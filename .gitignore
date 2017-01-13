@@ -1,0 +1,6 @@
+.idea
+data/
+/checkpoint
+/tfhSaved
+/tfhSaved.meta
+*.pyc
