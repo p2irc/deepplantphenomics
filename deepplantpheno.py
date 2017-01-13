@@ -9,7 +9,7 @@ import time
 from joblib import Parallel, delayed
 
 
-class tfHelper(object):
+class DPPModel(object):
     # Input options
     __total_classes = 0
     __total_raw_samples = 0
@@ -24,7 +24,7 @@ class tfHelper(object):
     __resize_images = False
 
     __preprocessing_steps = []
-    __processed_images_dir = '../tfHelper-Processed'
+    __processed_images_dir = '../DPP-Processed'
 
     # Augmentation options
     __augmentation_flip = False

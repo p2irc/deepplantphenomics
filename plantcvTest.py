@@ -1,21 +1,21 @@
-from tfHelper import tfHelper
+from deepplantpheno import DPPModel
 
-tfh = tfHelper(debug=True, load_from_saved=False)
+model = DPPModel(debug=True, load_from_saved=False)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
 # Setup and hyperparameters
-tfh.setBatchSize(128)
-tfh.setNumberOfThreads(12)
-tfh.setImageDimensions(32, 32, channels)
+model.setBatchSize(128)
+model.setNumberOfThreads(12)
+model.setImageDimensions(32, 32, channels)
 
-tfh.setTrainTestSplit(0.7)
-tfh.setRegularizationCoefficient(0.004)
-tfh.setLearningRate(0.001)
-tfh.setWeightInitializer('normal')
-tfh.setMaximumTrainingEpochs(700)
+model.setTrainTestSplit(0.7)
+model.setRegularizationCoefficient(0.004)
+model.setLearningRate(0.001)
+model.setWeightInitializer('normal')
+model.setMaximumTrainingEpochs(700)
 
-tfh.addPreprocessor('Auto-segment')
+model.addPreprocessor('Auto-segment')
 
-tfh.loadLemnatecDatasetFromDirectory('./data/danforth-sample')
+model.loadLemnatecDatasetFromDirectory('./data/danforth-sample')
