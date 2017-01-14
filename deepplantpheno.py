@@ -1,15 +1,20 @@
 from layers import *
 from loaders import *
 from preprocessing import *
+from definitions import *
 import tensorflow as tf
 import numpy as np
+from joblib import Parallel, delayed
 import os
 import datetime
 import time
-from joblib import Parallel, delayed
+import warnings
 
 
 class DPPModel(object):
+    # Operation settings
+    __problem_type = ProblemType.CLASSIFICATION
+
     # Input options
     __total_classes = 0
     __total_raw_samples = 0
@@ -174,6 +179,15 @@ class DPPModel(object):
     def addPreprocessor(self, selection):
         """Add a data preprocessing step"""
         self.__preprocessing_steps.append(selection)
+
+    def setProblemType(self, type):
+        """Set the problem type to be solved, either classification or regression"""
+        if type == 'classification':
+            self.__problem_type = ProblemType.CLASSIFICATION
+        elif type == 'regression':
+            self.__problem_type = ProblemType.REGRESSION
+        else:
+            warnings.warn('Problem type specified not supported', stacklevel=2)
 
     def beginTraining(self):
         """Initialize the network and run training to the specified max epoch"""

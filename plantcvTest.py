@@ -15,6 +15,7 @@ model.setRegularizationCoefficient(0.004)
 model.setLearningRate(0.001)
 model.setWeightInitializer('normal')
 model.setMaximumTrainingEpochs(700)
+model.setProblemType('regression')
 
 model.addPreprocessor('Auto-segment')
 
