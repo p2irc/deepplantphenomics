@@ -628,7 +628,7 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
-    def loadDatasetFromDirectory(self, dirname):
+    def loadDatasetFromDirectoryWithAutoLabels(self, dirname):
         """Loads the png images in the given directory, using subdirectories to separate classes"""
 
         # Load all file names and labels into arrays
@@ -689,18 +689,27 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parseDataset(image_files, train_labels=[], test_images=[], test_labels=[])
 
+    def loadLabelsFromCSV(self, filepath, id_column=0):
+        """Load labels from a CSV file. They can represent class labels or values for regression"""
+
+        all_ids, all_labels = readCSVMultiLabelsandIds(filepath, id_column)
+        # TODO
+
     def __parseDataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
         # pre-processing
 
         if not len(self.__preprocessing_steps) == 0:
             self.__log('Performing preprocessing steps...')
 
-            for step in self.__preprocessing_steps:
-                if not os.path.isdir(self.__processed_images_dir):
-                    os.mkdir(self.__processed_images_dir)
+            if not os.path.isdir(self.__processed_images_dir):
+                os.mkdir(self.__processed_images_dir)
 
-                train_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in train_images)
-                test_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in test_images)
+            for step in self.__preprocessing_steps:
+                if step == 'auto-segmentation':
+                    self.__log('Performing auto-segmentation...')
+
+                    train_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in train_images)
+                    test_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in test_images)
 
         # house keeping
         if isinstance(train_images, tf.Tensor):

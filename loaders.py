@@ -47,6 +47,24 @@ def readCSVLabelsAndIds(file_name, column_number, id_column_number, character=',
     return labels, ids
 
 
+def readCSVMultiLabelsandIds(file_name, id_column_number, character=','):
+    f = open(file_name, 'r')
+    labels = []
+    ids = []
+
+    for line in f:
+        line = line.rstrip()
+
+        temp = line.split(character)
+        ids.append(temp[id_column_number])
+
+        temp.pop(id_column_number)
+
+        ids.append((temp, 0))
+
+    return labels, ids
+
+
 def stringLabelsToSequential(labels):
     unique = set([label.strip() for label in labels])
     num_labels = range(len(unique))

@@ -17,6 +17,7 @@ model.setWeightInitializer('normal')
 model.setMaximumTrainingEpochs(700)
 model.setProblemType('regression')
 
-model.addPreprocessor('Auto-segment')
+model.addPreprocessor('auto-segmentation')
 
+model.loadLabelsFromCSV('./data/danforth-sample/bbox-labels.csv')
 model.loadLemnatecDatasetFromDirectory('./data/danforth-sample')
