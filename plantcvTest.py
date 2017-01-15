@@ -10,14 +10,18 @@ model.setBatchSize(128)
 model.setNumberOfThreads(12)
 model.setImageDimensions(32, 32, channels)
 
+model.setProblemType('regression')
 model.setTrainTestSplit(0.7)
 model.setRegularizationCoefficient(0.004)
 model.setLearningRate(0.001)
 model.setWeightInitializer('normal')
 model.setMaximumTrainingEpochs(700)
-model.setProblemType('regression')
 
+# Set image pre-processing steps
 model.addPreprocessor('auto-segmentation')
 
-model.loadLabelsFromCSV('./data/danforth-sample/bbox-labels.csv')
+# Load regression labels from CSV file
+model.loadMultipleLabelsFromCSV('./data/danforth-sample/bbox-labels.csv')
+
+# Load all VIS images from a Lemnatec
 model.loadLemnatecDatasetFromDirectory('./data/danforth-sample')

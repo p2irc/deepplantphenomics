@@ -37,8 +37,11 @@ class DPPModel(object):
     __augmentation_contrast = False
 
     # Dataset storage
+    __all_ids = None
     __train_images = None
     __test_images = None
+
+    __all_labels = None
     __train_labels = None
     __test_labels = None
 
@@ -666,34 +669,46 @@ class DPPModel(object):
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
     def loadLemnatecDatasetFromDirectory(self, dirname):
-        """Loads a Lemnatec plant scanner image dataset"""
+        """Loads a Lemnatec plant scanner image dataset. Regression or classification labels MUST be loaded first."""
 
         # Load all snapshot subdirectories
         subdirs = filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
                          [os.path.join(dirname, f) for f in os.listdir(dirname)])
 
         image_files = []
-        labels = np.array([])
 
         # Load the VIS images in each subdirectory
         for sd in subdirs:
             image_paths = [os.path.join(sd, name) for name in os.listdir(sd) if
                            os.path.isfile(os.path.join(sd, name)) & name.startswith('VIS_SV_')]
+
             image_files = image_files + image_paths
 
-        self.__total_raw_samples = len(image_files)
+        # Put the image files in the order of the IDs
+        sorted_paths = []
+
+        for image_id in self.__all_ids:
+            path = filter(lambda item: item.endswith(image_id), [p for p in image_files])
+            assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
+            sorted_paths.append(path[0])
+
+        self.__total_raw_samples = len(sorted_paths)
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
+        # split data
+        train_images, train_labels, test_images, test_labels = splitRawData(sorted_paths, self.__all_labels, self.__train_test_split)
+
         # create batches of input data and labels for training
-        self.__parseDataset(image_files, train_labels=[], test_images=[], test_labels=[])
+        self.__parseDataset(image_files, train_labels, test_images, test_labels)
 
-    def loadLabelsFromCSV(self, filepath, id_column=0):
-        """Load labels from a CSV file. They can represent class labels or values for regression"""
+    def loadMultipleLabelsFromCSV(self, filepath, id_column=0):
+        """Load multiple labels from a CSV file, for instance values for regression.
+        Parameter id_column is the column number specifying the image file name.
+        """
 
-        all_ids, all_labels = readCSVMultiLabelsandIds(filepath, id_column)
-        # TODO
+        self.__all_labels, self.__all_ids = readCSVMultiLabelsAndIds(filepath, id_column)
 
     def __parseDataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
         # pre-processing

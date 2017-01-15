@@ -47,7 +47,7 @@ def readCSVLabelsAndIds(file_name, column_number, id_column_number, character=',
     return labels, ids
 
 
-def readCSVMultiLabelsandIds(file_name, id_column_number, character=','):
+def readCSVMultiLabelsAndIds(file_name, id_column_number, character=','):
     f = open(file_name, 'r')
     labels = []
     ids = []
