@@ -23,5 +23,8 @@ model.addPreprocessor('auto-segmentation')
 # Load regression labels from CSV file
 model.loadMultipleLabelsFromCSV('./data/danforth-sample/bbox-labels.csv')
 
-# Load all VIS images from a Lemnatec
-model.loadLemnatecDatasetFromDirectory('./data/danforth-sample')
+# Load all VIS images from a Lemnatec image repository
+model.loadLemnatecImagesFromDirectory('./data/danforth-sample')
+
+# Begin training the regression model
+model.beginTraining()

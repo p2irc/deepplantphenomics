@@ -209,7 +209,9 @@ class DPPModel(object):
 
         # Run the network operations
         xx = self.forwardPass(x, deterministic=False)
-        class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
+
+        if self.__problem_type == ProblemType.CLASSIFICATION:
+            class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
 
         # Define regularization cost
         if self.__reg_coeff is not None:
@@ -219,7 +221,10 @@ class DPPModel(object):
             l2_cost = [0.0]
 
         # Define cost function and set optimizer
-        cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y,1)), l2_cost]))
+        if self.__problem_type == ProblemType.CLASSIFICATION:
+            cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y,1)), l2_cost]))
+        elif self.__problem_type == ProblemType.REGRESSION:
+            cost = tf.nn.l2_loss(tf.sub(xx,y))
 
         if self.__optimizer == 'Adagrad':
             optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -234,9 +239,9 @@ class DPPModel(object):
             optimizer = tf.train.AdamOptimizer(self.__learning_rate).minimize(cost)
             self.__log('Using Adam optimizer')
 
-        # Calculate classification accuracy
-        correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
-        accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
+        if self.__problem_type == ProblemType.CLASSIFICATION:
+            correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
+            accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
         # Calculate validation accuracy
         x_test, y_test = tf.train.shuffle_batch([self.__test_images, self.__test_labels],
@@ -248,22 +253,29 @@ class DPPModel(object):
         x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
         x_test_predicted = self.forwardPass(x_test, deterministic=True)
-        test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
 
-        test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
-        test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+        if self.__problem_type == ProblemType.CLASSIFICATION:
+            test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
+            test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
+            test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+        elif self.__problem_type == ProblemType.REGRESSION:
+            test_cost = tf.nn.l2_loss(tf.sub(x_test_predicted, y_test))
 
         full_test_op = self.computeFullTestAccuracy()
 
         # Epoch summaries for Tensorboard
         if self.__tb_dir is not None:
-            tf.scalar_summary('train/accuracy', accuracy)
-            tf.scalar_summary('test/accuracy', test_accuracy)
+            # Summaries for any problem type
             tf.scalar_summary('train/loss', cost)
             tf.scalar_summary('train/learning_rate', self.__learning_rate)
-            tf.scalar_summary('train/l2_loss', tf.reduce_mean(l2_cost))
-            tf.histogram_summary('train/class_predictions', class_predictions)
-            tf.histogram_summary('test/class_predictions', test_class_predictions)
+
+            # Summaries for classification problems
+            if self.__problem_type == ProblemType.CLASSIFICATION:
+                tf.scalar_summary('train/accuracy', accuracy)
+                tf.scalar_summary('test/accuracy', test_accuracy)
+                tf.scalar_summary('train/l2_loss', tf.reduce_mean(l2_cost))
+                tf.histogram_summary('train/class_predictions', class_predictions)
+                tf.histogram_summary('test/class_predictions', test_class_predictions)
 
             # Plot weights of first conv layer
             filter_summary = self.__getWeightsAsImage(self.__firstLayer().weights)
@@ -288,9 +300,12 @@ class DPPModel(object):
 
             self.__initializeQueueRunners()
 
-            self.__log('Computing total test accuracy...')
+            self.__log('Computing total test accuracy/regression loss...')
             tt_error = self.__session.run(full_test_op)
-            self.__log('Error: {:.5f}'.format(tt_error))
+            if self.__problem_type == ProblemType.CLASSIFICATION:
+                self.__log('Average test accuracy: {:.5f}'.format(tt_error))
+            elif self.__problem_type == ProblemType.REGRESSION:
+                self.__log('Average test loss: {:.5f}'.format(tt_error))
         else:
             self.__log('Initializing parameters...')
             init_op = tf.initialize_all_variables()
@@ -311,17 +326,29 @@ class DPPModel(object):
                         summary = self.__session.run(merged)
                         train_writer.add_summary(summary, i)
 
-                    loss, epoch_accuracy, epoch_test_accuracy = self.__session.run([cost, accuracy, test_accuracy])
+                    if self.__problem_type == ProblemType.CLASSIFICATION:
+                        loss, epoch_accuracy, epoch_test_accuracy = self.__session.run([cost, accuracy, test_accuracy])
 
-                    samples_per_sec = self.__batch_size / elapsed
+                        samples_per_sec = self.__batch_size / elapsed
 
-                    self.__log(
-                        'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
-                        .format(i,
-                                i / (self.__total_training_samples / self.__batch_size),
-                                loss,
-                                epoch_accuracy,
-                                samples_per_sec))
+                        self.__log(
+                            'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
+                            .format(i,
+                                    i / (self.__total_training_samples / self.__batch_size),
+                                    loss,
+                                    epoch_accuracy,
+                                    samples_per_sec))
+                    elif self.__problem_type == ProblemType.REGRESSION:
+                        loss, epoch_test_loss = self.__session.run([cost, test_cost])
+
+                        samples_per_sec = self.__batch_size / elapsed
+
+                        self.__log(
+                            'Results for batch {} (epoch {}) - Regression Loss: {:.5f}, samples/sec: {:.2f}'
+                                .format(i,
+                                        i / (self.__total_training_samples / self.__batch_size),
+                                        loss,
+                                        samples_per_sec))
 
                     if self.__global_epoch % (self.__report_rate * 100) == 0:
                         self.saveState()
@@ -337,9 +364,12 @@ class DPPModel(object):
 
             self.saveState()
 
-            self.__log('Computing total test accuracy...')
+            self.__log('Computing total test accuracy/regression loss...')
             tt_error = self.__session.run(full_test_op)
-            self.__log('Total test accuracy: {:.5f}'.format(tt_error))
+            if self.__problem_type == ProblemType.CLASSIFICATION:
+                self.__log('Average test accuracy: {:.5f}'.format(tt_error))
+            elif self.__problem_type == ProblemType.REGRESSION:
+                self.__log('Average test loss: {:.5f}'.format(tt_error))
 
             self.__log('Ending session...')
 
@@ -361,12 +391,18 @@ class DPPModel(object):
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
             x_test_predicted = self.forwardPass(x_test, deterministic=True)
-            test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
 
-            test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
-            test_acc = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+            if self.__problem_type == ProblemType.CLASSIFICATION:
+                test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
 
-            sum_correct = sum_correct + test_acc
+                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
+                test_acc = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+
+                sum_correct = sum_correct + test_acc
+            elif self.__problem_type == ProblemType.REGRESSION:
+                test_loss = tf.nn.l2_loss(tf.sub(x_test_predicted, y_test))
+
+                sum_correct = sum_correct + test_loss
 
         return sum_correct / num_batches
 
@@ -668,7 +704,7 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
-    def loadLemnatecDatasetFromDirectory(self, dirname):
+    def loadLemnatecImagesFromDirectory(self, dirname):
         """Loads a Lemnatec plant scanner image dataset. Regression or classification labels MUST be loaded first."""
 
         # Load all snapshot subdirectories
