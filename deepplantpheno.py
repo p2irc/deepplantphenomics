@@ -550,6 +550,11 @@ class DPPModel(object):
 
         reshape = isinstance(self.__lastLayer(), convLayer) or isinstance(self.__lastLayer(), poolingLayer)
 
+        if regularization_coefficient is None and self.__reg_coeff is not None:
+            regularization_coefficient = self.__reg_coeff
+        if regularization_coefficient is None and self.__reg_coeff is None:
+            regularization_coefficient = 0.0
+
         layer = fullyConnectedLayer('output',
                                     self.__lastLayer().output_size,
                                     self.__total_classes,
