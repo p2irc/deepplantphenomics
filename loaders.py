@@ -5,7 +5,7 @@ import os
 
 
 def splitRawData(images, labels, ratio):
-    # serialize labels if they are lists (e.g. regression)
+    # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         labels = [' '.join(label) for label in labels]
 

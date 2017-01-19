@@ -22,8 +22,9 @@ class DPPModel(object):
 
     __image_width = None
     __image_height = None
+    __image_width_original = None
+    __image_height_original = None
     __image_depth = None
-    __image_size = None
 
     __crop_or_pad_images = False
     __resize_images = False
@@ -179,7 +180,11 @@ class DPPModel(object):
         self.__image_width = image_width
         self.__image_height = image_height
         self.__image_depth = image_depth
-        self.__image_size = image_width*image_height*image_depth
+
+    def setOriginalImageDimensions(self, image_height, image_width):
+        """Specifies the original size of the image, before resizing"""
+        self.__image_width_original = image_width
+        self.__image_height_original = image_height
 
     def addPreprocessor(self, selection):
         """Add a data preprocessing step"""
@@ -228,9 +233,9 @@ class DPPModel(object):
 
         # Define cost function and set optimizer
         if self.__problem_type == ProblemType.CLASSIFICATION:
-            cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y,1)), l2_cost]))
+            cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
         elif self.__problem_type == ProblemType.REGRESSION:
-            cost = tf.nn.l2_loss(tf.sub(xx,y))
+            cost = tf.nn.l2_loss(tf.sub(xx, y))
 
         if self.__optimizer == 'Adagrad':
             optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -446,8 +451,9 @@ class DPPModel(object):
         return x8
 
     def __labelStringToTensor(self, x):
-        sparse = tf.string_split(x)
-        dense = tf.to_float(tf.reshape(sparse.values, (-1, self.__num_regression_outputs)))
+        sparse = tf.string_split(x, delimiter=' ')
+        values = tf.string_to_number(sparse.values)
+        dense = tf.reshape(values, (self.__batch_size, self.__num_regression_outputs))
 
         return dense
 
@@ -783,6 +789,14 @@ class DPPModel(object):
 
         for voc_file in file_paths:
             id, x_min, x_max, y_min, y_max = readBoundingBoxFromPascalVOC(voc_file)
+
+            # re-scale coordinates if images are being resized
+            if self.__resize_images:
+                x_min = x_min * (self.__image_width / self.__image_width_original)
+                x_max = x_max * (self.__image_width / self.__image_width_original)
+                y_min = y_min * (self.__image_height / self.__image_height_original)
+                y_max = y_max * (self.__image_height / self.__image_height_original)
+
             self.__all_ids.append(id)
             self.__all_labels.append([x_min, x_max, y_min, y_max])
 
