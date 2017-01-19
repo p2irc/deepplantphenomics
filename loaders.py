@@ -1,8 +1,14 @@
 import tensorflow as tf
+import xml.etree.ElementTree as tree
 import random
+import os
 
 
 def splitRawData(images, labels, ratio):
+    # serialize labels if they are lists (e.g. regression)
+    if isinstance(labels, list):
+        labels = [' '.join(label) for label in labels]
+
     total_samples = len(labels)
     num_training = int(total_samples * ratio)
 
@@ -60,7 +66,7 @@ def readCSVMultiLabelsAndIds(file_name, id_column_number, character=','):
 
         temp.pop(id_column_number)
 
-        ids.append((temp, 0))
+        ids.append(temp)
 
     return labels, ids
 
@@ -71,3 +77,18 @@ def stringLabelsToSequential(labels):
     seq_labels = dict(zip(unique, num_labels))
 
     return [seq_labels[label.strip()] for label in labels]
+
+
+def readBoundingBoxFromPascalVOC(file_name):
+    root = tree.parse(file_name)
+
+    filename = os.path.basename(root.find('path').text)
+
+    e = root.find('object/bndbox')
+
+    x_min = e.find('xmin').text
+    x_max = e.find('xmax').text
+    y_min = e.find('ymin').text
+    y_max = e.find('ymax').text
+
+    return filename, x_min, x_max, y_min, y_max

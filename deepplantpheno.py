@@ -71,6 +71,8 @@ class DPPModel(object):
     __dropout_p = 0.75
     __shakeweight_p = 0.75
 
+    __num_regression_outputs = 4
+
     # Wrapper options
     __debug = None
     __load_from_saved = None
@@ -207,6 +209,11 @@ class DPPModel(object):
         # Reshape input to the expected image dimensions
         x = tf.reshape(x, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
+        # If this is a regression problem, unserialize the label
+        if self.__problem_type == ProblemType.REGRESSION:
+            sparse_labels = tf.string_split(y)
+            y = tf.to_float(tf.reshape(sparse_labels.values, (self.__batch_size, self.__num_regression_outputs)))
+
         # Run the network operations
         xx = self.forwardPass(x, deterministic=False)
 
@@ -249,6 +256,10 @@ class DPPModel(object):
                                                 num_threads=self.__num_threads,
                                                 capacity=self.__queue_capacity,
                                                 min_after_dequeue=self.__batch_size)
+
+        if self.__problem_type == ProblemType.REGRESSION:
+            sparse_labels_test = tf.string_split(y_test)
+            y_test = tf.to_float(tf.reshape(sparse_labels_test.values, (self.__batch_size, self.__num_regression_outputs)))
 
         x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
@@ -316,6 +327,7 @@ class DPPModel(object):
             for i in range(self.__maximum_training_batches):
                 start_time = time.time()
                 self.__global_epoch = i
+
                 self.__session.run(optimizer)
 
                 if self.__global_epoch % self.__report_rate == 0:
@@ -555,9 +567,14 @@ class DPPModel(object):
         if regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
+        if self.__problem_type == ProblemType.CLASSIFICATION:
+            num_out = self.__total_classes
+        elif self.__problem_type == ProblemType.REGRESSION:
+            num_out = self.__num_regression_outputs
+
         layer = fullyConnectedLayer('output',
                                     self.__lastLayer().output_size,
-                                    self.__total_classes,
+                                    num_out,
                                     reshape,
                                     self.__batch_size,
                                     None,
@@ -750,6 +767,20 @@ class DPPModel(object):
         """
 
         self.__all_labels, self.__all_ids = readCSVMultiLabelsAndIds(filepath, id_column)
+
+    def loadPascalVOCLabelsFromDirectory(self, dir):
+        """Load bounding boxes from XML files in Pascal VOC format"""
+
+        self.__all_ids = []
+        self.__all_labels = []
+
+        file_paths = [os.path.join(dir, name) for name in os.listdir(dir) if
+                       os.path.isfile(os.path.join(dir, name)) & name.endswith('.xml')]
+
+        for voc_file in file_paths:
+            id, x_min, x_max, y_min, y_max = readBoundingBoxFromPascalVOC(voc_file)
+            self.__all_ids.append(id)
+            self.__all_labels.append([x_min, x_max, y_min, y_max])
 
     def __parseDataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
         # pre-processing
