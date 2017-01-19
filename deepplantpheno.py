@@ -211,8 +211,7 @@ class DPPModel(object):
 
         # If this is a regression problem, unserialize the label
         if self.__problem_type == ProblemType.REGRESSION:
-            sparse_labels = tf.string_split(y)
-            y = tf.to_float(tf.reshape(sparse_labels.values, (self.__batch_size, self.__num_regression_outputs)))
+            y = self.__labelStringToTensor(y)
 
         # Run the network operations
         xx = self.forwardPass(x, deterministic=False)
@@ -258,8 +257,7 @@ class DPPModel(object):
                                                 min_after_dequeue=self.__batch_size)
 
         if self.__problem_type == ProblemType.REGRESSION:
-            sparse_labels_test = tf.string_split(y_test)
-            y_test = tf.to_float(tf.reshape(sparse_labels_test.values, (self.__batch_size, self.__num_regression_outputs)))
+            y_test = self.__labelStringToTensor(y_test)
 
         x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
@@ -446,6 +444,12 @@ class DPPModel(object):
         x8 = (x7 - x_min) / (x_max - x_min)
 
         return x8
+
+    def __labelStringToTensor(self, x):
+        sparse = tf.string_split(x)
+        dense = tf.to_float(tf.reshape(sparse.values, (-1, self.__num_regression_outputs)))
+
+        return dense
 
     def saveState(self):
         self.__log('Saving parameters...')
