@@ -7,7 +7,7 @@ import os
 def splitRawData(images, labels, ratio):
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
-        labels = [' '.join(label) for label in labels]
+        labels = [' '.join(map(str, label)) for label in labels]
 
     total_samples = len(labels)
     num_training = int(total_samples * ratio)
@@ -86,9 +86,9 @@ def readBoundingBoxFromPascalVOC(file_name):
 
     e = root.find('object/bndbox')
 
-    x_min = e.find('xmin').text
-    x_max = e.find('xmax').text
-    y_min = e.find('ymin').text
-    y_max = e.find('ymax').text
+    x_min = float(e.find('xmin').text)
+    x_max = float(e.find('xmax').text)
+    y_min = float(e.find('ymin').text)
+    y_max = float(e.find('ymax').text)
 
     return filename, x_min, x_max, y_min, y_max

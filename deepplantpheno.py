@@ -789,10 +789,10 @@ class DPPModel(object):
 
             # re-scale coordinates if images are being resized
             if self.__resize_images:
-                x_min = x_min * (self.__image_width / self.__image_width_original)
-                x_max = x_max * (self.__image_width / self.__image_width_original)
-                y_min = y_min * (self.__image_height / self.__image_height_original)
-                y_max = y_max * (self.__image_height / self.__image_height_original)
+                x_min = int(x_min * (float(self.__image_width) / self.__image_width_original))
+                x_max = int(x_max * (float(self.__image_width) / self.__image_width_original))
+                y_min = int(y_min * (float(self.__image_height) / self.__image_height_original))
+                y_max = int(y_max * (float(self.__image_height) / self.__image_height_original))
 
             self.__all_ids.append(id)
             self.__all_labels.append([x_min, x_max, y_min, y_max])

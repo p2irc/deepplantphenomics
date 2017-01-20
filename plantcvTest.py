@@ -7,7 +7,7 @@ channels = 3
 
 # Setup and hyperparameters
 model.setBatchSize(8)
-model.setNumberOfThreads(12)
+model.setNumberOfThreads(4)
 model.setOriginalImageDimensions(2056, 2454)
 model.setImageDimensions(514, 614, channels)
 model.setResizeImages(True)
