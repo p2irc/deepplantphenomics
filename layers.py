@@ -185,6 +185,7 @@ class normLayer(object):
         x = tf.nn.lrn(x, bias=1.0, alpha=0.001/9.0, beta=0.75)
         return x
 
+
 class dropoutLayer(object):
     """Layer which performs dropout"""
     input_size = None

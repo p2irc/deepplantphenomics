@@ -280,31 +280,28 @@ class DPPModel(object):
         # Epoch summaries for Tensorboard
         if self.__tb_dir is not None:
             # Summaries for any problem type
-            tf.scalar_summary('train/loss', cost)
-            tf.scalar_summary('train/learning_rate', self.__learning_rate)
+            tf.summary.scalar('train/loss', cost)
+            tf.summary.scalar('train/learning_rate', self.__learning_rate)
+            tf.summary.scalar('train/l2_loss', tf.reduce_mean(l2_cost))
+            filter_summary = self.__getWeightsAsImage(self.__firstLayer().weights)
+            tf.summary.image('filters/first', filter_summary)
 
             # Summaries for classification problems
             if self.__problem_type == ProblemType.CLASSIFICATION:
-                tf.scalar_summary('train/accuracy', accuracy)
-                tf.scalar_summary('test/accuracy', test_accuracy)
-                tf.scalar_summary('train/l2_loss', tf.reduce_mean(l2_cost))
-                tf.histogram_summary('train/class_predictions', class_predictions)
-                tf.histogram_summary('test/class_predictions', test_class_predictions)
+                tf.summary.scalar('train/accuracy', accuracy)
+                tf.summary.scalar('test/accuracy', test_accuracy)
+                tf.summary.histogram('train/class_predictions', class_predictions)
+                tf.summary.histogram('test/class_predictions', test_class_predictions)
 
-            # Plot weights of first conv layer
-            filter_summary = self.__getWeightsAsImage(self.__firstLayer().weights)
-
-            tf.image_summary('filters/first', filter_summary)
-
-            # Including summaries for each layer
+            # Summaries for each layer
             for layer in self.__layers:
                 if hasattr(layer, 'name'):
-                    tf.histogram_summary('weights/'+layer.name, layer.weights)
-                    tf.histogram_summary('biases/'+layer.name, layer.biases)
-                    tf.histogram_summary('activations/'+layer.name, layer.activations)
+                    tf.summary.histogram('weights/'+layer.name, layer.weights)
+                    tf.summary.histogram('biases/'+layer.name, layer.biases)
+                    tf.summary.histogram('activations/'+layer.name, layer.activations)
 
-            merged = tf.merge_all_summaries()
-            train_writer = tf.train.SummaryWriter(self.__tb_dir, self.__session.graph)
+            merged = tf.summary.merge_all()
+            train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
         # Either load the network parameters from a checkpoint file or start training
         if self.__load_from_saved:
@@ -322,7 +319,7 @@ class DPPModel(object):
                 self.__log('Average test loss: {:.5f}'.format(tt_error))
         else:
             self.__log('Initializing parameters...')
-            init_op = tf.initialize_all_variables()
+            init_op = tf.global_variables_initializer()
             self.__session.run(init_op)
 
             self.__initializeQueueRunners()
@@ -470,7 +467,7 @@ class DPPModel(object):
                                             self.__lr_decay_factor,
                                             staircase=True)
 
-            tf.scalar_summary('learning_rate', self.__learning_rate)
+            tf.summary.scalar('learning_rate', self.__learning_rate)
 
     def forwardPass(self, x, deterministic=False):
         for layer in self.__layers:
@@ -892,8 +889,8 @@ class DPPModel(object):
             self.__train_images = tf.image.random_contrast(self.__train_images, lower=0.2, upper=1.8)
 
         # mean-center all inputs
-        self.__train_images = tf.image.per_image_whitening(self.__train_images)
-        self.__test_images = tf.image.per_image_whitening(self.__test_images)
+        self.__train_images = tf.image.per_image_standardization(self.__train_images)
+        self.__test_images = tf.image.per_image_standardization(self.__test_images)
 
         # define the shape of the image tensors so it matches the shape of the images
         self.__train_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
