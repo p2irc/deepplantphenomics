@@ -1,13 +1,13 @@
 from deepplantpheno import DPPModel
 
-model = DPPModel(debug=True, load_from_saved=False)
+model = DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
 # Setup and hyperparameters
 model.setBatchSize(8)
-model.setNumberOfThreads(4)
+model.setNumberOfThreads(8)
 model.setOriginalImageDimensions(2056, 2454)
 model.setImageDimensions(514, 614, channels)
 model.setResizeImages(True)
@@ -15,7 +15,7 @@ model.setResizeImages(True)
 model.setProblemType('regression')
 model.setTrainTestSplit(0.7)
 model.setRegularizationCoefficient(0.004)
-model.setLearningRate(0.001)
+model.setLearningRate(0.01)
 model.setWeightInitializer('normal')
 model.setMaximumTrainingEpochs(700)
 

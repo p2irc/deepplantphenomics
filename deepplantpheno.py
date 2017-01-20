@@ -293,6 +293,10 @@ class DPPModel(object):
                 tf.summary.histogram('train/class_predictions', class_predictions)
                 tf.summary.histogram('test/class_predictions', test_class_predictions)
 
+            # Summaries for regression
+            if self.__problem_type == ProblemType.REGRESSION:
+                tf.summary.scalar('test/loss', test_cost)
+
             # Summaries for each layer
             for layer in self.__layers:
                 if hasattr(layer, 'name'):
@@ -330,7 +334,7 @@ class DPPModel(object):
 
                 self.__session.run(optimizer)
 
-                if self.__global_epoch % self.__report_rate == 0:
+                if self.__global_epoch > 0 and self.__global_epoch % self.__report_rate == 0:
                     elapsed = time.time() - start_time
                     self.__setLearningRate()
 
