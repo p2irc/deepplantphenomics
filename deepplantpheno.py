@@ -412,6 +412,7 @@ class DPPModel(object):
 
                 sum_correct = sum_correct + test_acc
             elif self.__problem_type == ProblemType.REGRESSION:
+                y_test = self.__labelStringToTensor(y_test)
                 test_loss = tf.nn.l2_loss(tf.sub(x_test_predicted, y_test))
 
                 sum_correct = sum_correct + test_loss
@@ -766,7 +767,7 @@ class DPPModel(object):
         train_images, train_labels, test_images, test_labels = splitRawData(sorted_paths, self.__all_labels, self.__train_test_split)
 
         # create batches of input data and labels for training
-        self.__parseDataset(image_files, train_labels, test_images, test_labels)
+        self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
     def loadMultipleLabelsFromCSV(self, filepath, id_column=0):
         """Load multiple labels from a CSV file, for instance values for regression.
