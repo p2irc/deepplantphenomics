@@ -417,7 +417,7 @@ class DPPModel(object):
                 sum = sum + test_acc
             elif self.__problem_type == ProblemType.REGRESSION:
                 y_test = self.__labelStringToTensor(y_test)
-                test_loss = tf.nn.l2_loss(tf.sub(x_test_predicted, y_test))
+                test_loss = tf.div(tf.nn.l2_loss(tf.sub(x_test_predicted, y_test)), self.__batch_size)
 
                 sum = sum + test_loss
 
