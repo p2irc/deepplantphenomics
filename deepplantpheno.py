@@ -235,7 +235,7 @@ class DPPModel(object):
         if self.__problem_type == ProblemType.CLASSIFICATION:
             cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
         elif self.__problem_type == ProblemType.REGRESSION:
-            cost = tf.nn.l2_loss(tf.sub(xx, y))
+            cost = tf.div(tf.nn.l2_loss(tf.sub(xx, y)), self.__batch_size)
 
         if self.__optimizer == 'Adagrad':
             optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -273,7 +273,7 @@ class DPPModel(object):
             test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
             test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
         elif self.__problem_type == ProblemType.REGRESSION:
-            test_cost = tf.nn.l2_loss(tf.sub(x_test_predicted, y_test))
+            test_cost = tf.div(tf.nn.l2_loss(tf.sub(x_test_predicted, y_test)), self.__batch_size)
 
         full_test_op = self.computeFullTestAccuracy()
 
@@ -397,7 +397,7 @@ class DPPModel(object):
     def computeFullTestAccuracy(self):
         num_test = self.__total_raw_samples - self.__total_training_samples
         num_batches = int(num_test/self.__batch_size)
-        sum_correct = 0.0
+        sum = 0.0
 
         for i in range(num_batches):
             x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
@@ -414,14 +414,14 @@ class DPPModel(object):
                 test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
                 test_acc = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
 
-                sum_correct = sum_correct + test_acc
+                sum = sum + test_acc
             elif self.__problem_type == ProblemType.REGRESSION:
                 y_test = self.__labelStringToTensor(y_test)
                 test_loss = tf.nn.l2_loss(tf.sub(x_test_predicted, y_test))
 
-                sum_correct = sum_correct + test_loss
+                sum = sum + test_loss
 
-        return sum_correct / num_batches
+        return sum / num_batches
 
     def __getWeightsAsImage(self, kernel):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
