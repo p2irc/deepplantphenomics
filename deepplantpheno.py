@@ -2,6 +2,7 @@ from layers import *
 from loaders import *
 from preprocessing import *
 from definitions import *
+from networks import *
 import tensorflow as tf
 import numpy as np
 from joblib import Parallel, delayed
@@ -308,10 +309,10 @@ class DPPModel(object):
             train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
         # Either load the network parameters from a checkpoint file or start training
-        if self.__load_from_saved:
+        if self.__load_from_saved is not False:
             self.__log('Loading from checkpoint file...')
             saver = tf.train.Saver()
-            saver.restore(self.__session, tf.train.latest_checkpoint('./'))
+            saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
 
             self.__initializeQueueRunners()
 
@@ -321,6 +322,8 @@ class DPPModel(object):
                 self.__log('Average test accuracy: {:.5f}'.format(tt_error))
             elif self.__problem_type == ProblemType.REGRESSION:
                 self.__log('Average test loss: {:.5f}'.format(tt_error))
+
+            self.shutDown()
         else:
             self.__log('Initializing parameters...')
             init_op = tf.global_variables_initializer()
@@ -387,12 +390,7 @@ class DPPModel(object):
             elif self.__problem_type == ProblemType.REGRESSION:
                 self.__log('Average test loss: {:.5f}'.format(tt_error))
 
-            self.__log('Ending session...')
-
-            self.__coord.request_stop()
-            self.__coord.join(self.__threads)
-
-            self.__session.close()
+            self.shutDown()
 
     def computeFullTestAccuracy(self):
         num_test = self.__total_raw_samples - self.__total_training_samples
@@ -422,6 +420,14 @@ class DPPModel(object):
                 sum = sum + test_loss
 
         return sum / num_batches
+
+    def shutDown(self):
+        self.__log('Shutdown requested, ending session...')
+
+        self.__coord.request_stop()
+        self.__coord.join(self.__threads)
+
+        self.__session.close()
 
     def __getWeightsAsImage(self, kernel):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
@@ -621,7 +627,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels)
+        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
@@ -645,7 +651,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels)
+        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
@@ -673,7 +679,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels)
+        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels, image_type='jpg')
@@ -820,6 +826,18 @@ class DPPModel(object):
             for step in self.__preprocessing_steps:
                 if step == 'auto-segmentation':
                     self.__log('Performing auto-segmentation...')
+
+                    self.__log('Initializing bounding box regressor model...')
+                    bbr = boundingBoxRegressor(height=self.__image_height, width=self.__image_width)
+
+                    self.__log('Performing bounding box estimation...')
+                    bbs_train = bbr.forwardPass(train_images)
+                    bbs_test = bbr.forwardPass(test_images)
+
+                    bbr.shutDown()
+                    bbr = None
+
+                    self.__log('Bounding box estimation finished, performing segmentation...')
 
                     train_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in train_images)
                     test_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in test_images)

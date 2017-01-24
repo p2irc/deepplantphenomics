@@ -3,17 +3,42 @@ import plantcv as pcv
 import os
 
 
-def doParallelAutoSegmentation(file, outdir):
+def doParallelAutoSegmentation(file, outdir, img_height, img_width, coords):
     filename = os.path.basename(file)
     outpath = os.path.join(outdir, filename)
 
+    fixed_coords = pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords)
+
     if not os.path.exists(outpath):
-        auto_segment(file, outpath)
+        autoSegment(file, outpath, fixed_coords)
 
     return outpath
 
 
-def auto_segment(in_file, out_file):
+def pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords):
+    """Converts bounding box coordinates defined in Pascal VOC format to x_adj, y_adj, w_adj, h_adj"""
+
+    x_min = coords[0]
+    x_max = coords[1]
+    y_min = coords[2]
+    y_max = coords[3]
+
+    width = x_max - x_min
+    height = y_max - y_min
+
+    x_adj = (x_min + (width/2)) - (img_width / 2)
+    y_adj = (y_min + (height/2)) - (img_height / 2)
+    w_adj = width - img_width
+    h_adj = height - img_height
+
+    return (x_adj, y_adj, w_adj, h_adj)
+
+def autoSegment(in_file, out_file, coords):
+    x_adj = coords[0]
+    y_adj = coords[1]
+    w_adj = coords[2]
+    h_adj = coords[3]
+
     device = 0
     debug = 'None'
 
@@ -29,7 +54,7 @@ def auto_segment(in_file, out_file):
 
     device, id_objects, obj_hierarchy = pcv.find_objects(img, dilated, device, debug)
 
-    device, roi, roi_hierarchy = pcv.define_roi(img, 'rectangle', device, None, 'default', debug, True, 600, 100, -600, -300)
+    device, roi, roi_hierarchy = pcv.define_roi(img, 'rectangle', device, None, 'default', debug, True, x_adj, y_adj, w_adj, h_adj)
 
     device, roi_objects, roi_obj_hierarchy, kept_mask, obj_area = pcv.roi_objects(img, 'partial', roi, roi_hierarchy,
                                                                                   id_objects, obj_hierarchy, device,

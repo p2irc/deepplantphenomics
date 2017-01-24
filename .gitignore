@@ -1,6 +1,7 @@
 .idea
 data/
 /checkpoint
+/network_states
 /tfhSaved
 /tfhSaved.meta
 *.pyc
