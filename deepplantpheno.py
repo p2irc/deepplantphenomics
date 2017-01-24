@@ -235,7 +235,7 @@ class DPPModel(object):
         if self.__problem_type == ProblemType.CLASSIFICATION:
             cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
         elif self.__problem_type == ProblemType.REGRESSION:
-            cost = tf.div(tf.nn.l2_loss(tf.sub(xx, y)), self.__batch_size)
+            cost = self.__batchMeanL2Loss(tf.sub(xx, y))
 
         if self.__optimizer == 'Adagrad':
             optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -273,7 +273,7 @@ class DPPModel(object):
             test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
             test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
         elif self.__problem_type == ProblemType.REGRESSION:
-            test_cost = tf.div(tf.nn.l2_loss(tf.sub(x_test_predicted, y_test)), self.__batch_size)
+            test_cost = self.__batchMeanL2Loss(tf.sub(x_test_predicted, y_test))
 
         full_test_op = self.computeFullTestAccuracy()
 
@@ -417,7 +417,7 @@ class DPPModel(object):
                 sum = sum + test_acc
             elif self.__problem_type == ProblemType.REGRESSION:
                 y_test = self.__labelStringToTensor(y_test)
-                test_loss = tf.div(tf.nn.l2_loss(tf.sub(x_test_predicted, y_test)), self.__batch_size)
+                test_loss = self.__batchMeanL2Loss(tf.sub(x_test_predicted, y_test))
 
                 sum = sum + test_loss
 
@@ -479,6 +479,12 @@ class DPPModel(object):
             x = layer.forwardPass(x, deterministic)
 
         return x
+
+    def __batchMeanL2Loss(self, x):
+        agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
+        mean = tf.reduce_mean(agg)
+
+        return mean
 
     def addInputLayer(self):
         self.__log('Adding the input layer...')
