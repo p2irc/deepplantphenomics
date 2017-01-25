@@ -3,7 +3,10 @@ import plantcv as pcv
 import os
 
 
-def doParallelAutoSegmentation(file, outdir, img_height, img_width, coords):
+def doParallelAutoSegmentation(file_and_coords, outdir, img_height, img_width):
+    file = file_and_coords[0]
+    coords = file_and_coords[1]
+
     filename = os.path.basename(file)
     outpath = os.path.join(outdir, filename)
 

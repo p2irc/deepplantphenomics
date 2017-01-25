@@ -71,7 +71,6 @@ class DPPModel(object):
     __lr_decay_epochs = None
 
     __dropout_p = 0.75
-    __shakeweight_p = 0.75
 
     __num_regression_outputs = 4
 
@@ -87,7 +86,7 @@ class DPPModel(object):
     __coord = None
     __threads = None
 
-    def __init__(self, debug=False, load_from_saved=False, tensorboard_dir=None, report_rate=100):
+    def __init__(self, debug=False, load_from_saved=False, initialize=True, tensorboard_dir=None, report_rate=100):
         self.__debug = debug
         self.__load_from_saved = load_from_saved
         self.__tb_dir = tensorboard_dir
@@ -97,8 +96,9 @@ class DPPModel(object):
         if self.__tb_dir is not None:
             self.__tb_dir = "{0}/{1}".format(self.__tb_dir, datetime.datetime.now().strftime("%d%B%Y%I:%M%p"))
 
-        self.__log('TensorFlow loaded...')
-        self.__session = tf.Session()
+        if initialize:
+            self.__log('TensorFlow loaded...')
+            self.__session = tf.Session()
 
     def __log(self, message):
         if self.__debug:
@@ -190,6 +190,10 @@ class DPPModel(object):
     def addPreprocessor(self, selection):
         """Add a data preprocessing step"""
         self.__preprocessing_steps.append(selection)
+
+    def clearPreprocessors(self):
+        """Clear all preprocessing steps"""
+        self.__preprocessing_steps = []
 
     def setProblemType(self, type):
         """Set the problem type to be solved, either classification or regression"""
@@ -481,10 +485,33 @@ class DPPModel(object):
             tf.summary.scalar('learning_rate', self.__learning_rate)
 
     def forwardPass(self, x, deterministic=False):
-        for layer in self.__layers:
-            x = layer.forwardPass(x, deterministic)
+        """Perform a forward pass of the network with the given data
+        If the input is a tensor, it is considered to be the network input
+        If the input is a list of strings, it is considered to be filenames of images and
+        these images are loaded into input queues and pulled out as tensors"""
 
-        return x
+        # if input is list of strings, get an input queue containing the data and run all examples through
+        if isinstance(x, list):
+            num_batches = len(x) / self.__batch_size
+
+            queue = self.loadImagesFromList(x)
+
+            # Calculate validation accuracy
+            x_test = tf.train.batch(queue, batch_size=self.__batch_size, num_threads=self.__num_threads)
+
+            x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+
+            x_pred = self.forwardPass(x_test, deterministic=True)
+
+            xx = self.__session.run(x_pred)
+
+            return xx
+
+        else:
+            for layer in self.__layers:
+                x = layer.forwardPass(x, deterministic)
+
+            return x
 
     def __batchMeanL2Loss(self, x):
         agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
@@ -794,6 +821,28 @@ class DPPModel(object):
             # create batches of input data and labels for training
             self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
+    def loadImagesFromList(self, image_files):
+        """Loads images from a list of file names (strings). Unless you only want to do preprocessing,
+        regression or classification labels MUST be loaded first."""
+
+        self.__total_raw_samples = len(image_files)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        # do preprocessing
+        images = self.__applyPreprocessing(image_files)
+
+        # prepare images for training (if there are any labels loaded)
+        if self.__all_labels is not None:
+            # split data
+            train_images, train_labels, test_images, test_labels = loaders.splitRawData(images, self.__all_labels, self.__train_test_split)
+
+            # create batches of input data and labels for training
+            self.__parseDataset(train_images, train_labels, test_images, test_labels)
+        else:
+            return images
+
     def loadMultipleLabelsFromCSV(self, filepath, id_column=0):
         """Load multiple labels from a CSV file, for instance values for regression.
         Parameter id_column is the column number specifying the image file name.
@@ -843,9 +892,14 @@ class DPPModel(object):
                     bbr.shutDown()
                     bbr = None
 
+                    images = zip(images, bbs)
+
                     self.__log('Bounding box estimation finished, performing segmentation...')
 
-                    processed_images = Parallel(n_jobs=self.__num_threads)(delayed(preprocessing.doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in images)
+                    processed_images = Parallel(n_jobs=self.__num_threads)\
+                        (delayed(preprocessing.doParallelAutoSegmentation)
+                         (i, self.__processed_images_dir, self.__image_height, self.__image_width) for i in images)
+
                     images = processed_images
 
         return images
@@ -933,3 +987,35 @@ class DPPModel(object):
         # define the shape of the image tensors so it matches the shape of the images
         self.__train_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
         self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+
+    def __parseImages(self, images, image_type='png'):
+        """Takes some images as input and returns a producer of processed images"""
+
+        input_queue = tf.train.input_producer(images, shuffle=False)
+
+        # pre-processing for training and testing images
+
+        if image_type is 'jpg':
+            input_images = tf.image.decode_jpeg(tf.read_file(input_queue[0]), channels=self.__image_depth)
+        else:
+            input_images = tf.image.decode_png(tf.read_file(input_queue[0]), channels=self.__image_depth)
+
+        # convert images to float and normalize to 1.0
+            input_images = tf.image.convert_image_dtype(input_images, dtype=tf.float32)
+
+        if self.__resize_images is True:
+            input_images = tf.image.resize_images(input_images, [self.__image_height, self.__image_width])
+
+        if self.__crop_or_pad_images is True:
+            # pad or crop to deal with images of different sizes
+            input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
+        elif self.__augmentation_crop is True:
+            input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
+
+        # mean-center all inputs
+            input_images = tf.image.per_image_standardization(input_images)
+
+        # define the shape of the image tensors so it matches the shape of the images
+            input_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+
+        return input_images

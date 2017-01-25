@@ -1,6 +1,6 @@
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, load_from_saved=False)
+model = dpp.DPPModel(debug=True, load_from_saved=False, initialize=False)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
