@@ -2,9 +2,9 @@
 # Used to train the boundingBoxRegressor regression model
 #
 
-from deepplantpheno import DPPModel
+import deepplantphenomics as dpp
 
-model = DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
+model = dpp.DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3

@@ -33,6 +33,7 @@ def pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords):
 
     return (x_adj, y_adj, w_adj, h_adj)
 
+
 def autoSegment(in_file, out_file, coords):
     x_adj = coords[0]
     y_adj = coords[1]

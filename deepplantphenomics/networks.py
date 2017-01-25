@@ -1,8 +1,5 @@
-import tensorflow as tf
-from deepplantpheno import DPPModel
-
 class boundingBoxRegressor(object):
-    model = DPPModel(debug=False, load_from_saved='./network-states/bbox-regressor')
+    model = None
 
     img_height = 257
     img_width = 307
@@ -12,6 +9,8 @@ class boundingBoxRegressor(object):
 
     def __init__(self, height, width):
         """A network which predicts bounding box coordinates via a convolutional neural net"""
+        import deepplantpheno as dpp
+        self.model = dpp.DPPModel(debug=False, load_from_saved='./network-states/bbox-regressor')
 
         # Set original image dimensions
         self.original_img_height = height

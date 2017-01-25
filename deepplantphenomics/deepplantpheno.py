@@ -1,8 +1,8 @@
-from layers import *
-from loaders import *
-from preprocessing import *
-from definitions import *
-from networks import *
+import layers
+import loaders
+import preprocessing
+import definitions
+import networks
 import tensorflow as tf
 import numpy as np
 from joblib import Parallel, delayed
@@ -14,7 +14,7 @@ import warnings
 
 class DPPModel(object):
     # Operation settings
-    __problem_type = ProblemType.CLASSIFICATION
+    __problem_type = definitions.ProblemType.CLASSIFICATION
 
     # Input options
     __total_classes = 0
@@ -31,7 +31,7 @@ class DPPModel(object):
     __resize_images = False
 
     __preprocessing_steps = []
-    __processed_images_dir = '../DPP-Processed'
+    __processed_images_dir = './DPP-Processed'
 
     # Augmentation options
     __augmentation_flip = False
@@ -102,13 +102,13 @@ class DPPModel(object):
 
     def __log(self, message):
         if self.__debug:
-            print '{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), message)
+            print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), message))
 
     def __lastLayer(self):
         return self.__layers[-1]
 
     def __firstLayer(self):
-        return next(layer for layer in self.__layers if isinstance(layer, convLayer) or isinstance(layer, fullyConnectedLayer))
+        return next(layer for layer in self.__layers if isinstance(layer, layers.convLayer) or isinstance(layer, layers.fullyConnectedLayer))
 
     def __initializeQueueRunners(self):
         self.__log('Initializing queue runners...')
@@ -194,9 +194,9 @@ class DPPModel(object):
     def setProblemType(self, type):
         """Set the problem type to be solved, either classification or regression"""
         if type == 'classification':
-            self.__problem_type = ProblemType.CLASSIFICATION
+            self.__problem_type = definitions.ProblemType.CLASSIFICATION
         elif type == 'regression':
-            self.__problem_type = ProblemType.REGRESSION
+            self.__problem_type = definitions.ProblemType.REGRESSION
         else:
             warnings.warn('Problem type specified not supported', stacklevel=2)
 
@@ -216,26 +216,26 @@ class DPPModel(object):
         x = tf.reshape(x, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
         # If this is a regression problem, unserialize the label
-        if self.__problem_type == ProblemType.REGRESSION:
+        if self.__problem_type == definitions.ProblemType.REGRESSION:
             y = self.__labelStringToTensor(y)
 
         # Run the network operations
         xx = self.forwardPass(x, deterministic=False)
 
-        if self.__problem_type == ProblemType.CLASSIFICATION:
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
 
         # Define regularization cost
         if self.__reg_coeff is not None:
             l2_cost = [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
-                       if isinstance(layer, fullyConnectedLayer) or isinstance(layer, convLayer)]
+                       if isinstance(layer, layers.fullyConnectedLayer) or isinstance(layer, layers.convLayer)]
         else:
             l2_cost = [0.0]
 
         # Define cost function and set optimizer
-        if self.__problem_type == ProblemType.CLASSIFICATION:
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
-        elif self.__problem_type == ProblemType.REGRESSION:
+        elif self.__problem_type == definitions.ProblemType.REGRESSION:
             cost = self.__batchMeanL2Loss(tf.sub(xx, y))
 
         if self.__optimizer == 'Adagrad':
@@ -251,7 +251,7 @@ class DPPModel(object):
             optimizer = tf.train.AdamOptimizer(self.__learning_rate).minimize(cost)
             self.__log('Using Adam optimizer')
 
-        if self.__problem_type == ProblemType.CLASSIFICATION:
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
             accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
@@ -262,18 +262,18 @@ class DPPModel(object):
                                                 capacity=self.__queue_capacity,
                                                 min_after_dequeue=self.__batch_size)
 
-        if self.__problem_type == ProblemType.REGRESSION:
+        if self.__problem_type == definitions.ProblemType.REGRESSION:
             y_test = self.__labelStringToTensor(y_test)
 
         x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
         x_test_predicted = self.forwardPass(x_test, deterministic=True)
 
-        if self.__problem_type == ProblemType.CLASSIFICATION:
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
             test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
             test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
-        elif self.__problem_type == ProblemType.REGRESSION:
+        elif self.__problem_type == definitions.ProblemType.REGRESSION:
             test_cost = self.__batchMeanL2Loss(tf.sub(x_test_predicted, y_test))
 
         full_test_op = self.computeFullTestAccuracy()
@@ -288,14 +288,14 @@ class DPPModel(object):
             tf.summary.image('filters/first', filter_summary)
 
             # Summaries for classification problems
-            if self.__problem_type == ProblemType.CLASSIFICATION:
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 tf.summary.scalar('train/accuracy', accuracy)
                 tf.summary.scalar('test/accuracy', test_accuracy)
                 tf.summary.histogram('train/class_predictions', class_predictions)
                 tf.summary.histogram('test/class_predictions', test_class_predictions)
 
             # Summaries for regression
-            if self.__problem_type == ProblemType.REGRESSION:
+            if self.__problem_type == definitions.ProblemType.REGRESSION:
                 tf.summary.scalar('test/loss', test_cost)
 
             # Summaries for each layer
@@ -318,9 +318,9 @@ class DPPModel(object):
 
             self.__log('Computing total test accuracy/regression loss...')
             tt_error = self.__session.run(full_test_op)
-            if self.__problem_type == ProblemType.CLASSIFICATION:
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 self.__log('Average test accuracy: {:.5f}'.format(tt_error))
-            elif self.__problem_type == ProblemType.REGRESSION:
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 self.__log('Average test loss: {:.5f}'.format(tt_error))
 
             self.shutDown()
@@ -345,7 +345,7 @@ class DPPModel(object):
                         summary = self.__session.run(merged)
                         train_writer.add_summary(summary, i)
 
-                    if self.__problem_type == ProblemType.CLASSIFICATION:
+                    if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                         loss, epoch_accuracy, epoch_test_accuracy = self.__session.run([cost, accuracy, test_accuracy])
 
                         samples_per_sec = self.__batch_size / elapsed
@@ -357,7 +357,7 @@ class DPPModel(object):
                                     loss,
                                     epoch_accuracy,
                                     samples_per_sec))
-                    elif self.__problem_type == ProblemType.REGRESSION:
+                    elif self.__problem_type == definitions.ProblemType.REGRESSION:
                         loss, epoch_test_loss = self.__session.run([cost, test_cost])
 
                         samples_per_sec = self.__batch_size / elapsed
@@ -385,9 +385,9 @@ class DPPModel(object):
 
             self.__log('Computing total test accuracy/regression loss...')
             tt_error = self.__session.run(full_test_op)
-            if self.__problem_type == ProblemType.CLASSIFICATION:
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 self.__log('Average test accuracy: {:.5f}'.format(tt_error))
-            elif self.__problem_type == ProblemType.REGRESSION:
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 self.__log('Average test loss: {:.5f}'.format(tt_error))
 
             self.shutDown()
@@ -406,14 +406,14 @@ class DPPModel(object):
 
             x_test_predicted = self.forwardPass(x_test, deterministic=True)
 
-            if self.__problem_type == ProblemType.CLASSIFICATION:
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
 
                 test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
                 test_acc = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
 
                 sum = sum + test_acc
-            elif self.__problem_type == ProblemType.REGRESSION:
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 y_test = self.__labelStringToTensor(y_test)
                 test_loss = self.__batchMeanL2Loss(tf.sub(x_test_predicted, y_test))
 
@@ -494,7 +494,7 @@ class DPPModel(object):
 
     def addInputLayer(self):
         self.__log('Adding the input layer...')
-        layer = inputLayer([self.__batch_size, self.__image_height, self.__image_width, self.__image_depth])
+        layer = layers.inputLayer([self.__batch_size, self.__image_height, self.__image_width, self.__image_depth])
 
         self.__layers.append(layer)
 
@@ -508,7 +508,7 @@ class DPPModel(object):
         elif regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
-        layer = convLayer(layer_name,
+        layer = layers.convLayer(layer_name,
                           self.__lastLayer().output_size,
                           filter_dimension,
                           stride_length,
@@ -525,7 +525,7 @@ class DPPModel(object):
         layer_name = 'pool%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
 
-        layer = poolingLayer(self.__lastLayer().output_size, kernel_size, stride_length)
+        layer = layers.poolingLayer(self.__lastLayer().output_size, kernel_size, stride_length)
         self.__log('Outputs: %s' % layer.output_size)
 
         self.__layers.append(layer)
@@ -535,7 +535,7 @@ class DPPModel(object):
         layer_name = 'norm%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
 
-        layer = normLayer(self.__lastLayer().output_size)
+        layer = layers.normLayer(self.__lastLayer().output_size)
         self.__layers.append(layer)
 
     def addDropoutLayer(self, p=None):
@@ -546,7 +546,7 @@ class DPPModel(object):
         if p is None:
             p = self.__dropout_p
 
-        layer = dropoutLayer(self.__lastLayer().output_size, p)
+        layer = layers.dropoutLayer(self.__lastLayer().output_size, p)
         self.__layers.append(layer)
 
     def addFullyConnectedLayer(self, output_size, activation_function, shakeweight_p=None,
@@ -556,14 +556,14 @@ class DPPModel(object):
         layer_name = 'fc%d' % self.__num_layers_fc
         self.__log('Adding fully connected layer %s...' % layer_name)
 
-        reshape = isinstance(self.__lastLayer(), convLayer) or isinstance(self.__lastLayer(), poolingLayer)
+        reshape = isinstance(self.__lastLayer(), layers.convLayer) or isinstance(self.__lastLayer(), layers.poolingLayer)
 
         if regularization_coefficient is None and self.__reg_coeff is not None:
             regularization_coefficient = self.__reg_coeff
         if regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
-        layer = fullyConnectedLayer(layer_name,
+        layer = layers.fullyConnectedLayer(layer_name,
                                     self.__lastLayer().output_size,
                                     output_size,
                                     reshape,
@@ -584,19 +584,19 @@ class DPPModel(object):
     def addOutputLayer(self, regularization_coefficient=None):
         self.__log('Adding output layer...')
 
-        reshape = isinstance(self.__lastLayer(), convLayer) or isinstance(self.__lastLayer(), poolingLayer)
+        reshape = isinstance(self.__lastLayer(), layers.convLayer) or isinstance(self.__lastLayer(), layers.poolingLayer)
 
         if regularization_coefficient is None and self.__reg_coeff is not None:
             regularization_coefficient = self.__reg_coeff
         if regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
-        if self.__problem_type == ProblemType.CLASSIFICATION:
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             num_out = self.__total_classes
-        elif self.__problem_type == ProblemType.REGRESSION:
+        elif self.__problem_type == definitions.ProblemType.REGRESSION:
             num_out = self.__num_regression_outputs
 
-        layer = fullyConnectedLayer('output',
+        layer = layers.fullyConnectedLayer('output',
                                     self.__lastLayer().output_size,
                                     num_out,
                                     reshape,
@@ -617,7 +617,7 @@ class DPPModel(object):
         image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
                        os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
 
-        labels = readCSVLabels(labels_file, column_number)
+        labels = loaders.readCSVLabels(labels_file, column_number)
 
         self.__total_raw_samples = len(image_files)
         self.__total_classes = len(set(labels))
@@ -627,7 +627,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
+        train_images, train_labels, test_images, test_labels = loaders.splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
@@ -635,7 +635,7 @@ class DPPModel(object):
     def loadIPPNDatasetFromDirectory(self, dirname):
         """Loads the RGB images and labels from the IPPN dataset"""
 
-        labels, ids = readCSVLabelsAndIds(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        labels, ids = loaders.readCSVLabelsAndIds(os.path.join(dirname, 'Metadata.csv'), 1, 0)
 
         image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
 
@@ -643,7 +643,7 @@ class DPPModel(object):
         self.__total_classes = len(set(labels))
 
         # transform into numerical one-hot labels
-        labels = stringLabelsToSequential(labels)
+        labels = loaders.stringLabelsToSequential(labels)
         labels = tf.one_hot(labels, self.__total_classes)
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
@@ -651,7 +651,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
+        train_images, train_labels, test_images, test_labels = loaders.splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
@@ -659,7 +659,7 @@ class DPPModel(object):
     def loadINRADatasetFromDirectory(self, dirname):
         """Loads the RGB images and labels from the INRA dataset"""
 
-        labels, ids = readCSVLabelsAndIds(os.path.join(dirname, 'AutomatonImages.csv'), 1, 3, character=';')
+        labels, ids = loaders.readCSVLabelsAndIds(os.path.join(dirname, 'AutomatonImages.csv'), 1, 3, character=';')
 
         # Remove the header line
         labels.pop(0)
@@ -671,7 +671,7 @@ class DPPModel(object):
         self.__total_classes = len(set(labels))
 
         # transform into numerical one-hot labels
-        labels = stringLabelsToSequential(labels)
+        labels = loaders.stringLabelsToSequential(labels)
         labels = tf.one_hot(labels, self.__total_classes)
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
@@ -679,7 +679,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
+        train_images, train_labels, test_images, test_labels = loaders.splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels, image_type='jpg')
@@ -692,13 +692,13 @@ class DPPModel(object):
         self.__total_classes = 10
         self.__queue_capacity = 60000
 
-        train_labels, train_images = readCSVLabelsAndIds(os.path.join(train_dir, 'train.txt'), 1, 0, character=' ')
+        train_labels, train_images = loaders.readCSVLabelsAndIds(os.path.join(train_dir, 'train.txt'), 1, 0, character=' ')
 
         # transform into numerical one-hot labels
         train_labels = [int(label) for label in train_labels]
         train_labels = tf.one_hot(train_labels, self.__total_classes)
 
-        test_labels, test_images = readCSVLabelsAndIds(os.path.join(test_dir, 'test.txt'), 1, 0, character=' ')
+        test_labels, test_images = loaders.readCSVLabelsAndIds(os.path.join(test_dir, 'test.txt'), 1, 0, character=' ')
 
         # transform into numerical one-hot labels
         test_labels = [int(label) for label in test_labels]
@@ -745,13 +745,14 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(image_files, labels, self.__train_test_split)
+        train_images, train_labels, test_images, test_labels = loaders.splitRawData(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
     def loadLemnatecImagesFromDirectory(self, dirname):
-        """Loads a Lemnatec plant scanner image dataset. Regression or classification labels MUST be loaded first."""
+        """Loads a Lemnatec plant scanner image dataset. Unless you only want to do preprocessing,
+        regression or classification labels MUST be loaded first."""
 
         # Load all snapshot subdirectories
         subdirs = filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
@@ -766,31 +767,39 @@ class DPPModel(object):
 
             image_files = image_files + image_paths
 
-        # Put the image files in the order of the IDs
+        # Put the image files in the order of the IDs (if there are any labels loaded)
         sorted_paths = []
 
-        for image_id in self.__all_ids:
-            path = filter(lambda item: item.endswith(image_id), [p for p in image_files])
-            assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
-            sorted_paths.append(path[0])
+        if self.__all_labels is not None:
+            for image_id in self.__all_ids:
+                path = filter(lambda item: item.endswith(image_id), [p for p in image_files])
+                assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
+                sorted_paths.append(path[0])
+        else:
+            sorted_paths = image_files
 
         self.__total_raw_samples = len(sorted_paths)
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
-        # split data
-        train_images, train_labels, test_images, test_labels = splitRawData(sorted_paths, self.__all_labels, self.__train_test_split)
+        # do preprocessing
+        images = self.__applyPreprocessing(sorted_paths)
 
-        # create batches of input data and labels for training
-        self.__parseDataset(train_images, train_labels, test_images, test_labels)
+        # prepare images for training (if there are any labels loaded)
+        if self.__all_labels is not None:
+            # split data
+            train_images, train_labels, test_images, test_labels = loaders.splitRawData(images, self.__all_labels, self.__train_test_split)
+
+            # create batches of input data and labels for training
+            self.__parseDataset(train_images, train_labels, test_images, test_labels)
 
     def loadMultipleLabelsFromCSV(self, filepath, id_column=0):
         """Load multiple labels from a CSV file, for instance values for regression.
         Parameter id_column is the column number specifying the image file name.
         """
 
-        self.__all_labels, self.__all_ids = readCSVMultiLabelsAndIds(filepath, id_column)
+        self.__all_labels, self.__all_ids = loaders.readCSVMultiLabelsAndIds(filepath, id_column)
 
     def loadPascalVOCLabelsFromDirectory(self, dir):
         """Load bounding boxes from XML files in Pascal VOC format"""
@@ -802,7 +811,7 @@ class DPPModel(object):
                        os.path.isfile(os.path.join(dir, name)) & name.endswith('.xml')]
 
         for voc_file in file_paths:
-            id, x_min, x_max, y_min, y_max = readBoundingBoxFromPascalVOC(voc_file)
+            id, x_min, x_max, y_min, y_max = loaders.readBoundingBoxFromPascalVOC(voc_file)
 
             # re-scale coordinates if images are being resized
             if self.__resize_images:
@@ -814,9 +823,7 @@ class DPPModel(object):
             self.__all_ids.append(id)
             self.__all_labels.append([x_min, x_max, y_min, y_max])
 
-    def __parseDataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
-        # pre-processing
-
+    def __applyPreprocessing(self, images):
         if not len(self.__preprocessing_steps) == 0:
             self.__log('Performing preprocessing steps...')
 
@@ -828,20 +835,22 @@ class DPPModel(object):
                     self.__log('Performing auto-segmentation...')
 
                     self.__log('Initializing bounding box regressor model...')
-                    bbr = boundingBoxRegressor(height=self.__image_height, width=self.__image_width)
+                    bbr = networks.boundingBoxRegressor(height=self.__image_height, width=self.__image_width)
 
                     self.__log('Performing bounding box estimation...')
-                    bbs_train = bbr.forwardPass(train_images)
-                    bbs_test = bbr.forwardPass(test_images)
+                    bbs = bbr.forwardPass(images)
 
                     bbr.shutDown()
                     bbr = None
 
                     self.__log('Bounding box estimation finished, performing segmentation...')
 
-                    train_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in train_images)
-                    test_images = Parallel(n_jobs=self.__num_threads)(delayed(doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in test_images)
+                    processed_images = Parallel(n_jobs=self.__num_threads)(delayed(preprocessing.doParallelAutoSegmentation)(i, self.__processed_images_dir) for i in images)
+                    images = processed_images
 
+        return images
+
+    def __parseDataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
         # house keeping
         if isinstance(train_images, tf.Tensor):
             self.__total_training_samples = train_images.get_shape().as_list()[0]
