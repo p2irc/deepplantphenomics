@@ -79,7 +79,7 @@ def stringLabelsToSequential(labels):
     return [seq_labels[label.strip()] for label in labels]
 
 
-def readBoundingBoxFromPascalVOC(file_name):
+def readSingleBoundingBoxFromPascalVOC(file_name):
     root = tree.parse(file_name)
 
     filename = os.path.basename(root.find('path').text)
@@ -92,3 +92,22 @@ def readBoundingBoxFromPascalVOC(file_name):
     y_max = float(e.find('ymax').text)
 
     return filename, x_min, x_max, y_min, y_max
+
+
+def pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords):
+    """Converts bounding box coordinates defined in Pascal VOC format to x_adj, y_adj, w_adj, h_adj"""
+
+    x_min = coords[0]
+    x_max = coords[1]
+    y_min = coords[2]
+    y_max = coords[3]
+
+    width = x_max - x_min
+    height = y_max - y_min
+
+    x_adj = (x_min + (width/2)) - (img_width / 2)
+    y_adj = (y_min + (height/2)) - (img_height / 2)
+    w_adj = width - img_width
+    h_adj = height - img_height
+
+    return (x_adj, y_adj, w_adj, h_adj)

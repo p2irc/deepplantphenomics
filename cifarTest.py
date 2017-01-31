@@ -1,6 +1,7 @@
 import deepplantphenomics as dpp
 
 model = dpp.DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs')
+#model = dpp.DPPModel(debug=True, load_from_saved='./tfhSaved.meta')
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
@@ -35,8 +36,7 @@ model.addPoolingLayer(kernel_size=3, stride_length=2)
 model.addConvolutionalLayer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-model.addFullyConnectedLayer(output_size=256, activation_function='relu', shakeweight_p=0.5)
-model.addFullyConnectedLayer(output_size=256, activation_function='relu', shakeweight_p=0.5)
+model.addFullyConnectedLayer(output_size=256, activation_function='relu')
 
 model.addOutputLayer(regularization_coefficient=0.0)
 

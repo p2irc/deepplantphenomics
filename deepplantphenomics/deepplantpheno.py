@@ -15,6 +15,7 @@ import warnings
 class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
+    __has_trained = False
 
     # Input options
     __total_classes = 0
@@ -40,6 +41,8 @@ class DPPModel(object):
 
     # Dataset storage
     __all_ids = None
+
+    __all_images = None
     __train_images = None
     __test_images = None
 
@@ -286,37 +289,35 @@ class DPPModel(object):
         if self.__tb_dir is not None:
             # Summaries for any problem type
             tf.summary.scalar('train/loss', cost)
-            tf.summary.scalar('train/learning_rate', self.__learning_rate)
-            tf.summary.scalar('train/l2_loss', tf.reduce_mean(l2_cost))
+            tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
+            tf.summary.scalar('train/l2_loss', tf.reduce_mean(l2_cost), collections=['custom_summaries'])
             filter_summary = self.__getWeightsAsImage(self.__firstLayer().weights)
-            tf.summary.image('filters/first', filter_summary)
+            tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
 
             # Summaries for classification problems
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                tf.summary.scalar('train/accuracy', accuracy)
-                tf.summary.scalar('test/accuracy', test_accuracy)
-                tf.summary.histogram('train/class_predictions', class_predictions)
-                tf.summary.histogram('test/class_predictions', test_class_predictions)
+                tf.summary.scalar('train/accuracy', accuracy, collections=['custom_summaries'])
+                tf.summary.scalar('test/accuracy', test_accuracy, collections=['custom_summaries'])
+                tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
+                tf.summary.histogram('test/class_predictions', test_class_predictions, collections=['custom_summaries'])
 
             # Summaries for regression
             if self.__problem_type == definitions.ProblemType.REGRESSION:
-                tf.summary.scalar('test/loss', test_cost)
+                tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
 
             # Summaries for each layer
             for layer in self.__layers:
                 if hasattr(layer, 'name'):
-                    tf.summary.histogram('weights/'+layer.name, layer.weights)
-                    tf.summary.histogram('biases/'+layer.name, layer.biases)
-                    tf.summary.histogram('activations/'+layer.name, layer.activations)
+                    tf.summary.histogram('weights/'+layer.name, layer.weights, collections=['custom_summaries'])
+                    tf.summary.histogram('biases/'+layer.name, layer.biases, collections=['custom_summaries'])
+                    tf.summary.histogram('activations/'+layer.name, layer.activations, collections=['custom_summaries'])
 
-            merged = tf.summary.merge_all()
+            merged = tf.summary.merge_all(key='custom_summaries')
             train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
         # Either load the network parameters from a checkpoint file or start training
         if self.__load_from_saved is not False:
-            self.__log('Loading from checkpoint file...')
-            saver = tf.train.Saver()
-            saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
+            self.loadState()
 
             self.__initializeQueueRunners()
 
@@ -471,8 +472,21 @@ class DPPModel(object):
 
     def saveState(self):
         self.__log('Saving parameters...')
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(tf.trainable_variables())
         saver.save(self.__session, 'tfhSaved')
+
+        self.__has_trained = True
+
+    def loadState(self):
+        if self.__load_from_saved is not False:
+            self.__log('Loading from checkpoint file...')
+
+            saver = tf.train.import_meta_graph(self.__load_from_saved)
+            saver.restore(self.__session, tf.train.latest_checkpoint(os.path.dirname(self.__load_from_saved)))
+
+            self.__has_trained = True
+        else:
+            warnings.warn('Tried to load state with no file given. Make sure load_from_saved is set in constructor.')
 
     def __setLearningRate(self):
         if self.__lr_decay_factor is not None:
@@ -485,33 +499,35 @@ class DPPModel(object):
             tf.summary.scalar('learning_rate', self.__learning_rate)
 
     def forwardPass(self, x, deterministic=False):
-        """Perform a forward pass of the network with the given data
-        If the input is a tensor, it is considered to be the network input
-        If the input is a list of strings, it is considered to be filenames of images and
-        these images are loaded into input queues and pulled out as tensors"""
+        """Perform a forward pass of the network with an input tensor"""
+        for layer in self.__layers:
+            x = layer.forwardPass(x, deterministic)
 
-        # if input is list of strings, get an input queue containing the data and run all examples through
-        if isinstance(x, list):
-            num_batches = len(x) / self.__batch_size
+        return x
 
-            queue = self.loadImagesFromList(x)
+    def forwardPassWithFileInputs(self, x):
+        """Get network outputs with a list of filenames as input. Handles all the loading and batching automatically."""
 
-            # Calculate validation accuracy
-            x_test = tf.train.batch(queue, batch_size=self.__batch_size, num_threads=self.__num_threads)
+        total_outputs = []
+        num_batches = len(x) / self.__batch_size
 
-            x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+        self.loadImagesFromList(x)
 
-            x_pred = self.forwardPass(x_test, deterministic=True)
+        # Calculate validation accuracy
+        x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
 
-            xx = self.__session.run(x_pred)
+        x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
-            return xx
+        x_pred = self.forwardPass(x_test, deterministic=True)
 
-        else:
-            for layer in self.__layers:
-                x = layer.forwardPass(x, deterministic)
+        self.loadState()
 
-            return x
+        self.__initializeQueueRunners()
+
+        xx = self.__session.run(x_pred)
+        total_outputs.append(xx)
+
+        return total_outputs
 
     def __batchMeanL2Loss(self, x):
         agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
@@ -841,6 +857,8 @@ class DPPModel(object):
             # create batches of input data and labels for training
             self.__parseDataset(train_images, train_labels, test_images, test_labels)
         else:
+            images = self.__parseImages(images)
+
             return images
 
     def loadMultipleLabelsFromCSV(self, filepath, id_column=0):
@@ -860,7 +878,7 @@ class DPPModel(object):
                        os.path.isfile(os.path.join(dir, name)) & name.endswith('.xml')]
 
         for voc_file in file_paths:
-            id, x_min, x_max, y_min, y_max = loaders.readBoundingBoxFromPascalVOC(voc_file)
+            id, x_min, x_max, y_min, y_max = loaders.readSingleBoundingBoxFromPascalVOC(voc_file)
 
             # re-scale coordinates if images are being resized
             if self.__resize_images:
@@ -898,7 +916,7 @@ class DPPModel(object):
 
                     processed_images = Parallel(n_jobs=self.__num_threads)\
                         (delayed(preprocessing.doParallelAutoSegmentation)
-                         (i, self.__processed_images_dir, self.__image_height, self.__image_width) for i in images)
+                         (i[0], i[1], self.__processed_images_dir, self.__image_height, self.__image_width) for i in images)
 
                     images = processed_images
 
@@ -935,13 +953,10 @@ class DPPModel(object):
         # pre-processing for training and testing images
 
         if image_type is 'jpg':
-            self.__train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
-                                                       channels=self.__image_depth)
-            self.__test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
-                                                      channels=self.__image_depth)
+            self.__train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]), channels=self.__image_depth)
+            self.__test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]), channels=self.__image_depth)
         else:
-            self.__train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
-                                                      channels=self.__image_depth)
+            self.__train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]), channels=self.__image_depth)
             self.__test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]), channels=self.__image_depth)
 
         # convert images to float and normalize to 1.0
@@ -991,17 +1006,20 @@ class DPPModel(object):
     def __parseImages(self, images, image_type='png'):
         """Takes some images as input and returns a producer of processed images"""
 
-        input_queue = tf.train.input_producer(images, shuffle=False)
+        input_queue = tf.train.string_input_producer(images, shuffle=False)
+
+        reader = tf.WholeFileReader()
+        key, file = reader.read(input_queue)
 
         # pre-processing for training and testing images
 
         if image_type is 'jpg':
-            input_images = tf.image.decode_jpeg(tf.read_file(input_queue[0]), channels=self.__image_depth)
+            input_images = tf.image.decode_jpeg(file, channels=self.__image_depth)
         else:
-            input_images = tf.image.decode_png(tf.read_file(input_queue[0]), channels=self.__image_depth)
+            input_images = tf.image.decode_png(file, channels=self.__image_depth)
 
         # convert images to float and normalize to 1.0
-            input_images = tf.image.convert_image_dtype(input_images, dtype=tf.float32)
+        input_images = tf.image.convert_image_dtype(input_images, dtype=tf.float32)
 
         if self.__resize_images is True:
             input_images = tf.image.resize_images(input_images, [self.__image_height, self.__image_width])
@@ -1013,9 +1031,9 @@ class DPPModel(object):
             input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
 
         # mean-center all inputs
-            input_images = tf.image.per_image_standardization(input_images)
+        input_images = tf.image.per_image_standardization(input_images)
 
         # define the shape of the image tensors so it matches the shape of the images
-            input_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+        input_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
 
-        return input_images
+        self.__all_images = input_images
