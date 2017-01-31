@@ -1,6 +1,3 @@
-import tensorflow as tf
-
-
 class boundingBoxRegressor(object):
     model = None
 
