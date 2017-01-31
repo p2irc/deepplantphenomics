@@ -288,7 +288,7 @@ class DPPModel(object):
         # Epoch summaries for Tensorboard
         if self.__tb_dir is not None:
             # Summaries for any problem type
-            tf.summary.scalar('train/loss', cost)
+            tf.summary.scalar('train/loss', cost, collections=['custom_summaries'])
             tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
             tf.summary.scalar('train/l2_loss', tf.reduce_mean(l2_cost), collections=['custom_summaries'])
             filter_summary = self.__getWeightsAsImage(self.__firstLayer().weights)
