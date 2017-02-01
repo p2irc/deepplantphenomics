@@ -482,7 +482,7 @@ class DPPModel(object):
             self.__log('Loading from checkpoint file...')
 
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.restore(self.__session, tf.train.latest_checkpoint(os.path.dirname(self.__load_from_saved)))
+            saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
 
             self.__has_trained = True
         else:
