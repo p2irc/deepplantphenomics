@@ -102,12 +102,9 @@ def pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords):
     y_min = coords[2]
     y_max = coords[3]
 
-    width = x_max - x_min
-    height = y_max - y_min
-
     x_adj = int(x_min)
     y_adj = int(y_min)
-    w_adj = int(width - img_width)
-    h_adj = int(height - img_height)
+    w_adj = int(x_max - img_width)
+    h_adj = int(y_max - img_height)
 
     return (x_adj, y_adj, w_adj, h_adj)
