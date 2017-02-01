@@ -50,8 +50,8 @@ class boundingBoxRegressor(object):
     def forwardPass(self, x):
         y = self.model.forwardPassWithFileInputs(x)
 
-        height_ratio = (self.img_height / self.original_img_height)
-        width_ratio = (self.img_width / self.original_img_width)
+        height_ratio = (self.original_img_height / float(self.img_height))
+        width_ratio = (self.original_img_width / float(self.img_width))
 
         # TODO
         y = y * height_ratio

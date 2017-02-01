@@ -508,12 +508,10 @@ class DPPModel(object):
     def forwardPassWithFileInputs(self, x):
         """Get network outputs with a list of filenames as input. Handles all the loading and batching automatically."""
 
-        total_outputs = []
+        total_outputs = np.empty([1, 4])
         num_batches = len(x) / self.__batch_size
-
         self.loadImagesFromList(x)
 
-        # Calculate validation accuracy
         x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
 
         x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
@@ -524,10 +522,12 @@ class DPPModel(object):
 
         self.__initializeQueueRunners()
 
-        xx = self.__session.run(x_pred)
-        total_outputs.append(xx)
+        for i in range(num_batches):
+            xx = self.__session.run(x_pred)
+            total_outputs = np.append(total_outputs, xx, axis=0)
 
-        return total_outputs
+        # delete the complete matrix with the weird first row deleted
+        return np.delete(total_outputs, 0, 0)
 
     def __batchMeanL2Loss(self, x):
         agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
