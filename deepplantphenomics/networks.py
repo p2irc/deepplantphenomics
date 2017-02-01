@@ -52,8 +52,10 @@ class boundingBoxRegressor(object):
         height_ratio = (self.original_img_height / float(self.img_height))
         width_ratio = (self.original_img_width / float(self.img_width))
 
-        # TODO
-        y = y * height_ratio
+        y[:, 0] = y[:, 0] * width_ratio
+        y[:, 1] = y[:, 1] * width_ratio
+        y[:, 2] = y[:, 2] * height_ratio
+        y[:, 3] = y[:, 3] * height_ratio
 
         return y
 
