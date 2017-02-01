@@ -26,8 +26,8 @@ def doParallelAutoSegmentation(file, coords, outdir, img_height, img_width):
 
         device, id_objects, obj_hierarchy = pcv.find_objects(img, dilated, device, debug)
 
-        device, roi, roi_hierarchy = pcv.define_roi(img, 'rectangle', device, None, 'default', debug, True, x_adj,
-                                                    y_adj, w_adj, h_adj)
+        device, roi, roi_hierarchy = pcv.define_roi(img, 'rectangle', device, None, 'default', debug, True,
+                                                    x_adj, y_adj, w_adj, h_adj)
 
         device, roi_objects, roi_obj_hierarchy, kept_mask, obj_area = pcv.roi_objects(img, 'partial', roi,
                                                                                       roi_hierarchy,
