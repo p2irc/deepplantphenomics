@@ -14,10 +14,9 @@ class boundingBoxRegressor(object):
         self.original_img_height = height
         self.original_img_width = width
 
-        #with tf.variable_scope("bbox-regressor") as scope:
         import deepplantpheno as dpp
 
-        self.model = dpp.DPPModel(debug=True, load_from_saved='./network_states/bbox-regressor-lemnatec')
+        self.model = dpp.DPPModel(debug=False, load_from_saved='./network_states/bbox-regressor-lemnatec')
 
         self.model.clearPreprocessors()
 
