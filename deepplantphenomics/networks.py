@@ -26,20 +26,22 @@ class boundingBoxRegressor(object):
         self.model.setOriginalImageDimensions(self.original_img_height, self.original_img_width)
         self.model.setImageDimensions(self.img_height, self.img_width, 3)
         self.model.setResizeImages(True)
-        self.model.setWeightInitializer('normal')
 
         self.model.setProblemType('regression')
 
         # Define a model architecture
         self.model.addInputLayer()
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 3, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 3, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
         self.model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 128], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
         self.model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 128, 128], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.addPoolingLayer(kernel_size=3, stride_length=2)
+
+        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
         self.model.addPoolingLayer(kernel_size=3, stride_length=2)
 
         self.model.addFullyConnectedLayer(output_size=384, activation_function='relu')
@@ -49,6 +51,7 @@ class boundingBoxRegressor(object):
     def forwardPass(self, x):
         y = self.model.forwardPassWithFileInputs(x)
 
+        # rescale coordinates from network input size to original image size
         height_ratio = (self.original_img_height / float(self.img_height))
         width_ratio = (self.original_img_width / float(self.img_width))
 

@@ -22,6 +22,14 @@ def splitRawData(images, labels, ratio):
     return train_images, train_labels, test_images, test_labels
 
 
+def labelStringToTensor(self, x, batch_size, num_outputs):
+    sparse = tf.string_split(x, delimiter=' ')
+    values = tf.string_to_number(sparse.values)
+    dense = tf.reshape(values, (batch_size, num_outputs))
+
+    return dense
+
+
 def readCSVLabels(file_name, column_number, character=','):
     f = open(file_name, 'r')
     labels = []

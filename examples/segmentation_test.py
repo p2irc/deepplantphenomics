@@ -6,7 +6,7 @@ model = dpp.DPPModel(debug=True, load_from_saved=False, initialize=False)
 channels = 3
 
 # Setup and hyperparameters
-model.setNumberOfThreads(24)
+model.setNumberOfThreads(12)
 model.setImageDimensions(2056, 2454, channels)
 
 # Add auto-segment preprocessor

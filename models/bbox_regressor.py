@@ -4,7 +4,7 @@
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
+model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
@@ -32,13 +32,16 @@ model.loadLemnatecImagesFromDirectory('./data/danforth-sample')
 # Define a model architecture
 model.addInputLayer()
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, channels, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addConvolutionalLayer(filter_dimension=[5, 5, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 128], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 128, 128], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addPoolingLayer(kernel_size=3, stride_length=2)
+
+model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
 model.addFullyConnectedLayer(output_size=384, activation_function='relu')

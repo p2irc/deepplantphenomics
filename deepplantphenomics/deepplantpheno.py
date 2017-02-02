@@ -16,6 +16,7 @@ class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
     __has_trained = False
+    __save_checkpoints = None
 
     # Input options
     __total_classes = 0
@@ -73,7 +74,7 @@ class DPPModel(object):
     __lr_decay_factor = None
     __lr_decay_epochs = None
 
-    __dropout_p = 0.75
+    __dropout_p = 0.5
 
     __num_regression_outputs = 4
 
@@ -89,11 +90,12 @@ class DPPModel(object):
     __coord = None
     __threads = None
 
-    def __init__(self, debug=False, load_from_saved=False, initialize=True, tensorboard_dir=None, report_rate=100):
+    def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None, report_rate=100):
         self.__debug = debug
         self.__load_from_saved = load_from_saved
         self.__tb_dir = tensorboard_dir
         self.__report_rate = report_rate
+        self.__save_checkpoints = save_checkpoints
 
         # Add the run level to the tensorboard path
         if self.__tb_dir is not None:
@@ -125,6 +127,10 @@ class DPPModel(object):
     def setBatchSize(self, size):
         """Setter for batch size"""
         self.__batch_size = size
+
+    def setNumRegressionOutputs(self, num):
+        """Set the number of regression response variables"""
+        self.__num_regression_outputs = num
 
     def setTrainTestSplit(self, ratio):
         """Setter for a ratio for the number of samples to use as training set"""
@@ -224,7 +230,7 @@ class DPPModel(object):
 
         # If this is a regression problem, unserialize the label
         if self.__problem_type == definitions.ProblemType.REGRESSION:
-            y = self.__labelStringToTensor(y)
+            y = loaders.labelStringToTensor(y, self.__batch_size, self.__num_regression_outputs)
 
         # Run the network operations
         xx = self.forwardPass(x, deterministic=False)
@@ -270,7 +276,7 @@ class DPPModel(object):
                                                 min_after_dequeue=self.__batch_size)
 
         if self.__problem_type == definitions.ProblemType.REGRESSION:
-            y_test = self.__labelStringToTensor(y_test)
+            y_test = loaders.labelStringToTensor(y_test, self.__batch_size, self.__num_regression_outputs)
 
         x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
@@ -374,7 +380,7 @@ class DPPModel(object):
                                         loss,
                                         samples_per_sec))
 
-                    if self.__global_epoch % (self.__report_rate * 100) == 0:
+                    if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
                         self.saveState()
                 else:
                     loss = self.__session.run([cost])
@@ -463,13 +469,6 @@ class DPPModel(object):
 
         return x8
 
-    def __labelStringToTensor(self, x):
-        sparse = tf.string_split(x, delimiter=' ')
-        values = tf.string_to_number(sparse.values)
-        dense = tf.reshape(values, (self.__batch_size, self.__num_regression_outputs))
-
-        return dense
-
     def saveState(self):
         self.__log('Saving parameters...')
         saver = tf.train.Saver(tf.trainable_variables())
@@ -510,6 +509,12 @@ class DPPModel(object):
 
         total_outputs = np.empty([1, 4])
         num_batches = len(x) / self.__batch_size
+        remainder = len(x) % self.__batch_size
+
+        if remainder != 0:
+            num_batches += 1
+            remainder = self.__batch_size - remainder
+
         self.loadImagesFromList(x)
 
         x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
@@ -526,8 +531,15 @@ class DPPModel(object):
             xx = self.__session.run(x_pred)
             total_outputs = np.append(total_outputs, xx, axis=0)
 
-        # delete the complete matrix with the weird first row deleted
-        return np.delete(total_outputs, 0, 0)
+        # delete weird first row
+        total_outputs = np.delete(total_outputs, 0, 0)
+
+        # delete any outputs which are overruns from the last batch
+        if remainder != 0:
+            for i in range(remainder):
+                total_outputs = np.delete(total_outputs, -1, 0)
+
+        return total_outputs
 
     def __batchMeanL2Loss(self, x):
         agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
