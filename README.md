@@ -70,10 +70,10 @@ model.beginTraining()
 # Installation
 
 1. Install the following dependencies, following the directions provided according to your platform and requirements:
-  - [Tensorflow](https://www.tensorflow.org/) (R0.12 or later)
-  - [PlantCV](http://plantcv.danforthcenter.org/)
-  - [joblib](https://pythonhosted.org/joblib/installing.html)
-3. `git clone https://github.com/jubbens/deepplantphenomics.git`
+    - [Tensorflow](https://www.tensorflow.org/) (R0.12 or later)
+    - [PlantCV](http://plantcv.danforthcenter.org/)
+    - [joblib](https://pythonhosted.org/joblib/installing.html) 
+3. `git clone https://github.com/jubbens/deepplantphenomics.git` 
 4. Test installation using `python -c 'import deepplantphenomics'`
 
 # Contributing
