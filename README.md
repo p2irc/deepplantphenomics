@@ -6,11 +6,11 @@ DPP integrates [Tensorflow](https://www.tensorflow.org/) for learning and [Plant
 
 DPP is maintained at the [Plant Phenotyping and Imaging Research Center (PIRC)](http://p2irc.usask.ca/) at the [University of Saskatchewan](https://www.usask.ca/). 🌾🇨🇦
 
-# What's Deep Learning?
+## What's Deep Learning?
 
 Principally, DPP provides deep learning functionality for plant phenotyping and related applications. Deep learning is a category of techniques which encompasses many different types of neural networks. Deep learning techniques lead the state of the art in many image-based tasks, including image classification, object detection and localization, image segmentation, and others.
 
-# What Can I Do With This?
+## What Can I Do With This?
 
 This package provides two things:
 
@@ -22,7 +22,7 @@ For example, calling `addPreprocessingStep('auto-segmentation')` will use a pre-
 
 For example, using a few lines of code you can easily use your data to train a convolutional neural network to rate plants for the presence of disease.
 
-# Example Usage
+## Example Usage
 
 Train a simple model to classify species:
 
@@ -67,7 +67,7 @@ model.addOutputLayer()
 model.beginTraining()
 ```
 
-# Installation
+## Installation
 
 1. Install the following dependencies, following the directions provided according to your platform and requirements:
     - [Tensorflow](https://www.tensorflow.org/) (R0.12 or later)
@@ -76,11 +76,11 @@ model.beginTraining()
 3. `git clone https://github.com/jubbens/deepplantphenomics.git` 
 4. Test installation using `python -c 'import deepplantphenomics'`
 
-# Contributing
+## Contributing
 
 Contributions are always welcome. If you would like to make a contribution, please fork from the develop branch.
 
-# Help
+## Help
 
 If you are interested in research collaborations or want more information regarding this package, please email `jordan.ubbens@usask.ca`.
 
