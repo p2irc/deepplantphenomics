@@ -22,6 +22,14 @@ def splitRawData(images, labels, ratio):
     return train_images, train_labels, test_images, test_labels
 
 
+def labelStringToTensor(self, x, batch_size, num_outputs):
+    sparse = tf.string_split(x, delimiter=' ')
+    values = tf.string_to_number(sparse.values)
+    dense = tf.reshape(values, (batch_size, num_outputs))
+
+    return dense
+
+
 def readCSVLabels(file_name, column_number, character=','):
     f = open(file_name, 'r')
     labels = []
@@ -79,7 +87,7 @@ def stringLabelsToSequential(labels):
     return [seq_labels[label.strip()] for label in labels]
 
 
-def readBoundingBoxFromPascalVOC(file_name):
+def readSingleBoundingBoxFromPascalVOC(file_name):
     root = tree.parse(file_name)
 
     filename = os.path.basename(root.find('path').text)
@@ -92,3 +100,19 @@ def readBoundingBoxFromPascalVOC(file_name):
     y_max = float(e.find('ymax').text)
 
     return filename, x_min, x_max, y_min, y_max
+
+
+def pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords):
+    """Converts bounding box coordinates defined in Pascal VOC format to x_adj, y_adj, w_adj, h_adj"""
+
+    x_min = coords[0]
+    x_max = coords[1]
+    y_min = coords[2]
+    y_max = coords[3]
+
+    x_adj = int(x_min)
+    y_adj = int(y_min)
+    w_adj = int(x_max - img_width)
+    h_adj = int(y_max - img_height)
+
+    return (x_adj, y_adj, w_adj, h_adj)

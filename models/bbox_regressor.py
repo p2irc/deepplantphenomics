@@ -1,26 +1,27 @@
-from deepplantpheno import DPPModel
+#
+# Used to train the boundingBoxRegressor regression model
+#
 
-model = DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
+import deepplantphenomics as dpp
+
+model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
 # Setup and hyperparameters
-model.setBatchSize(8)
+model.setBatchSize(4)
 model.setNumberOfThreads(8)
 model.setOriginalImageDimensions(2056, 2454)
-model.setImageDimensions(514, 614, channels)
+model.setImageDimensions(257, 307, channels)
 model.setResizeImages(True)
 
 model.setProblemType('regression')
-model.setTrainTestSplit(0.7)
-model.setRegularizationCoefficient(0.004)
-model.setLearningRate(0.01)
+model.setTrainTestSplit(0.8)
+model.setRegularizationCoefficient(0.01)
+model.setLearningRate(0.0001)
 model.setWeightInitializer('normal')
-model.setMaximumTrainingEpochs(700)
-
-# Set image pre-processing steps
-#model.addPreprocessor('auto-segmentation')
+model.setMaximumTrainingEpochs(1000)
 
 # Load bounding box labels from Pascal VOC format
 model.loadPascalVOCLabelsFromDirectory('./data/danforth-annotations')
@@ -34,13 +35,16 @@ model.addInputLayer()
 model.addConvolutionalLayer(filter_dimension=[5, 5, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 20], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.addPoolingLayer(kernel_size=3, stride_length=2)
 
-model.addFullyConnectedLayer(output_size=64, activation_function='relu')
+model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.addPoolingLayer(kernel_size=3, stride_length=2)
+
+model.addFullyConnectedLayer(output_size=384, activation_function='relu')
 
 model.addOutputLayer(regularization_coefficient=0.0)
 
