@@ -725,7 +725,7 @@ class DPPModel(object):
 
     def load_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=False):
         """
-        Loads the png images in the given directory into an internal representation, using the labels provided in a csv
+        Loads the png images in the given directory into an internal representation, using the labels provided in a CSV
         file.
 
         :param dirname: the path of the directory containing the images
@@ -752,7 +752,7 @@ class DPPModel(object):
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_dataset_from_directory(self, dirname):
-        """Loads the RGB images and labels from the IPPN dataset"""
+        """Loads the RGB images and labels from the International Plant Phenotyping Network dataset."""
 
         labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
 
@@ -776,7 +776,7 @@ class DPPModel(object):
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_inra_dataset_from_directory(self, dirname):
-        """Loads the RGB images and labels from the INRA dataset"""
+        """Loads the RGB images and labels from the INRA dataset."""
 
         labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'AutomatonImages.csv'), 1, 3, character=';')
 
@@ -804,7 +804,10 @@ class DPPModel(object):
         self.__parse_dataset(train_images, train_labels, test_images, test_labels, image_type='jpg')
 
     def load_cifar10_dataset_from_directory(self, dirname):
-        """Loads a static CIFAR10 data directory"""
+        """
+        Loads the images and labels from a directory containing the CIFAR-10 image classification dataset as
+        downloaded by nvidia DIGITS.
+        """
 
         train_dir = os.path.join(dirname, 'train')
         test_dir = os.path.join(dirname, 'test')
@@ -833,7 +836,7 @@ class DPPModel(object):
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_dataset_from_directory_with_auto_labels(self, dirname):
-        """Loads the png images in the given directory, using subdirectories to separate classes"""
+        """Loads the png images in the given directory, using subdirectories to separate classes."""
 
         # Load all file names and labels into arrays
         subdirs = filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
@@ -870,8 +873,10 @@ class DPPModel(object):
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_lemnatec_images_from_directory(self, dirname):
-        """Loads a Lemnatec plant scanner image dataset. Unless you only want to do preprocessing,
-        regression or classification labels MUST be loaded first."""
+        """
+        Loads the RGB (VIS) images from a Lemnatec plant scanner image dataset. Unless you only want to do
+        preprocessing, regression or classification labels MUST be loaded first.
+        """
 
         # Load all snapshot subdirectories
         subdirs = filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
@@ -914,8 +919,10 @@ class DPPModel(object):
             self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_images_from_list(self, image_files):
-        """Loads images from a list of file names (strings). Unless you only want to do preprocessing,
-        regression or classification labels MUST be loaded first."""
+        """
+        Loads images from a list of file names (strings). Unless you only want to do preprocessing,
+        regression or classification labels MUST be loaded first.
+        """
 
         self.__total_raw_samples = len(image_files)
 
@@ -938,14 +945,15 @@ class DPPModel(object):
             return images
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
-        """Load multiple labels from a CSV file, for instance values for regression.
+        """
+        Load multiple labels from a CSV file, for instance values for regression.
         Parameter id_column is the column number specifying the image file name.
         """
 
         self.__all_labels, self.__all_ids = loaders.read_csv_multi_labels_and_ids(filepath, id_column)
 
     def load_pascal_voc_labels_from_directory(self, dir):
-        """Load bounding boxes from XML files in Pascal VOC format"""
+        """Loads single per-image bounding boxes from XML files in Pascal VOC format."""
 
         self.__all_ids = []
         self.__all_labels = []
@@ -999,6 +1007,8 @@ class DPPModel(object):
         return images
 
     def __parse_dataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
+        """Takes training and testing images and labels, creates input queues internally to this instance"""
+
         # house keeping
         if isinstance(train_images, tf.Tensor):
             self.__total_training_samples = train_images.get_shape().as_list()[0]
@@ -1080,7 +1090,7 @@ class DPPModel(object):
         self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
 
     def __parse_images(self, images, image_type='png'):
-        """Takes some images as input and returns a producer of processed images"""
+        """Takes some images as input, creates producer of processed images internally to this instance"""
 
         input_queue = tf.train.string_input_producer(images, shuffle=False)
 
