@@ -13,5 +13,5 @@ model.setImageDimensions(2056, 2454, channels)
 model.addPreprocessor('auto-segmentation')
 
 # Load all VIS images from a Lemnatec image repository
-model.loadLemnatecImagesFromDirectory('./data/danforth-sample-2')
+model.loadLemnatecImagesFromDirectory('./data')
 

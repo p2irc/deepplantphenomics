@@ -1,7 +1,6 @@
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, load_from_saved=False, tensorboard_dir='/home/jordan/tensorlogs')
-#model = dpp.DPPModel(debug=True, load_from_saved='./tfhSaved.meta')
+model = dpp.DPPModel(debug=True, load_from_saved=False)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3

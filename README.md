@@ -45,7 +45,7 @@ model.setTrainTestSplit(0.75)
 model.loadDatasetFromDirectoryWithAutoLabels('./data')
 
 # Specify pre-processing steps
-model.addPreprocessingStep('auto-segment')
+model.addPreprocessingStep('auto-segmentation')
 
 # Simple convolutional neural network model
 model.addInputLayer()

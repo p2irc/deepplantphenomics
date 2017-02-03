@@ -1,10 +1,10 @@
 #
-# Used to train the boundingBoxRegressor regression model
+# Used to train the bbox-regressor-lemnatec model
 #
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
+model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
@@ -24,10 +24,10 @@ model.setWeightInitializer('normal')
 model.setMaximumTrainingEpochs(1000)
 
 # Load bounding box labels from Pascal VOC format
-model.loadPascalVOCLabelsFromDirectory('./data/danforth-annotations')
+model.loadPascalVOCLabelsFromDirectory('./annotations')
 
 # Load all VIS images from a Lemnatec image repository
-model.loadLemnatecImagesFromDirectory('./data/danforth-sample')
+model.loadLemnatecImagesFromDirectory('./data')
 
 # Define a model architecture
 model.addInputLayer()
