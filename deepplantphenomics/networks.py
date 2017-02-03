@@ -1,3 +1,5 @@
+import os
+
 class boundingBoxRegressor(object):
     model = None
 
@@ -7,6 +9,8 @@ class boundingBoxRegressor(object):
     original_img_height = None
     original_img_width = None
 
+    __dir_name = 'bbox-regressor-lemnatec'
+
     def __init__(self, height, width):
         """A network which predicts bounding box coordinates via a convolutional neural net"""
 
@@ -14,9 +18,12 @@ class boundingBoxRegressor(object):
         self.original_img_height = height
         self.original_img_width = width
 
+        m_path, _ = os.path.split(__file__)
+        checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
+
         import deepplantpheno as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved='./network_states/bbox-regressor-lemnatec')
+        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
         self.model.clearPreprocessors()
 
