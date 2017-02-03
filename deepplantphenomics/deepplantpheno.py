@@ -89,6 +89,20 @@ class DPPModel(object):
     __threads = None
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None, report_rate=100):
+        """
+        The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file.
+        This class is the singular point of contact for the DPP module.
+
+        :param debug: If True, debug messages are printed to the console.
+        :param load_from_saved: Optionally, pass the name of a directory containing the checkpoint file.
+        :param save_checkpoints: If True, trainable parameters will be saved at intervals during training.
+        :param initialize: If False, a new Tensorflow session will not be initialized with the instance. This is useful,
+         for example, if you want to perform preprocessing only and will not be using a Tensorflow graph.
+        :param tensorboard_dir: Optionally, provide the path to your Tensorboard logs directory.
+        :param report_rate: Set the frequency at which progress is reported during training (also the rate at which new
+        timepoints are recorded to Tensorboard).
+        """
+
         self.__debug = debug
         self.__load_from_saved = load_from_saved
         self.__tb_dir = tensorboard_dir
@@ -119,11 +133,11 @@ class DPPModel(object):
         self.__threads = tf.train.start_queue_runners(sess=self.__session, coord=self.__coord)
 
     def set_number_of_threads(self, num_threads):
-        """Set number of threads for input queue runners"""
+        """Set number of threads for input queue runners and preprocessing tasks"""
         self.__num_threads = num_threads
 
     def set_batch_size(self, size):
-        """Setter for batch size"""
+        """Set the batch size"""
         self.__batch_size = size
 
     def set_num_regression_outputs(self, num):
@@ -131,39 +145,39 @@ class DPPModel(object):
         self.__num_regression_outputs = num
 
     def set_train_test_split(self, ratio):
-        """Setter for a ratio for the number of samples to use as training set"""
+        """Set a ratio for the number of samples to use as training set"""
         self.__train_test_split = ratio
 
     def set_maximum_training_epochs(self, epochs):
-        """Setter for max training epochs"""
+        """Set the max number of training epochs"""
         self.__maximum_training_batches = epochs
 
     def set_learning_rate(self, rate):
-        """Setter for learning rate"""
+        """Set the initial learning rate"""
         self.__learning_rate = rate
 
     def set_crop_or_pad_images(self, crop_or_pad):
-        """Setter for padding or cropping images, which is required if the dataset has images of different sizes"""
+        """Apply padding or cropping images to, which is required if the dataset has images of different sizes"""
         self.__crop_or_pad_images = crop_or_pad
 
     def set_resize_images(self, resize):
-        """Setting for up- or down-sampling images to specified size"""
+        """Up-sample or down-sample images to specified size"""
         self.__resize_images = resize
 
     def set_augmentation_flip(self, flip):
-        """Setter for randomly flipping images horizontally augmentation"""
+        """Randomly flip training images horizontally"""
         self.__augmentation_flip = flip
 
     def set_augmentation_crop(self, resize):
-        """Setter for randomly cropping images augmentation"""
+        """Randomly crop images during training, and crop images to center during testing"""
         self.__augmentation_crop = resize
 
     def set_augmentation_brightness_and_contrast(self, contr):
-        """Setter for random brightness and contrast augmentation"""
+        """Randomly adjust contrast and/or brightness on training images"""
         self.__augmentation_contrast = contr
 
     def set_regularization_coefficient(self, lamb):
-        """Setter for L2 regularization lambda"""
+        """Set lambda for L2 weight decay"""
         self.__reg_coeff = lamb
 
     def set_learning_rate_decay(self, decay_factor, epochs_per_decay):
@@ -172,7 +186,7 @@ class DPPModel(object):
         self.__lr_decay_epochs = epochs_per_decay
 
     def set_optimizer(self, optimizer):
-        """Set the optimizer to use by string"""
+        """Set the optimizer to use"""
         self.__optimizer = optimizer
 
     def set_weight_initializer(self, initializer):
@@ -180,13 +194,17 @@ class DPPModel(object):
         self.__weight_initializer = initializer
 
     def set_image_dimensions(self, image_height, image_width, image_depth):
-        """Setter for image dimensions for images in the dataset"""
+        """Specify the image dimensions for images in the dataset (depth is the number of channels)"""
         self.__image_width = image_width
         self.__image_height = image_height
         self.__image_depth = image_depth
 
     def set_original_image_dimensions(self, image_height, image_width):
-        """Specifies the original size of the image, before resizing"""
+        """
+        Specify the original size of the image, before resizing.
+        This is only needed in special cases, for instance, if you are resizing input images but using image coordinate
+        labels which reference the original size.
+        """
         self.__image_width_original = image_width
         self.__image_height_original = image_height
 
@@ -208,7 +226,12 @@ class DPPModel(object):
             warnings.warn('Problem type specified not supported', stacklevel=2)
 
     def begin_training(self):
-        """Initialize the network and run training to the specified max epoch"""
+        """
+        Initialize the network and either run training to the specified max epoch, or load trainable variables.
+        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
+        the session is shut down.
+        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        """
 
         self.__log('Beginning training...')
 
@@ -398,6 +421,7 @@ class DPPModel(object):
             self.shut_down()
 
     def compute_full_test_accuracy(self):
+        """Returns the network's mean classification (top-1) or regression (L2) accuracy on the entire training set."""
         num_test = self.__total_raw_samples - self.__total_training_samples
         num_batches = int(num_test/self.__batch_size)
         sum = 0.0
@@ -427,6 +451,7 @@ class DPPModel(object):
         return sum / num_batches
 
     def shut_down(self):
+        """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
         self.__log('Shutdown requested, ending session...')
 
         self.__coord.request_stop()
@@ -464,6 +489,7 @@ class DPPModel(object):
         return x8
 
     def save_state(self):
+        """Save all trainable variables as a checkpoint in the current working path"""
         self.__log('Saving parameters...')
         saver = tf.train.Saver(tf.trainable_variables())
         saver.save(self.__session, 'tfhSaved')
@@ -471,6 +497,10 @@ class DPPModel(object):
         self.__has_trained = True
 
     def load_state(self):
+        """
+        Load all trainable variables from a checkpoint file specified from the load_from_saved parameter in the
+        class constructor.
+        """
         if self.__load_from_saved is not False:
             self.__log('Loading from checkpoint file...')
 
@@ -492,14 +522,22 @@ class DPPModel(object):
             tf.summary.scalar('learning_rate', self.__learning_rate)
 
     def forward_pass(self, x, deterministic=False):
-        """Perform a forward pass of the network with an input tensor"""
+        """
+        Perform a forward pass of the network with an input tensor.
+        In general, this is only used when the model is integrated into a Tensorflow graph.
+        See also forward_pass_with_file_inputs.
+        """
         for layer in self.__layers:
             x = layer.forward_pass(x, deterministic)
 
         return x
 
     def forward_pass_with_file_inputs(self, x):
-        """Get network outputs with a list of filenames as input. Handles all the loading and batching automatically."""
+        """
+        Get network outputs with a list of filenames of images as input.
+        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
+        without any problems.
+        """
 
         total_outputs = np.empty([1, 4])
         num_batches = len(x) / self.__batch_size
@@ -536,18 +574,29 @@ class DPPModel(object):
         return total_outputs
 
     def __batch_mean_l2_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector L2 norm"""
         agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
         mean = tf.reduce_mean(agg)
 
         return mean
 
     def add_input_layer(self):
+        """Add an input layer to the network"""
         self.__log('Adding the input layer...')
         layer = layers.inputLayer([self.__batch_size, self.__image_height, self.__image_width, self.__image_depth])
 
         self.__layers.append(layer)
 
     def add_convolutional_layer(self, filter_dimension, stride_length, activation_function, regularization_coefficient=None):
+        """
+        Add a convolutional layer to the model.
+
+        :param filter_dimension: array of dimensions in the format [x_size, y_size, depth, num_filters]
+        :param stride_length: convolution stride length
+        :param activation_function: the activation function to apply to the activation map
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        """
         self.__num_layers_conv += 1
         layer_name = 'conv%d' % self.__num_layers_conv
         self.__log('Adding convolutional layer %s...' % layer_name)
@@ -570,6 +619,12 @@ class DPPModel(object):
         self.__layers.append(layer)
 
     def add_pooling_layer(self, kernel_size, stride_length):
+        """
+        Add a pooling layer to the model.
+
+        :param kernel_size: an integer representing the width and height dimensions of the pooling operation
+        :param stride_length: convolution stride length
+        """
         self.__num_layers_pool += 1
         layer_name = 'pool%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -580,6 +635,7 @@ class DPPModel(object):
         self.__layers.append(layer)
 
     def add_normalization_layer(self):
+        """Add a local response normalization layer to the model"""
         self.__num_layers_norm += 1
         layer_name = 'norm%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -588,6 +644,11 @@ class DPPModel(object):
         self.__layers.append(layer)
 
     def add_dropout_layer(self, p):
+        """
+        Add a DropOut layer to the model.
+
+        :param p: the keep-probability parameter for the DropOut operation
+        """
         self.__num_layers_dropout += 1
         layer_name = 'drop%d' % self.__num_layers_dropout
         self.__log('Adding dropout layer %s...' % layer_name)
@@ -595,9 +656,15 @@ class DPPModel(object):
         layer = layers.dropoutLayer(self.__last_layer().output_size, p)
         self.__layers.append(layer)
 
-    def add_fully_connected_layer(self, output_size, activation_function, shakeweight_p=None,
-                                  shakeout_p=None, shakeout_c=None, dropconnect_p=None,
-                                  regularization_coefficient=None):
+    def add_fully_connected_layer(self, output_size, activation_function, regularization_coefficient=None):
+        """
+        Add a fully connected layer to the model.
+
+        :param output_size: the number of units in the layer
+        :param activation_function: optionally, the activation function to use
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        """
         self.__num_layers_fc += 1
         layer_name = 'fc%d' % self.__num_layers_fc
         self.__log('Adding fully connected layer %s...' % layer_name)
@@ -618,16 +685,17 @@ class DPPModel(object):
                                            self.__weight_initializer,
                                            regularization_coefficient)
 
-        layer.shakeweight_p = shakeweight_p
-        layer.shakeout_p = shakeout_p
-        layer.shakeout_c = shakeout_c
-        layer.dropconnect_p = dropconnect_p
-
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 
         self.__layers.append(layer)
 
     def add_output_layer(self, regularization_coefficient=None):
+        """
+        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
+
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        """
         self.__log('Adding output layer...')
 
         reshape = isinstance(self.__last_layer(), layers.convLayer) or isinstance(self.__last_layer(), layers.poolingLayer)
@@ -656,9 +724,14 @@ class DPPModel(object):
         self.__layers.append(layer)
 
     def load_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=False):
-        """Loads the png images in the given directory into an internal representation,
-        using the labels provided in a csv file. You can optionally specify a column
-        number from the labels file to specify the class label"""
+        """
+        Loads the png images in the given directory into an internal representation, using the labels provided in a csv
+        file.
+
+        :param dirname: the path of the directory containing the images
+        :param labels_file: the path of the .csv file containing the labels
+        :param column_number: the column number (zero-indexed) of the column in the csv file representing the label
+        """
 
         image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
                        os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
