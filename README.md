@@ -16,7 +16,7 @@ This package provides two things:
 
 ### 1. Useful tools made possible using pre-trained neural networks
 
-For example, calling `addPreprocessingStep('auto-segmentation')` will use a pre-trained bounding box regression network to segment the plant from the background.
+For example, calling `add_preprocessing_step('auto-segmentation')` will use a pre-trained bounding box regression network to segment the plant from the background.
 
 ### 2. An easy way to train your own models
 
@@ -35,36 +35,36 @@ model = dpp.DPPModel(debug=True)
 channels = 3
 
 # Setup and hyperparameters
-model.setBatchSize(128)
-model.setImageDimensions(256, 256, channels)
-model.setLearningRate(0.001)
-model.setMaximumTrainingEpochs(700)
-model.setTrainTestSplit(0.75)
+model.set_batch_size(128)
+model.set_image_dimensions(256, 256, channels)
+model.set_learning_rate(0.001)
+model.set_maximum_training_epochs(700)
+model.set_train_test_split(0.75)
 
 # Load dataset
-model.loadDatasetFromDirectoryWithAutoLabels('./data')
+model.load_dataset_from_directory_with_auto_labels('./data')
 
 # Specify pre-processing steps
-model.addPreprocessingStep('auto-segmentation')
+model.add_preprocessing_step('auto-segmentation')
 
 # Simple convolutional neural network model
-model.addInputLayer()
+model.add_input_layer()
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='relu')
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='relu')
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu')
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu')
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu')
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu')
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addFullyConnectedLayer(output_size=256, activation_function='relu')
+model.add_fully_connected_layer(output_size=256, activation_function='relu')
 
-model.addOutputLayer()
+model.add_output_layer()
 
 # Train!
-model.beginTraining()
+model.begin_training()
 ```
 
 ## Installation
