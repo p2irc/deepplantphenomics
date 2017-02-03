@@ -1,4 +1,3 @@
-from regularizers import *
 import tensorflow as tf
 import math
 
@@ -95,11 +94,6 @@ class fullyConnectedLayer(object):
     __reshape = None
     regularization_coefficient = None
 
-    shakeweight_p = None
-    shakeout_p = None
-    shakeout_c = None
-    dropconnect_p = None
-
     input_size = None
     output_size = None
     name = None
@@ -138,16 +132,7 @@ class fullyConnectedLayer(object):
         if self.__reshape is True:
             x = tf.reshape(x, [self.__batch_size, -1])
 
-        # Do special regularization operation on weights
-        if not deterministic and self.shakeweight_p is not None:
-            activations = regularizers.shakeWeight(x, self.weights, self.shakeweight_p)
-        elif not deterministic and self.shakeout_p is not None:
-            activations = regularizers.shakeOut(x, self.weights, self.shakeout_p, self.shakeout_c)
-        elif not deterministic and self.dropconnect_p is not None:
-            activations = regularizers.dropConnect(x, self.weights, self.dropconnect_p)
-        else:
-            activations = tf.matmul(x, self.weights)
-
+        activations = tf.matmul(x, self.weights)
         activations = tf.add(activations, self.biases)
 
         # Apply a non-linearity specified by the user
