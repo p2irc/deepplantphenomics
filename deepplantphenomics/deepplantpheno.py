@@ -526,6 +526,10 @@ class DPPModel(object):
         Perform a forward pass of the network with an input tensor.
         In general, this is only used when the model is integrated into a Tensorflow graph.
         See also forward_pass_with_file_inputs.
+
+        :param x: input tensor where the first dimension is batch
+        :param deterministic: if True, performs inference-time operations on stochastic layers e.g. DropOut layers
+        :return: output tensor where the first dimension is batch
         """
         for layer in self.__layers:
             x = layer.forward_pass(x, deterministic)
@@ -537,8 +541,9 @@ class DPPModel(object):
         Get network outputs with a list of filenames of images as input.
         Handles all the loading and batching automatically, so the size of the input can exceed the available memory
         without any problems.
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-
         total_outputs = np.empty([1, 4])
         num_batches = len(x) / self.__batch_size
         remainder = len(x) % self.__batch_size
