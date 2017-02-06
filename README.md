@@ -1,6 +1,6 @@
 # Deep Plant Phenomics
 
-Deep Plant Phenomics (DPP) is anplatform for plant phenotyping tasks using deep learning. Think of it as [Keras](https://keras.io/) for plant scientists.
+Deep Plant Phenomics (DPP) is a platform for plant phenotyping using deep learning. Think of it as [Keras](https://keras.io/) for plant scientists.
 
 DPP integrates [Tensorflow](https://www.tensorflow.org/) for learning and [PlantCV](http://plantcv.danforthcenter.org/) for image processing. This means that it is able to run on both CPUs and GPUs, and scale easily across devices.
 
