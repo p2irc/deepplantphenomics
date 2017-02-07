@@ -30,7 +30,7 @@ def label_string_to_tensor(x, batch_size, num_outputs):
     return dense
 
 
-def read_csv_labels(file_name, column_number, character=','):
+def read_csv_labels(file_name, column_number=False, character=','):
     f = open(file_name, 'r')
     labels = []
 
@@ -116,3 +116,13 @@ def pascal_voc_coordinates_to_pcv_coordinates(img_height, img_width, coords):
     h_adj = int(y_max - img_height)
 
     return (x_adj, y_adj, w_adj, h_adj)
+
+
+def box_coordinates_to_pascal_voc_coordinates(coords):
+    """Converts c1x,c1y,c2x,c2y... box coordinates to Pascal VOC format"""
+    min_x = coords[0]
+    max_x = coords[6]
+    min_y = coords[1]
+    max_y = coords[5]
+
+    return (min_x, max_x, min_y, max_y)

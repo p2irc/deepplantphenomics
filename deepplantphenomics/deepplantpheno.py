@@ -74,7 +74,7 @@ class DPPModel(object):
     __lr_decay_factor = None
     __lr_decay_epochs = None
 
-    __num_regression_outputs = 4
+    __num_regression_outputs = 1
 
     # Wrapper options
     __debug = None
@@ -756,8 +756,8 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
-    def load_ippn_dataset_from_directory(self, dirname):
-        """Loads the RGB images and labels from the International Plant Phenotyping Network dataset."""
+    def load_ippn_strain_dataset_from_directory(self, dirname):
+        """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
         labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
 
@@ -779,6 +779,41 @@ class DPPModel(object):
 
         # create batches of input data and labels for training
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+
+    def load_ippn_tray_dataset_from_directory(self, dirname):
+        """
+        Loads the RGB tray images and plant bounding box labels from the International Plant Phenotyping Network
+        dataset.
+        """
+
+        images = [os.path.join(dirname, name) for name in os.listdir(dirname) if
+                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('_rgb.png')]
+
+        label_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
+                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('_bbox.csv')]
+
+        labels = [loaders.read_csv_labels(label_file) for label_file in label_files]
+
+        self.__all_labels = []
+
+        for label in labels:
+            self.__all_labels.append([loaders.box_coordinates_to_pascal_voc_coordinates(l) for l in label])
+
+        self.__total_raw_samples = len(images)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        # do preprocessing
+        images = self.__apply_preprocessing(images)
+
+        # prepare images for training (if there are any labels loaded)
+        if self.__all_labels is not None:
+            # split data
+            train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
+
+            # create batches of input data and labels for training
+            self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_inra_dataset_from_directory(self, dirname):
         """Loads the RGB images and labels from the INRA dataset."""
