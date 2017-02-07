@@ -4,8 +4,8 @@ import plantcv as pcv
 import os
 
 
-def doParallelAutoSegmentation(file, coords, outdir, img_height, img_width):
-    def autoSegment(in_file, out_file, coords):
+def do_parallel_auto_segmentation(file, coords, outdir, img_height, img_width):
+    def auto_segment(in_file, out_file, coords):
         x_adj = coords[0]
         y_adj = coords[1]
         w_adj = coords[2]
@@ -43,9 +43,9 @@ def doParallelAutoSegmentation(file, coords, outdir, img_height, img_width):
     filename = os.path.basename(file)
     outpath = os.path.join(outdir, filename)
 
-    fixed_coords = loaders.pascalVOCCoordinatesToPCVCoordinates(img_height, img_width, coords)
+    fixed_coords = loaders.pascal_voc_coordinates_to_pcv_coordinates(img_height, img_width, coords)
 
     if not os.path.exists(outpath):
-        autoSegment(file, outpath, fixed_coords)
+        auto_segment(file, outpath, fixed_coords)
 
     return outpath

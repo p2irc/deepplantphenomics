@@ -1,52 +1,52 @@
 #
-# Used to train the boundingBoxRegressor regression model
+# Used to train the bbox-regressor-lemnatec model
 #
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
+model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
 # Setup and hyperparameters
-model.setBatchSize(4)
-model.setNumberOfThreads(8)
-model.setOriginalImageDimensions(2056, 2454)
-model.setImageDimensions(257, 307, channels)
-model.setResizeImages(True)
+model.set_batch_size(4)
+model.set_number_of_threads(8)
+model.set_original_image_dimensions(2056, 2454)
+model.set_image_dimensions(257, 307, channels)
+model.set_resize_images(True)
 
-model.setProblemType('regression')
-model.setTrainTestSplit(0.8)
-model.setRegularizationCoefficient(0.01)
-model.setLearningRate(0.0001)
-model.setWeightInitializer('normal')
-model.setMaximumTrainingEpochs(1000)
+model.set_problem_type('regression')
+model.set_train_test_split(0.8)
+model.set_regularization_coefficient(0.01)
+model.set_learning_rate(0.0001)
+model.set_weight_initializer('normal')
+model.set_maximum_training_epochs(1000)
 
 # Load bounding box labels from Pascal VOC format
-model.loadPascalVOCLabelsFromDirectory('./data/danforth-annotations')
+model.load_pascal_voc_labels_from_directory('./annotations')
 
 # Load all VIS images from a Lemnatec image repository
-model.loadLemnatecImagesFromDirectory('./data/danforth-sample')
+model.load_lemnatec_images_from_directory('./data')
 
 # Define a model architecture
-model.addInputLayer()
+model.add_input_layer()
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-model.addPoolingLayer(kernel_size=3, stride_length=2)
+model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.addFullyConnectedLayer(output_size=384, activation_function='relu')
+model.add_fully_connected_layer(output_size=384, activation_function='relu')
 
-model.addOutputLayer(regularization_coefficient=0.0)
+model.add_output_layer(regularization_coefficient=0.0)
 
 # Begin training the regression model
-model.beginTraining()
+model.begin_training()

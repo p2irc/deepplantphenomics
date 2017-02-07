@@ -1,8 +1,4 @@
 .idea
-data/
-/checkpoint
-/network_states
-/tfhSaved
-/tfhSaved.meta
+/data
 /DPP-Processed
 *.pyc

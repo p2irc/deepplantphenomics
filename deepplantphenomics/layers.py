@@ -1,4 +1,3 @@
-from regularizers import *
 import tensorflow as tf
 import math
 
@@ -47,7 +46,7 @@ class convLayer(object):
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
 
-    def forwardPass(self, x, deterministic):
+    def forward_pass(self, x, deterministic):
         # For convention, just use a symmetrical stride with same padding
         activations = tf.nn.conv2d(x, self.weights,
                                    strides=[1, self.__stride_length, self.__stride_length, 1],
@@ -80,7 +79,7 @@ class poolingLayer(object):
         self.output_size[1] = int(math.floor((self.output_size[1]-kernel_size)/stride_length + 1) + 1)
         self.output_size[2] = int(math.floor((self.output_size[2]-kernel_size)/stride_length + 1) + 1)
 
-    def forwardPass(self, x, deterministic):
+    def forward_pass(self, x, deterministic):
         return tf.nn.max_pool(x,
                               ksize=[1, self.__kernel_size, self.__kernel_size, 1],
                               strides=[1, self.__stride_length, self.__stride_length, 1],
@@ -94,11 +93,6 @@ class fullyConnectedLayer(object):
     __activation_function = None
     __reshape = None
     regularization_coefficient = None
-
-    shakeweight_p = None
-    shakeout_p = None
-    shakeout_c = None
-    dropconnect_p = None
 
     input_size = None
     output_size = None
@@ -133,21 +127,12 @@ class fullyConnectedLayer(object):
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
 
-    def forwardPass(self, x, deterministic):
+    def forward_pass(self, x, deterministic):
         # Reshape into a column vector if necessary
         if self.__reshape is True:
             x = tf.reshape(x, [self.__batch_size, -1])
 
-        # Do special regularization operation on weights
-        if not deterministic and self.shakeweight_p is not None:
-            activations = regularizers.shakeWeight(x, self.weights, self.shakeweight_p)
-        elif not deterministic and self.shakeout_p is not None:
-            activations = regularizers.shakeOut(x, self.weights, self.shakeout_p, self.shakeout_c)
-        elif not deterministic and self.dropconnect_p is not None:
-            activations = regularizers.dropConnect(x, self.weights, self.dropconnect_p)
-        else:
-            activations = tf.matmul(x, self.weights)
-
+        activations = tf.matmul(x, self.weights)
         activations = tf.add(activations, self.biases)
 
         # Apply a non-linearity specified by the user
@@ -168,7 +153,7 @@ class inputLayer(object):
         self.input_size = input_size
         self.output_size = input_size
 
-    def forwardPass(self, x, deterministic):
+    def forward_pass(self, x, deterministic):
         return x
 
 
@@ -181,7 +166,7 @@ class normLayer(object):
         self.input_size = input_size
         self.output_size = input_size
 
-    def forwardPass(self, x, deterministic):
+    def forward_pass(self, x, deterministic):
         x = tf.nn.lrn(x, bias=1.0, alpha=0.001/9.0, beta=0.75)
         return x
 
@@ -197,7 +182,7 @@ class dropoutLayer(object):
         self.output_size = input_size
         self.p = p
 
-    def forwardPass(self, x, deterministic):
+    def forward_pass(self, x, deterministic):
         if deterministic:
             return x * self.p
         else:

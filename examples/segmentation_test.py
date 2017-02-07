@@ -6,12 +6,12 @@ model = dpp.DPPModel(debug=True, load_from_saved=False, initialize=False)
 channels = 3
 
 # Setup and hyperparameters
-model.setNumberOfThreads(12)
-model.setImageDimensions(2056, 2454, channels)
+model.set_number_of_threads(12)
+model.set_image_dimensions(2056, 2454, channels)
 
 # Add auto-segment preprocessor
-model.addPreprocessor('auto-segmentation')
+model.add_preprocessor('auto-segmentation')
 
 # Load all VIS images from a Lemnatec image repository
-model.loadLemnatecImagesFromDirectory('./data/danforth-sample-2')
+model.load_lemnatec_images_from_directory('./data')
 

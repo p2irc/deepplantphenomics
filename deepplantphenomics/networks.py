@@ -1,3 +1,5 @@
+import os
+
 class boundingBoxRegressor(object):
     model = None
 
@@ -7,6 +9,8 @@ class boundingBoxRegressor(object):
     original_img_height = None
     original_img_width = None
 
+    __dir_name = 'bbox-regressor-lemnatec'
+
     def __init__(self, height, width):
         """A network which predicts bounding box coordinates via a convolutional neural net"""
 
@@ -14,42 +18,45 @@ class boundingBoxRegressor(object):
         self.original_img_height = height
         self.original_img_width = width
 
+        m_path, _ = os.path.split(__file__)
+        checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
+
         import deepplantpheno as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved='./network_states/bbox-regressor-lemnatec')
+        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
-        self.model.clearPreprocessors()
+        self.model.clear_preprocessors()
 
         # Define model hyperparameters
-        self.model.setBatchSize(4)
-        self.model.setNumberOfThreads(4)
-        self.model.setOriginalImageDimensions(self.original_img_height, self.original_img_width)
-        self.model.setImageDimensions(self.img_height, self.img_width, 3)
-        self.model.setResizeImages(True)
+        self.model.set_batch_size(4)
+        self.model.set_number_of_threads(4)
+        self.model.set_original_image_dimensions(self.original_img_height, self.original_img_width)
+        self.model.set_image_dimensions(self.img_height, self.img_width, 3)
+        self.model.set_resize_images(True)
 
-        self.model.setProblemType('regression')
+        self.model.set_problem_type('regression')
 
         # Define a model architecture
-        self.model.addInputLayer()
+        self.model.add_input_layer()
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 3, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-        self.model.addPoolingLayer(kernel_size=3, stride_length=2)
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 3, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-        self.model.addPoolingLayer(kernel_size=3, stride_length=2)
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-        self.model.addPoolingLayer(kernel_size=3, stride_length=2)
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.addConvolutionalLayer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-        self.model.addPoolingLayer(kernel_size=3, stride_length=2)
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.addFullyConnectedLayer(output_size=384, activation_function='relu')
+        self.model.add_fully_connected_layer(output_size=384, activation_function='relu')
 
-        self.model.addOutputLayer(regularization_coefficient=0.0)
+        self.model.add_output_layer(regularization_coefficient=0.0)
 
-    def forwardPass(self, x):
-        y = self.model.forwardPassWithFileInputs(x)
+    def forward_pass(self, x):
+        y = self.model.forward_pass_with_file_inputs(x)
 
         # rescale coordinates from network input size to original image size
         height_ratio = (self.original_img_height / float(self.img_height))
@@ -62,5 +69,5 @@ class boundingBoxRegressor(object):
 
         return y
 
-    def shutDown(self):
-        self.model.shutDown()
+    def shut_down(self):
+        self.model.shut_down()
