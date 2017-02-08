@@ -21,7 +21,7 @@ model.set_train_test_split(0.8)
 model.set_regularization_coefficient(0.01)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('normal')
-model.set_maximum_training_epochs(200)
+model.set_maximum_training_epochs(400)
 
 # Augmentation options
 model.set_augmentation_brightness_and_contrast(True)
@@ -47,7 +47,8 @@ model.add_pooling_layer(kernel_size=3, stride_length=2)
 model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_fully_connected_layer(output_size=384, activation_function='relu')
+model.add_fully_connected_layer(output_size=2048, activation_function='relu')
+model.add_fully_connected_layer(output_size=2048, activation_function='relu')
 
 model.add_output_layer(regularization_coefficient=0.0)
 
