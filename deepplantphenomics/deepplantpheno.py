@@ -815,6 +815,27 @@ class DPPModel(object):
             # create batches of input data and labels for training
             self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
+    def load_ippn_leaf_count_dataset_from_directory(self, dirname):
+        """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
+
+        labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Leaf_counts.csv'), 1, 0)
+
+        # labels must be lists
+        labels = [[label] for label in labels]
+
+        image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
+
+        self.__total_raw_samples = len(image_files)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        # split data
+        train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+
+        # create batches of input data and labels for training
+        self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+
     def load_inra_dataset_from_directory(self, dirname):
         """Loads the RGB images and labels from the INRA dataset."""
 
