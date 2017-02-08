@@ -21,7 +21,7 @@ model.set_train_test_split(0.8)
 model.set_regularization_coefficient(0.01)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('normal')
-model.set_maximum_training_epochs(400)
+model.set_maximum_training_epochs(200)
 
 # Augmentation options
 model.set_augmentation_brightness_and_contrast(True)

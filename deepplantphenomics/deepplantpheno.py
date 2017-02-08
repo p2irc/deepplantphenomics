@@ -40,6 +40,7 @@ class DPPModel(object):
     __augmentation_flip_vertical = False
     __augmentation_crop = False
     __augmentation_contrast = False
+    __crop_amount = 0.75
 
     # Dataset storage
     __all_ids = None
@@ -546,10 +547,11 @@ class DPPModel(object):
         Get network outputs with a list of filenames of images as input.
         Handles all the loading and batching automatically, so the size of the input can exceed the available memory
         without any problems.
+
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        total_outputs = np.empty([1, 4])
+        total_outputs = np.empty([1, self.__num_regression_outputs])
         num_batches = len(x) / self.__batch_size
         remainder = len(x) % self.__batch_size
 
@@ -590,10 +592,17 @@ class DPPModel(object):
 
         return mean
 
-    def add_input_layer(self):
+    def add_input_layer(self, apply_crop=False):
         """Add an input layer to the network"""
         self.__log('Adding the input layer...')
-        layer = layers.inputLayer([self.__batch_size, self.__image_height, self.__image_width, self.__image_depth])
+
+        if apply_crop:
+            size = [self.__batch_size, int(self.__image_height * self.__crop_amount),
+                    int(self.__image_width * self.__crop_amount), self.__image_depth]
+        else:
+            size = [self.__batch_size, self.__image_height, self.__image_width, self.__image_depth]
+
+        layer = layers.inputLayer(size)
 
         self.__layers.append(layer)
 
@@ -1006,9 +1015,7 @@ class DPPModel(object):
             # create batches of input data and labels for training
             self.__parse_dataset(train_images, train_labels, test_images, test_labels)
         else:
-            images = self.__parse_images(images)
-
-            return images
+            self.__parse_images(images)
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
         """
@@ -1120,8 +1127,8 @@ class DPPModel(object):
             self.__test_images = tf.image.resize_images(self.__test_images, [self.__image_height, self.__image_width])
 
         if self.__augmentation_crop is True:
-            self.__image_height = int(self.__image_height * 0.75)
-            self.__image_width = int(self.__image_width * 0.75)
+            self.__image_height = int(self.__image_height * self.__crop_amount)
+            self.__image_width = int(self.__image_width * self.__crop_amount)
             self.__train_images = tf.random_crop(self.__train_images, [self.__image_height, self.__image_width, 3])
             self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                         self.__image_width)
@@ -1162,7 +1169,7 @@ class DPPModel(object):
         reader = tf.WholeFileReader()
         key, file = reader.read(input_queue)
 
-        # pre-processing for training and testing images
+        # pre-processing for all images
 
         if image_type is 'jpg':
             input_images = tf.image.decode_jpeg(file, channels=self.__image_depth)
@@ -1176,10 +1183,9 @@ class DPPModel(object):
             input_images = tf.image.resize_images(input_images, [self.__image_height, self.__image_width])
 
         if self.__augmentation_crop is True:
-            self.__image_height = int(self.__image_height * 0.75)
-            self.__image_width = int(self.__image_width * 0.75)
-            input_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
-                                                                  self.__image_width)
+            self.__image_height = int(self.__image_height * self.__crop_amount)
+            self.__image_width = int(self.__image_width * self.__crop_amount)
+            input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
 
         if self.__crop_or_pad_images is True:
             # pad or crop to deal with images of different sizes
