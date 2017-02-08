@@ -36,7 +36,8 @@ class DPPModel(object):
     __processed_images_dir = './DPP-Processed'
 
     # Augmentation options
-    __augmentation_flip = False
+    __augmentation_flip_horizontal = False
+    __augmentation_flip_vertical = False
     __augmentation_crop = False
     __augmentation_contrast = False
 
@@ -164,9 +165,13 @@ class DPPModel(object):
         """Up-sample or down-sample images to specified size"""
         self.__resize_images = resize
 
-    def set_augmentation_flip(self, flip):
+    def set_augmentation_flip_horizontal(self, flip):
         """Randomly flip training images horizontally"""
-        self.__augmentation_flip = flip
+        self.__augmentation_flip_horizontal = flip
+
+    def set_augmentation_flip_vertical(self, flip):
+        """Randomly flip training images vertically"""
+        self.__augmentation_flip_vertical = flip
 
     def set_augmentation_crop(self, resize):
         """Randomly crop images during training, and crop images to center during testing"""
@@ -1133,9 +1138,13 @@ class DPPModel(object):
             self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images, self.__image_height,
                                                                          self.__image_width)
 
-        if self.__augmentation_flip is True:
-            # apply flip augmentation
+        if self.__augmentation_flip_horizontal is True:
+            # apply flip horizontal augmentation
             self.__train_images = tf.image.random_flip_left_right(self.__train_images)
+
+        if self.__augmentation_flip_vertical is True:
+            # apply flip vertical augmentation
+            self.__train_images = tf.image.random_flip_up_down(self.__train_images)
 
         if self.__augmentation_contrast is True:
             # apply random contrast and brightness augmentation

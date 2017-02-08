@@ -4,7 +4,7 @@
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, report_rate=20)
+model = dpp.DPPModel(debug=True, save_checkpoints=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
@@ -21,7 +21,12 @@ model.set_train_test_split(0.8)
 model.set_regularization_coefficient(0.01)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('normal')
-model.set_maximum_training_epochs(1000)
+model.set_maximum_training_epochs(200)
+
+# Augmentation options
+model.set_augmentation_brightness_and_contrast(True)
+model.set_augmentation_flip_horizontal(True)
+model.set_augmentation_flip_vertical(True)
 
 # Load all VIS images from a Lemnatec image repository
 model.load_ippn_leaf_count_dataset_from_directory('./data/Ara2013-Canon')
