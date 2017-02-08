@@ -1175,10 +1175,14 @@ class DPPModel(object):
         if self.__resize_images is True:
             input_images = tf.image.resize_images(input_images, [self.__image_height, self.__image_width])
 
+        if self.__augmentation_crop is True:
+            self.__image_height = int(self.__image_height * 0.75)
+            self.__image_width = int(self.__image_width * 0.75)
+            input_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
+                                                                  self.__image_width)
+
         if self.__crop_or_pad_images is True:
             # pad or crop to deal with images of different sizes
-            input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
-        elif self.__augmentation_crop is True:
             input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
 
         # mean-center all inputs
