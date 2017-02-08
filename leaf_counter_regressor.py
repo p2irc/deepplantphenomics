@@ -27,6 +27,7 @@ model.set_maximum_training_epochs(200)
 model.set_augmentation_brightness_and_contrast(True)
 model.set_augmentation_flip_horizontal(True)
 model.set_augmentation_flip_vertical(True)
+model.set_augmentation_crop(True)
 
 # Load all VIS images from a Lemnatec image repository
 model.load_ippn_leaf_count_dataset_from_directory('./data/Ara2013-Canon')

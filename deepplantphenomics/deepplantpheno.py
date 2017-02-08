@@ -1115,6 +1115,10 @@ class DPPModel(object):
         self.__train_images = tf.image.convert_image_dtype(self.__train_images, dtype=tf.float32)
         self.__test_images = tf.image.convert_image_dtype(self.__test_images, dtype=tf.float32)
 
+        if self.__resize_images is True:
+            self.__train_images = tf.image.resize_images(self.__train_images, [self.__image_height, self.__image_width])
+            self.__test_images = tf.image.resize_images(self.__test_images, [self.__image_height, self.__image_width])
+
         if self.__augmentation_crop is True:
             self.__image_height = int(self.__image_height * 0.75)
             self.__image_width = int(self.__image_width * 0.75)
@@ -1122,21 +1126,12 @@ class DPPModel(object):
             self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                         self.__image_width)
 
-        if self.__resize_images is True:
-            self.__train_images = tf.image.resize_images(self.__train_images,
-                                                         [self.__image_height, self.__image_width])
-            self.__test_images = tf.image.resize_images(self.__test_images,
-                                                        [self.__image_height, self.__image_width])
-
         if self.__crop_or_pad_images is True:
             # pad or crop to deal with images of different sizes
             self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images, self.__image_height,
                                                                          self.__image_width)
             self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                         self.__image_width)
-        elif self.__augmentation_crop is True:
-            self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images, self.__image_height,
-                                                                         self.__image_width)
 
         if self.__augmentation_flip_horizontal is True:
             # apply flip horizontal augmentation
