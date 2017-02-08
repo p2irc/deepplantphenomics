@@ -17,6 +17,7 @@ model.set_image_dimensions(257, 307, channels)
 model.set_resize_images(True)
 
 model.set_problem_type('regression')
+model.set_num_regression_outputs(4)
 model.set_train_test_split(0.8)
 model.set_regularization_coefficient(0.01)
 model.set_learning_rate(0.0001)
