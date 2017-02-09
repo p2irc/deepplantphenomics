@@ -592,9 +592,11 @@ class DPPModel(object):
 
         return mean
 
-    def add_input_layer(self, apply_crop=False):
+    def add_input_layer(self):
         """Add an input layer to the network"""
         self.__log('Adding the input layer...')
+
+        apply_crop = (self.__augmentation_crop and self.__all_images is None and self.__train_images is None)
 
         if apply_crop:
             size = [self.__batch_size, int(self.__image_height * self.__crop_amount),
