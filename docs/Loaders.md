@@ -61,7 +61,7 @@ load_dataset_from_directory_with_auto_labels(dirname)
 Loads the RGB images and species labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/).
 
 ```
-load_ippn_dataset_from_directory(dirname)
+load_ippn_strain_dataset_from_directory(dirname)
 ```
 
 ### Load Dataset from IPPN for Tray Segmentation
