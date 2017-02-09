@@ -20,7 +20,7 @@ For example, calling `tools.predict_rosette_leaf_count(my_files)` will use a pre
 
 ### 2. An easy way to train your own models
 
-For example, using a few lines of code you can easily use your data to train a convolutional neural network to rate plants for the presence of disease.
+For example, using a few lines of code you can easily use your data to train a convolutional neural network to rate plants for biotic stress. See the tutorial for how the leaf counting model was built.
 
 ## Example Usage
 

@@ -102,6 +102,8 @@ model.add_output_layer(regularization_coefficient=0.0)
 
 Depending on your task, you may have better results with larger or smaller networks. Don't assume that a large model is better, especially with small datasets! Try a few different configurations with different feature extractors (the convolutional layers and accompanying machinery) and classifiers (the fully connected layers).
 
+The `regularization_coefficient=0.0` arguments prevent the L2 weight decay from being applied to those layers.
+
 ## Training
 
 We begin training the model by simply calling the training function.
