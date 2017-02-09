@@ -36,9 +36,11 @@ class DPPModel(object):
     __processed_images_dir = './DPP-Processed'
 
     # Augmentation options
-    __augmentation_flip = False
+    __augmentation_flip_horizontal = False
+    __augmentation_flip_vertical = False
     __augmentation_crop = False
     __augmentation_contrast = False
+    __crop_amount = 0.75
 
     # Dataset storage
     __all_ids = None
@@ -164,9 +166,13 @@ class DPPModel(object):
         """Up-sample or down-sample images to specified size"""
         self.__resize_images = resize
 
-    def set_augmentation_flip(self, flip):
+    def set_augmentation_flip_horizontal(self, flip):
         """Randomly flip training images horizontally"""
-        self.__augmentation_flip = flip
+        self.__augmentation_flip_horizontal = flip
+
+    def set_augmentation_flip_vertical(self, flip):
+        """Randomly flip training images vertically"""
+        self.__augmentation_flip_vertical = flip
 
     def set_augmentation_crop(self, resize):
         """Randomly crop images during training, and crop images to center during testing"""
@@ -541,10 +547,11 @@ class DPPModel(object):
         Get network outputs with a list of filenames of images as input.
         Handles all the loading and batching automatically, so the size of the input can exceed the available memory
         without any problems.
+
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        total_outputs = np.empty([1, 4])
+        total_outputs = np.empty([1, self.__num_regression_outputs])
         num_batches = len(x) / self.__batch_size
         remainder = len(x) % self.__batch_size
 
@@ -588,7 +595,16 @@ class DPPModel(object):
     def add_input_layer(self):
         """Add an input layer to the network"""
         self.__log('Adding the input layer...')
-        layer = layers.inputLayer([self.__batch_size, self.__image_height, self.__image_width, self.__image_depth])
+
+        apply_crop = (self.__augmentation_crop and self.__all_images is None and self.__train_images is None)
+
+        if apply_crop:
+            size = [self.__batch_size, int(self.__image_height * self.__crop_amount),
+                    int(self.__image_width * self.__crop_amount), self.__image_depth]
+        else:
+            size = [self.__batch_size, self.__image_height, self.__image_width, self.__image_depth]
+
+        layer = layers.inputLayer(size)
 
         self.__layers.append(layer)
 
@@ -815,6 +831,27 @@ class DPPModel(object):
             # create batches of input data and labels for training
             self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
+    def load_ippn_leaf_count_dataset_from_directory(self, dirname):
+        """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
+
+        labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Leaf_counts.csv'), 1, 0)
+
+        # labels must be lists
+        labels = [[label] for label in labels]
+
+        image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
+
+        self.__total_raw_samples = len(image_files)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        # split data
+        train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+
+        # create batches of input data and labels for training
+        self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+
     def load_inra_dataset_from_directory(self, dirname):
         """Loads the RGB images and labels from the INRA dataset."""
 
@@ -980,9 +1017,7 @@ class DPPModel(object):
             # create batches of input data and labels for training
             self.__parse_dataset(train_images, train_labels, test_images, test_labels)
         else:
-            images = self.__parse_images(images)
-
-            return images
+            self.__parse_images(images)
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
         """
@@ -1089,18 +1124,16 @@ class DPPModel(object):
         self.__train_images = tf.image.convert_image_dtype(self.__train_images, dtype=tf.float32)
         self.__test_images = tf.image.convert_image_dtype(self.__test_images, dtype=tf.float32)
 
+        if self.__resize_images is True:
+            self.__train_images = tf.image.resize_images(self.__train_images, [self.__image_height, self.__image_width])
+            self.__test_images = tf.image.resize_images(self.__test_images, [self.__image_height, self.__image_width])
+
         if self.__augmentation_crop is True:
-            self.__image_height = int(self.__image_height * 0.75)
-            self.__image_width = int(self.__image_width * 0.75)
+            self.__image_height = int(self.__image_height * self.__crop_amount)
+            self.__image_width = int(self.__image_width * self.__crop_amount)
             self.__train_images = tf.random_crop(self.__train_images, [self.__image_height, self.__image_width, 3])
             self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                         self.__image_width)
-
-        if self.__resize_images is True:
-            self.__train_images = tf.image.resize_images(self.__train_images,
-                                                         [self.__image_height, self.__image_width])
-            self.__test_images = tf.image.resize_images(self.__test_images,
-                                                        [self.__image_height, self.__image_width])
 
         if self.__crop_or_pad_images is True:
             # pad or crop to deal with images of different sizes
@@ -1108,13 +1141,14 @@ class DPPModel(object):
                                                                          self.__image_width)
             self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                         self.__image_width)
-        elif self.__augmentation_crop is True:
-            self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images, self.__image_height,
-                                                                         self.__image_width)
 
-        if self.__augmentation_flip is True:
-            # apply flip augmentation
+        if self.__augmentation_flip_horizontal is True:
+            # apply flip horizontal augmentation
             self.__train_images = tf.image.random_flip_left_right(self.__train_images)
+
+        if self.__augmentation_flip_vertical is True:
+            # apply flip vertical augmentation
+            self.__train_images = tf.image.random_flip_up_down(self.__train_images)
 
         if self.__augmentation_contrast is True:
             # apply random contrast and brightness augmentation
@@ -1137,7 +1171,7 @@ class DPPModel(object):
         reader = tf.WholeFileReader()
         key, file = reader.read(input_queue)
 
-        # pre-processing for training and testing images
+        # pre-processing for all images
 
         if image_type is 'jpg':
             input_images = tf.image.decode_jpeg(file, channels=self.__image_depth)
@@ -1150,10 +1184,13 @@ class DPPModel(object):
         if self.__resize_images is True:
             input_images = tf.image.resize_images(input_images, [self.__image_height, self.__image_width])
 
+        if self.__augmentation_crop is True:
+            self.__image_height = int(self.__image_height * self.__crop_amount)
+            self.__image_width = int(self.__image_width * self.__crop_amount)
+            input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
+
         if self.__crop_or_pad_images is True:
             # pad or crop to deal with images of different sizes
-            input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
-        elif self.__augmentation_crop is True:
             input_images = tf.image.resize_image_with_crop_or_pad(input_images, self.__image_height, self.__image_width)
 
         # mean-center all inputs

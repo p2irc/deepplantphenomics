@@ -4,3 +4,4 @@ Copyright Jordan Ubbens, all rights reserved
 """
 
 from .deepplantpheno import *
+from .tools import *

@@ -16,7 +16,7 @@ model.set_weight_initializer('normal')
 model.set_maximum_training_epochs(700)
 
 # Augmentation options
-model.set_augmentation_flip(True)
+model.set_augmentation_flip_horizontal(True)
 model.set_augmentation_crop(True)
 model.set_augmentation_brightness_and_contrast(True)
 
