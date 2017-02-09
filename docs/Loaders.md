@@ -30,12 +30,12 @@ Load multiple labels from a CSV file, for instance values for regression. Parame
 load_multiple_labels_from_csv(filepath, id_column)
 ```
 
-### Load Pascal VOC Bounding Box Coordinates
+### Load Pascal VOC Bounding Box Coordinates from Directory
 
 Loads single per-image bounding boxes from XML files in Pascal VOC format. The corresponding image filename should be specified in the XML file.
 
 ```
-load_pascal_voc_labels_from_directory(dir)
+load_pascal_voc_labels_from_directory(dirname)
 ```
 
 ## Dataset (Image+Labels) Loaders
