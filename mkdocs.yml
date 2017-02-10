@@ -1,0 +1,14 @@
+site_name: Deep Plant Phenomics
+
+pages:
+    - Home: index.md
+    - DPPmodel API:
+      - Loaders: Loaders.md
+      - Neural Network Layers: Neural-Network-Layers.md
+      - Preprocessing Steps: Preprocessing-Steps.md
+      - Model Options: Model-Options.md
+    - Tools: Tools.md
+    - Tutorials:
+      - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
+
+theme: readthedocs
