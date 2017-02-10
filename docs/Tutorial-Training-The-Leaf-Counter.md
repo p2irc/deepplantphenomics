@@ -10,7 +10,7 @@ The data used to train the leaf counter comes from the [IPPN dataset](http://www
 
 ## Setting Up Model Parameters
 
-Let's break down the setup of our model.
+Let's break down the setup of our model. See the documentation on model options for more information about these settings.
 
 ```python
 import deepplantphenomics as dpp
@@ -31,7 +31,9 @@ model.set_image_dimensions(128, 128, channels)
 model.set_resize_images(True)
 ```
 
-These lines tell us about the input images. In this case, we are going to use batches of 8 examples for each iteration of training. We are going to use 8 threads for each Tensorflow input producer. Since the size of images varies in this dataset, we are going to choose to resize them to 128x128. We could also choose to resize them by cropping or padding instead.
+These lines tell us about the input images. In this case, we are going to use batches of 8 examples for each iteration of training (since this is a very small dataset). We are going to use 8 threads for each Tensorflow input producer. This is useful if a single producer thread can't keep up with the GPU. It normally doesn't matter, but we're training on a machine with a lot of cores so why not use them.
+
+Since the size of images varies in this dataset, we are going to choose to resize them to 128x128. We could also choose to resize them by cropping or padding instead.
 
 ```python
 model.set_problem_type('regression')
@@ -45,7 +47,7 @@ model.set_maximum_training_epochs(200)
 
 These are hyperparameters to use for training. The first two lines specify that we are doing a regression problem (trying to estimate a number), with one output (the number of leaves).
 
-We are going to use 80% of the examples for training, and 20% for testing. We are going to use L2 weight decay for regularization with a coefficient of 0.01. We are going to initialize layer weights with a normal distribution.
+We are going to use 80% of the examples for training, and 20% for testing. We are going to use L2 weight decay for regularization with a coefficient (strength) of 0.01. We are going to initialize our layer weights with a normal distribution.
 
 We will train until 200 epochs - i.e. until we have seen all of the examples in the training set 200 times.
 
@@ -102,7 +104,7 @@ model.add_output_layer(regularization_coefficient=0.0)
 
 Depending on your task, you may have better results with larger or smaller networks. Don't assume that a large model is better, especially with small datasets! Try a few different configurations with different feature extractors (the convolutional layers and accompanying machinery) and classifiers (the fully connected layers).
 
-The `regularization_coefficient=0.0` arguments prevent the L2 weight decay from being applied to those layers.
+The `regularization_coefficient=0.0` arguments prevent the L2 weight decay from being applied to the convolutional layers and the output layer.
 
 ## Training
 
