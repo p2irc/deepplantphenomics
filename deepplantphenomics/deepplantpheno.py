@@ -557,7 +557,13 @@ class DPPModel(object):
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        total_outputs = np.empty([1, self.__num_regression_outputs])
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+            total_outputs = np.empty([1, self.__last_layer().output_size])
+        elif self.__problem_type == definitions.ProblemType.REGRESSION:
+            total_outputs = np.empty([1, self.__num_regression_outputs])
+        else:
+            warnings.warn('Problem type is not recognized')
+
         num_batches = len(x) / self.__batch_size
         remainder = len(x) % self.__batch_size
 
@@ -716,12 +722,14 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
-    def add_output_layer(self, regularization_coefficient=None):
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
         """
         Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
 
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
         """
         self.__log('Adding output layer...')
 
@@ -732,10 +740,15 @@ class DPPModel(object):
         if regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
-        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-            num_out = self.__total_classes
-        elif self.__problem_type == definitions.ProblemType.REGRESSION:
-            num_out = self.__num_regression_outputs
+        if output_size is None:
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                num_out = self.__total_classes
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                num_out = self.__num_regression_outputs
+            else:
+                warnings.warn('Problem type is not recognized')
+        else:
+            num_out = output_size
 
         layer = layers.fullyConnectedLayer('output',
                                            self.__last_layer().output_size,
