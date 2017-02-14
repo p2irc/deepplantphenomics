@@ -174,9 +174,10 @@ class DPPModel(object):
         """Randomly flip training images vertically"""
         self.__augmentation_flip_vertical = flip
 
-    def set_augmentation_crop(self, resize):
+    def set_augmentation_crop(self, resize, crop_ratio=0.75):
         """Randomly crop images during training, and crop images to center during testing"""
         self.__augmentation_crop = resize
+        self.__crop_amount = crop_ratio
 
     def set_augmentation_brightness_and_contrast(self, contr):
         """Randomly adjust contrast and/or brightness on training images"""
@@ -430,6 +431,11 @@ class DPPModel(object):
         """Returns the network's mean classification (top-1) or regression (L2) accuracy on the entire training set."""
         num_test = self.__total_raw_samples - self.__total_training_samples
         num_batches = int(num_test/self.__batch_size)
+
+        if num_batches == 0:
+            warnings.warn('Less than a batch of training data')
+            exit()
+
         sum = 0.0
 
         for i in range(num_batches):
@@ -772,10 +778,18 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
-    def load_ippn_strain_dataset_from_directory(self, dirname):
+    def load_ippn_classification_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
-        labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        if column == 'treatment':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 2, 0)
+        elif column == 'strain':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        elif column == 'DAG':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 3, 0)
+        else:
+            warnings.warn('Unknown column in IPPN dataset')
+            exit()
 
         image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
 
