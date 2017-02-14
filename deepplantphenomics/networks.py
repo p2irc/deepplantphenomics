@@ -30,7 +30,7 @@ class boundingBoxRegressor(object):
 
         # Define model hyperparameters
         self.model.set_batch_size(4)
-        self.model.set_number_of_threads(4)
+        self.model.set_number_of_threads(1)
         self.model.set_original_image_dimensions(self.original_img_height, self.original_img_width)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
@@ -96,7 +96,7 @@ class rosetteLeafRegressor(object):
 
         # Define model hyperparameters
         self.model.set_batch_size(8)
-        self.model.set_number_of_threads(4)
+        self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
 
@@ -152,7 +152,7 @@ class arabidopsisStrainClassifier(object):
 
         # Define model hyperparameters
         self.model.set_batch_size(32)
-        self.model.set_number_of_threads(4)
+        self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
 
