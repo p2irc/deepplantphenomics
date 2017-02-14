@@ -127,6 +127,9 @@ class rosetteLeafRegressor(object):
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
 
+        # round for leaf counts
+        y = np.round(y)
+
         return y
 
     def shut_down(self):
