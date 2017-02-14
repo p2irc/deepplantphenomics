@@ -1,3 +1,4 @@
+import numpy as np
 import os
 
 class boundingBoxRegressor(object):
@@ -147,7 +148,7 @@ class arabidopsisStrainClassifier(object):
 
         import deepplantpheno as dpp
 
-        self.model = dpp.DPPModel(debug=True, load_from_saved=checkpoint_path)
+        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
         self.model.set_batch_size(32)
@@ -182,7 +183,24 @@ class arabidopsisStrainClassifier(object):
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
 
-        return y
+        # Convert from class probabilities to labels
+        indices = np.argmax(y, axis=1)
+
+        def indexToLabel(idx):
+            if idx == 0:
+                return 'Col-0'
+            elif idx == 1:
+                return 'ein2'
+            elif idx == 2:
+                return 'pgm'
+            elif idx == 3:
+                return 'adh1'
+            elif idx == 4:
+                return 'ctr'
+
+        labels = [indexToLabel(index) for index in indices]
+
+        return labels
 
     def shut_down(self):
         self.model.shut_down()
