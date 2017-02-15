@@ -20,7 +20,7 @@ Fully connected layers can be added with a specified output size, corresponding 
 model.add_fully_connected_layer(output_size=64, activation_function='relu')
 ```
 
-The optional `activation_function` parameter specifies the nonlinear activation (or *transfer*) function to apply.
+The optional `activation_function` parameter specifies the nonlinear activation function (or *transfer function*) to apply.
 
 ## Convolutional Layer
 
@@ -71,3 +71,5 @@ model.add_output_layer()
 ```
 
 The number of units in this layer corresponds to the number of outputs - for example, the number of regression values, or the number of classes in the classification task.
+
+The `output_size` parameter is optional and only used in rare cases where you want to override the calculated output size - for example, when the number of classes is not known because the dataset has not been loaded yet.
