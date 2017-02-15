@@ -10,6 +10,8 @@ set_number_of_threads()
 
 Set number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
+Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
+
 ## Learning Hyperparameters
 
 ```
@@ -107,10 +109,10 @@ set_augmentation_flip_vertical(True)
 Randomly flip training images vertically.
 
 ```
-set_augmentation_crop(True)
+set_augmentation_crop(True, crop_ratio)
 ```
 
-Randomly crop images during training, and crop images to center during testing.
+Randomly crop images during training, and crop images to center during testing. The size of the crop is specified by `crop_ratio`, and defaults to `0.75`, or 75% of the original image.
 
 ```
 set_augmentation_brightness_and_contrast(True)
