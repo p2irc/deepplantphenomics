@@ -8,8 +8,10 @@ def split_raw_data(images, labels, ratio):
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         labels = [' '.join(map(str, label)) for label in labels]
+        total_samples = len(labels)
+    else:
+        total_samples = labels.get_shape().as_list()[0]
 
-    total_samples = len(labels)
     num_training = int(total_samples * ratio)
 
     partitions = [0] * total_samples

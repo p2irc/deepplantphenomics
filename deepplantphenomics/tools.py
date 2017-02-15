@@ -19,3 +19,17 @@ class tools(object):
         net.shut_down()
 
         return predictions
+
+    @staticmethod
+    def classify_arabidopsis_strain(x):
+        """
+        Uses a pre-trained network to classify arabidopsis strain
+        """
+
+        net = networks.arabidopsisStrainClassifier()
+
+        predictions = net.forward_pass(x)
+
+        net.shut_down()
+
+        return predictions
