@@ -1,5 +1,3 @@
-# Tutorial: Training The Leaf Counter
-
 One of the functions provided in the `tools` class is `tools.estimate_rosette_leaf_count()`. This implements a pre-trained convolutional neural network to count the number of leaves on a rosette-type plant.
 
 This guide reviews the basic process which was used to train the regression model to perform this leaf-counting task. It is intended to help users who wish to train their own models for similar tasks. The full code for this model appears in the `models/leaf_counter_regressor.py` source file.

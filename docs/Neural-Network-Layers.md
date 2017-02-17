@@ -1,7 +1,3 @@
-# Neural Network Layers
-
-DPP offers several different layers which can be stacked together to build models.
-
 ## Input Layer
 
 The first layer which needs to be added to the model is an input layer.

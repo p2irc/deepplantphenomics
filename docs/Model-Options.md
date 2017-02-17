@@ -1,7 +1,3 @@
-# Model Options
-
-This page details the different options which are available in DPP for training.
-
 ## Multithreading Options
 
 ```
@@ -36,7 +32,7 @@ Set the initial learning rate. If you're not sure what learning rate is appropri
 set_optimizer()
 ```
 
-Set the optimization algorithm to use. Default is `'Adam'`. Other options are `'SGD'` (Stochastic Gradient Descent), `'Adadelta'`, and `'Adagrad'`, 
+Set the optimization algorithm to use. Default is `'Adam'`. Other options are `'SGD'` (Stochastic Gradient Descent), `'Adadelta'`, and `'Adagrad'`.
 
 ```
 set_learning_rate_decay(decay_factor, epochs_per_decay)

@@ -1,7 +1,3 @@
-# Loaders
-
-This page details the different functions which are provided to load images, labels, or both.
-
 ## Image Loaders
 
 ### Load Images from a List of Filenames
