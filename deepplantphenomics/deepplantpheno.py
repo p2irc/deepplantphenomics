@@ -651,18 +651,19 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
-    def add_pooling_layer(self, kernel_size, stride_length):
+    def add_pooling_layer(self, kernel_size, stride_length, pooling_type='max'):
         """
         Add a pooling layer to the model.
 
         :param kernel_size: an integer representing the width and height dimensions of the pooling operation
         :param stride_length: convolution stride length
+        :param pooling_type: optional, the type of pooling operation
         """
         self.__num_layers_pool += 1
         layer_name = 'pool%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
 
-        layer = layers.poolingLayer(self.__last_layer().output_size, kernel_size, stride_length)
+        layer = layers.poolingLayer(self.__last_layer().output_size, kernel_size, stride_length, pooling_type)
         self.__log('Outputs: %s' % layer.output_size)
 
         self.__layers.append(layer)
