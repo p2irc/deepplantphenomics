@@ -16,7 +16,7 @@ Fully connected layers can be added with a specified output size, corresponding 
 model.add_fully_connected_layer(output_size=64, activation_function='relu')
 ```
 
-The optional `activation_function` parameter specifies the nonlinear activation function (or *transfer function*) to apply.
+The optional `activation_function` parameter specifies the nonlinear activation function (or *transfer function*) to apply (`'relu'` or `'tanh'`).
 
 ## Convolutional Layer
 
@@ -35,10 +35,12 @@ Replication padding is used at the boundaries.
 The pooling layer spatially downsamples an input volume using max pooling. These are typically used following convolutional layers to decrease spatial resolution.
 
 ```
-model.add_pooling_layer(kernel_size=3, stride_length=2)
+model.add_pooling_layer(kernel_size=3, stride_length=2, pooling_type='max')
 ```
 
 The `kernel_size` parameter specifies the spatial diameter of the downsampling operation. For example, if max pooling is used with `kernel_size=3`, then the value at a particular position is the maximum of the 3x3 neighbourhood centered at that position.
+
+The optional `pooling_type` parameter specifies the type of pooling operation, which defaults to `'max'` for max pooling but can also be set to `'avg'` for average pooling.
 
 ## DropOut Layer
 
