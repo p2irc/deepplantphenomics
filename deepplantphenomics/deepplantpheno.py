@@ -70,7 +70,7 @@ class DPPModel(object):
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
-    __weight_initializer = 'xavier'
+    __weight_initializer = 'normal'
 
     __learning_rate = None
     __lr_decay_factor = None

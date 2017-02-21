@@ -44,7 +44,7 @@ Manually anneal the learning rate every `epochs_per_decay` epochs. This isn't ne
 set_weight_initializer()
 ```
 
-Set the weight initialization scheme for convolutional and fully connected layers. Default is `'xavier'`, other option is `'normal'`.
+Set the weight initialization scheme for convolutional and fully connected layers. Default is `'normal'`, other option is `'xavier'`. Note that you may experience gradient problems with relu activations and xavier initialization.
 
 ```
 set_problem_type()
