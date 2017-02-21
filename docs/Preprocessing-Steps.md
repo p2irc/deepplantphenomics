@@ -1,6 +1,6 @@
 This guide details the available preprocessing steps which can be added via the `add_preprocessing_step` function.
 
-All preprocessing steps are executed as soon as images are loaded using one of the image or dataset loading functions. They are run in the order they were added. The preprocessed images are saved in a separate folder and are cached there to avoid re-processing the images on subsequent runs.
+All preprocessing steps are executed as soon as images are loaded using one of the image or dataset loading functions. They are run in the order they were added. The preprocessed images are saved in a separate folder and are cached there to avoid re-processing the images on subsequent runs. The location of this folder defaults to `./DPP-Processed` but can be specified with `set_processed_images_dir()`.
 
 ## auto-segmentation
 

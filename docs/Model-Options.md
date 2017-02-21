@@ -90,6 +90,12 @@ set_resize_images(True)
 
 Up-sample or down-sample images to specified size.
 
+```
+set_processed_images_dir()
+```
+
+Set the location to save processed images when pre-processing is used.
+
 ## Data Augmentation Options
 
 ```

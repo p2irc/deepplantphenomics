@@ -138,6 +138,10 @@ class DPPModel(object):
         """Set number of threads for input queue runners and preprocessing tasks"""
         self.__num_threads = num_threads
 
+    def set_processed_images_dir(self, dir):
+        """Set the directory for storing processed images when pre-processing is used"""
+        self.__processed_images_dir = dir
+
     def set_batch_size(self, size):
         """Set the batch size"""
         self.__batch_size = size
