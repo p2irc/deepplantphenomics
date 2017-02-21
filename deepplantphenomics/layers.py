@@ -57,6 +57,8 @@ class convLayer(object):
         # Apply a non-linearity specified by the user
         if self.__activation_function == 'relu':
             activations = tf.nn.relu(activations)
+        elif self.__activation_function == 'tanh':
+            activations = tf.tanh(activations)
 
         self.activations = activations
 
@@ -147,6 +149,8 @@ class fullyConnectedLayer(object):
         # Apply a non-linearity specified by the user
         if self.__activation_function == 'relu':
             activations = tf.nn.relu(activations)
+        elif self.__activation_function == 'tanh':
+            activations = tf.tanh(activations)
 
         self.activations = activations
 
