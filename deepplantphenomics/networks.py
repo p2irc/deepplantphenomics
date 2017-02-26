@@ -188,20 +188,8 @@ class arabidopsisStrainClassifier(object):
 
         # Convert from class probabilities to labels
         indices = np.argmax(y, axis=1)
-
-        def indexToLabel(idx):
-            if idx == 0:
-                return 'Col-0'
-            elif idx == 1:
-                return 'ein2'
-            elif idx == 2:
-                return 'pgm'
-            elif idx == 3:
-                return 'adh1'
-            elif idx == 4:
-                return 'ctr'
-
-        labels = [indexToLabel(index) for index in indices]
+        mapping = {0: 'Col-0', 1: 'ein2', 2: 'pgm', 3: 'adh1', 4: 'ctr'}
+        labels = [mapping[index] for index in indices]
 
         return labels
 
