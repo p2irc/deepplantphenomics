@@ -1,7 +1,3 @@
-# Neural Network Layers
-
-DPP offers several different layers which can be stacked together to build models.
-
 ## Input Layer
 
 The first layer which needs to be added to the model is an input layer.
@@ -20,7 +16,7 @@ Fully connected layers can be added with a specified output size, corresponding 
 model.add_fully_connected_layer(output_size=64, activation_function='relu')
 ```
 
-The optional `activation_function` parameter specifies the nonlinear activation (or *transfer*) function to apply.
+The optional `activation_function` parameter specifies the nonlinear activation function (or *transfer function*) to apply (`'relu'` or `'tanh'`).
 
 ## Convolutional Layer
 
@@ -39,10 +35,12 @@ Replication padding is used at the boundaries.
 The pooling layer spatially downsamples an input volume using max pooling. These are typically used following convolutional layers to decrease spatial resolution.
 
 ```
-model.add_pooling_layer(kernel_size=3, stride_length=2)
+model.add_pooling_layer(kernel_size=3, stride_length=2, pooling_type='max')
 ```
 
 The `kernel_size` parameter specifies the spatial diameter of the downsampling operation. For example, if max pooling is used with `kernel_size=3`, then the value at a particular position is the maximum of the 3x3 neighbourhood centered at that position.
+
+The optional `pooling_type` parameter specifies the type of pooling operation, which defaults to `'max'` for max pooling but can also be set to `'avg'` for average pooling.
 
 ## DropOut Layer
 
@@ -71,3 +69,5 @@ model.add_output_layer()
 ```
 
 The number of units in this layer corresponds to the number of outputs - for example, the number of regression values, or the number of classes in the classification task.
+
+The `output_size` parameter is optional and only used in rare cases where you want to override the calculated output size - for example, when the number of classes is not known because the dataset has not been loaded yet.

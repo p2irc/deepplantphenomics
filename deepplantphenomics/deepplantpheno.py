@@ -70,7 +70,7 @@ class DPPModel(object):
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
-    __weight_initializer = 'xavier'
+    __weight_initializer = 'normal'
 
     __learning_rate = None
     __lr_decay_factor = None
@@ -138,6 +138,10 @@ class DPPModel(object):
         """Set number of threads for input queue runners and preprocessing tasks"""
         self.__num_threads = num_threads
 
+    def set_processed_images_dir(self, dir):
+        """Set the directory for storing processed images when pre-processing is used"""
+        self.__processed_images_dir = dir
+
     def set_batch_size(self, size):
         """Set the batch size"""
         self.__batch_size = size
@@ -174,9 +178,10 @@ class DPPModel(object):
         """Randomly flip training images vertically"""
         self.__augmentation_flip_vertical = flip
 
-    def set_augmentation_crop(self, resize):
+    def set_augmentation_crop(self, resize, crop_ratio=0.75):
         """Randomly crop images during training, and crop images to center during testing"""
         self.__augmentation_crop = resize
+        self.__crop_amount = crop_ratio
 
     def set_augmentation_brightness_and_contrast(self, contr):
         """Randomly adjust contrast and/or brightness on training images"""
@@ -430,6 +435,11 @@ class DPPModel(object):
         """Returns the network's mean classification (top-1) or regression (L2) accuracy on the entire training set."""
         num_test = self.__total_raw_samples - self.__total_training_samples
         num_batches = int(num_test/self.__batch_size)
+
+        if num_batches == 0:
+            warnings.warn('Less than a batch of training data')
+            exit()
+
         sum = 0.0
 
         for i in range(num_batches):
@@ -551,7 +561,13 @@ class DPPModel(object):
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        total_outputs = np.empty([1, self.__num_regression_outputs])
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+            total_outputs = np.empty([1, self.__last_layer().output_size])
+        elif self.__problem_type == definitions.ProblemType.REGRESSION:
+            total_outputs = np.empty([1, self.__num_regression_outputs])
+        else:
+            warnings.warn('Problem type is not recognized')
+
         num_batches = len(x) / self.__batch_size
         remainder = len(x) % self.__batch_size
 
@@ -639,18 +655,19 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
-    def add_pooling_layer(self, kernel_size, stride_length):
+    def add_pooling_layer(self, kernel_size, stride_length, pooling_type='max'):
         """
         Add a pooling layer to the model.
 
         :param kernel_size: an integer representing the width and height dimensions of the pooling operation
         :param stride_length: convolution stride length
+        :param pooling_type: optional, the type of pooling operation
         """
         self.__num_layers_pool += 1
         layer_name = 'pool%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
 
-        layer = layers.poolingLayer(self.__last_layer().output_size, kernel_size, stride_length)
+        layer = layers.poolingLayer(self.__last_layer().output_size, kernel_size, stride_length, pooling_type)
         self.__log('Outputs: %s' % layer.output_size)
 
         self.__layers.append(layer)
@@ -710,12 +727,14 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
-    def add_output_layer(self, regularization_coefficient=None):
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
         """
         Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
 
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
         """
         self.__log('Adding output layer...')
 
@@ -726,10 +745,15 @@ class DPPModel(object):
         if regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
-        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-            num_out = self.__total_classes
-        elif self.__problem_type == definitions.ProblemType.REGRESSION:
-            num_out = self.__num_regression_outputs
+        if output_size is None:
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                num_out = self.__total_classes
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                num_out = self.__num_regression_outputs
+            else:
+                warnings.warn('Problem type is not recognized')
+        else:
+            num_out = output_size
 
         layer = layers.fullyConnectedLayer('output',
                                            self.__last_layer().output_size,
@@ -772,10 +796,18 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
-    def load_ippn_strain_dataset_from_directory(self, dirname):
+    def load_ippn_classification_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
-        labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        if column == 'treatment':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 2, 0)
+        elif column == 'strain':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        elif column == 'DAG':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 3, 0)
+        else:
+            warnings.warn('Unknown column in IPPN dataset')
+            exit()
 
         image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
 

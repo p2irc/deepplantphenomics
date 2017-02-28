@@ -57,6 +57,8 @@ class convLayer(object):
         # Apply a non-linearity specified by the user
         if self.__activation_function == 'relu':
             activations = tf.nn.relu(activations)
+        elif self.__activation_function == 'tanh':
+            activations = tf.tanh(activations)
 
         self.activations = activations
 
@@ -69,21 +71,30 @@ class poolingLayer(object):
 
     input_size = None
     output_size = None
+    pooling_type= None
 
-    def __init__(self, input_size, kernel_size, stride_length):
+    def __init__(self, input_size, kernel_size, stride_length, pooling_type='max'):
         self.__kernel_size = kernel_size
         self.__stride_length = stride_length
         self.input_size = input_size
+        self.pooling_type = pooling_type
+
         # The pooling operation will reduce the width and height dimensions
         self.output_size = self.input_size
         self.output_size[1] = int(math.floor((self.output_size[1]-kernel_size)/stride_length + 1) + 1)
         self.output_size[2] = int(math.floor((self.output_size[2]-kernel_size)/stride_length + 1) + 1)
 
     def forward_pass(self, x, deterministic):
-        return tf.nn.max_pool(x,
-                              ksize=[1, self.__kernel_size, self.__kernel_size, 1],
-                              strides=[1, self.__stride_length, self.__stride_length, 1],
-                              padding='SAME')
+        if self.pooling_type == 'max':
+            return tf.nn.max_pool(x,
+                                  ksize=[1, self.__kernel_size, self.__kernel_size, 1],
+                                  strides=[1, self.__stride_length, self.__stride_length, 1],
+                                  padding='SAME')
+        elif self.pooling_type == 'avg':
+            return tf.nn.avg_pool(x,
+                                  ksize=[1, self.__kernel_size, self.__kernel_size, 1],
+                                  strides=[1, self.__stride_length, self.__stride_length, 1],
+                                  padding='SAME')
 
 
 class fullyConnectedLayer(object):
@@ -138,6 +149,8 @@ class fullyConnectedLayer(object):
         # Apply a non-linearity specified by the user
         if self.__activation_function == 'relu':
             activations = tf.nn.relu(activations)
+        elif self.__activation_function == 'tanh':
+            activations = tf.tanh(activations)
 
         self.activations = activations
 

@@ -1,7 +1,3 @@
-# Loaders
-
-This page details the different functions which are provided to load images, labels, or both.
-
 ## Image Loaders
 
 ### Load Images from a List of Filenames
@@ -56,12 +52,12 @@ Put your images in a directory, organized with images of each class in a separat
 load_dataset_from_directory_with_auto_labels(dirname)
 ```
 
-### Load Dataset from IPPN for Species Classification
+### Load Dataset from IPPN for Classification
 
-Loads the RGB images and species labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/).
+Loads the RGB images and classification labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/). Depending on the task you want labels for, you can pass the values `strain`, `treatment`, or `DAG` (Days After Germination).
 
 ```
-load_ippn_strain_dataset_from_directory(dirname)
+load_ippn_classification_dataset_from_directory(dirname, column)
 ```
 
 ### Load Dataset from IPPN for Tray Segmentation

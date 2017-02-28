@@ -1,7 +1,3 @@
-# Model Options
-
-This page details the different options which are available in DPP for training.
-
 ## Multithreading Options
 
 ```
@@ -9,6 +5,8 @@ set_number_of_threads()
 ```
 
 Set number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
+
+Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
 
 ## Learning Hyperparameters
 
@@ -34,7 +32,7 @@ Set the initial learning rate. If you're not sure what learning rate is appropri
 set_optimizer()
 ```
 
-Set the optimization algorithm to use. Default is `'Adam'`. Other options are `'SGD'` (Stochastic Gradient Descent), `'Adadelta'`, and `'Adagrad'`, 
+Set the optimization algorithm to use. Default is `'Adam'`. Other options are `'SGD'` (Stochastic Gradient Descent), `'Adadelta'`, and `'Adagrad'`.
 
 ```
 set_learning_rate_decay(decay_factor, epochs_per_decay)
@@ -46,7 +44,7 @@ Manually anneal the learning rate every `epochs_per_decay` epochs. This isn't ne
 set_weight_initializer()
 ```
 
-Set the weight initialization scheme for convolutional and fully connected layers. Default is `'xavier'`, other option is `'normal'`.
+Set the weight initialization scheme for convolutional and fully connected layers. Default is `'normal'`, other option is `'xavier'`. Note that you may experience gradient problems with relu activations and xavier initialization.
 
 ```
 set_problem_type()
@@ -92,6 +90,12 @@ set_resize_images(True)
 
 Up-sample or down-sample images to specified size.
 
+```
+set_processed_images_dir()
+```
+
+Set the location to save processed images when pre-processing is used.
+
 ## Data Augmentation Options
 
 ```
@@ -107,10 +111,10 @@ set_augmentation_flip_vertical(True)
 Randomly flip training images vertically.
 
 ```
-set_augmentation_crop(True)
+set_augmentation_crop(True, crop_ratio)
 ```
 
-Randomly crop images during training, and crop images to center during testing.
+Randomly crop images during training, and crop images to center during testing. The size of the crop is specified by `crop_ratio`, and defaults to `0.75`, or 75% of the original image.
 
 ```
 set_augmentation_brightness_and_contrast(True)

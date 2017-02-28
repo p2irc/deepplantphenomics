@@ -1,5 +1,3 @@
-# Tools
-
 "Tools" are stand-alone functions which provide useful functionality.
 
 ## Rosette Leaf Counter
