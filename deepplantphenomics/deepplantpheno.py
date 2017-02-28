@@ -796,7 +796,7 @@ class DPPModel(object):
         # create batches of input data and labels for training
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
-    def load_ippn_classification_dataset_from_directory(self, dirname, column='strain'):
+    def load_ippn_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
         if column == 'treatment':
@@ -812,14 +812,19 @@ class DPPModel(object):
         image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
 
         self.__total_raw_samples = len(image_files)
-        self.__total_classes = len(set(labels))
 
-        # transform into numerical one-hot labels
-        labels = loaders.string_labels_to_sequential(labels)
-        labels = tf.one_hot(labels, self.__total_classes)
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+            self.__total_classes = len(set(labels))
+
+            # transform into numerical one-hot labels
+            labels = loaders.string_labels_to_sequential(labels)
+            labels = tf.one_hot(labels, self.__total_classes)
+
+            self.__log('Total classes is %d' % self.__total_classes)
+        elif self.__problem_type == definitions.ProblemType.REGRESSION:
+            labels = [[label] for label in labels]
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
-        self.__log('Total classes is %d' % self.__total_classes)
         self.__log('Parsing dataset...')
 
         # split data
