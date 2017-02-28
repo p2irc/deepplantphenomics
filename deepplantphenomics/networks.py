@@ -12,7 +12,7 @@ class boundingBoxRegressor(object):
 
     __dir_name = 'bbox-regressor-lemnatec'
 
-    def __init__(self, height, width):
+    def __init__(self, height, width, batch_size=4):
         """A network which predicts bounding box coordinates via a convolutional neural net"""
 
         # Set original image dimensions
@@ -29,7 +29,7 @@ class boundingBoxRegressor(object):
         self.model.clear_preprocessors()
 
         # Define model hyperparameters
-        self.model.set_batch_size(4)
+        self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
         self.model.set_original_image_dimensions(self.original_img_height, self.original_img_width)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
@@ -82,7 +82,7 @@ class rosetteLeafRegressor(object):
 
     __dir_name = 'rosette-leaf-regressor'
 
-    def __init__(self):
+    def __init__(self, batch_size=8):
         """A network which predicts bounding box coordinates via a convolutional neural net"""
 
         m_path, _ = os.path.split(__file__)
@@ -95,7 +95,7 @@ class rosetteLeafRegressor(object):
         self.model.clear_preprocessors()
 
         # Define model hyperparameters
-        self.model.set_batch_size(8)
+        self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
@@ -130,7 +130,7 @@ class rosetteLeafRegressor(object):
         # round for leaf counts
         y = np.round(y)
 
-        return y
+        return y[:,0]
 
     def shut_down(self):
         self.model.shut_down()
@@ -143,7 +143,7 @@ class arabidopsisStrainClassifier(object):
 
     __dir_name = 'arabidopsis-strain-classifier'
 
-    def __init__(self):
+    def __init__(self, batch_size=32):
         """A network which predicts bounding box coordinates via a convolutional neural net"""
 
         m_path, _ = os.path.split(__file__)
@@ -154,7 +154,7 @@ class arabidopsisStrainClassifier(object):
         self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
-        self.model.set_batch_size(32)
+        self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)

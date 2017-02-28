@@ -6,13 +6,13 @@ class tools(object):
     """
 
     @staticmethod
-    def predict_rosette_leaf_count(x):
+    def predict_rosette_leaf_count(x, batch_size=8):
         """
         Uses a pre-trained network to predict the number of leaves on rosette plants.
         Images are input as a list of filenames.
         """
 
-        net = networks.rosetteLeafRegressor()
+        net = networks.rosetteLeafRegressor(batch_size=batch_size)
 
         predictions = net.forward_pass(x)
 
@@ -21,12 +21,12 @@ class tools(object):
         return predictions
 
     @staticmethod
-    def classify_arabidopsis_strain(x):
+    def classify_arabidopsis_strain(x, batch_size=32):
         """
         Uses a pre-trained network to classify arabidopsis strain
         """
 
-        net = networks.arabidopsisStrainClassifier()
+        net = networks.arabidopsisStrainClassifier(batch_size=batch_size)
 
         predictions = net.forward_pass(x)
 
