@@ -130,7 +130,7 @@ class rosetteLeafRegressor(object):
         # round for leaf counts
         y = np.round(y)
 
-        return y
+        return y[:,0]
 
     def shut_down(self):
         self.model.shut_down()
