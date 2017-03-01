@@ -83,7 +83,7 @@ class rosetteLeafRegressor(object):
     __dir_name = 'rosette-leaf-regressor'
 
     def __init__(self, batch_size=8):
-        """A network which predicts bounding box coordinates via a convolutional neural net"""
+        """A network which predicts rosette leaf count via a convolutional neural net"""
 
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
@@ -144,7 +144,7 @@ class arabidopsisStrainClassifier(object):
     __dir_name = 'arabidopsis-strain-classifier'
 
     def __init__(self, batch_size=32):
-        """A network which predicts bounding box coordinates via a convolutional neural net"""
+        """A network which predicts arabidopsis strain/mutant via a convolutional neural net"""
 
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
