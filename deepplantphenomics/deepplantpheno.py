@@ -53,6 +53,10 @@ class DPPModel(object):
     __train_labels = None
     __test_labels = None
 
+    __all_moderation_features = None
+    __has_moderation = False
+    all_training_filenames = None
+
     # Network internal representation
     __session = None
     __layers = []
@@ -219,6 +223,11 @@ class DPPModel(object):
         self.__image_width_original = image_width
         self.__image_height_original = image_height
 
+    def add_moderation_features(self, moderation_features):
+        """Specify moderation features for examples in the dataset"""
+        self.__has_moderation = True
+        self.__moderation_features = tf.train.input_producer(moderation_features, shuffle=False)
+
     def add_preprocessor(self, selection):
         """Add a data preprocessing step"""
         self.__preprocessing_steps.append(selection)
@@ -247,11 +256,18 @@ class DPPModel(object):
         self.__log('Beginning training...')
 
         # Define batches
-        x, y = tf.train.shuffle_batch([self.__train_images, self.__train_labels],
-                                      batch_size=self.__batch_size,
-                                      num_threads=self.__num_threads,
-                                      capacity=self.__queue_capacity,
-                                      min_after_dequeue=self.__batch_size)
+        if self.__has_moderation:
+            x, y, mod_w = tf.train.shuffle_batch([self.__train_images, self.__train_labels, self.__moderation_features],
+                                                 batch_size=self.__batch_size,
+                                                 num_threads=self.__num_threads,
+                                                 capacity=self.__queue_capacity,
+                                                 min_after_dequeue=self.__batch_size)
+        else:
+            x, y = tf.train.shuffle_batch([self.__train_images, self.__train_labels],
+                                          batch_size=self.__batch_size,
+                                          num_threads=self.__num_threads,
+                                          capacity=self.__queue_capacity,
+                                          min_after_dequeue=self.__batch_size)
 
         # Reshape input to the expected image dimensions
         x = tf.reshape(x, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
@@ -261,7 +277,10 @@ class DPPModel(object):
             y = loaders.label_string_to_tensor(y, self.__batch_size, self.__num_regression_outputs)
 
         # Run the network operations
-        xx = self.forward_pass(x, deterministic=False)
+        if self.__has_moderation:
+            xx = self.forward_pass(x, deterministic=False, moderation_weights=mod_w)
+        else:
+            xx = self.forward_pass(x, deterministic=False)
 
         if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
@@ -437,7 +456,7 @@ class DPPModel(object):
         num_batches = int(num_test/self.__batch_size)
 
         if num_batches == 0:
-            warnings.warn('Less than a batch of training data')
+            warnings.warn('Less than a batch of testing data')
             exit()
 
         sum = 0.0
@@ -537,7 +556,7 @@ class DPPModel(object):
 
             tf.summary.scalar('learning_rate', self.__learning_rate)
 
-    def forward_pass(self, x, deterministic=False):
+    def forward_pass(self, x, deterministic=False, moderation_weights=None):
         """
         Perform a forward pass of the network with an input tensor.
         In general, this is only used when the model is integrated into a Tensorflow graph.
@@ -548,7 +567,10 @@ class DPPModel(object):
         :return: output tensor where the first dimension is batch
         """
         for layer in self.__layers:
-            x = layer.forward_pass(x, deterministic)
+            if isinstance(layer, layers.moderationLayer) and moderation_weights is not None:
+                x = layer.forward_pass(x, deterministic, moderation_weights)
+            else:
+                x = layer.forward_pass(x, deterministic)
 
         return x
 
@@ -621,6 +643,17 @@ class DPPModel(object):
             size = [self.__batch_size, self.__image_height, self.__image_width, self.__image_depth]
 
         layer = layers.inputLayer(size)
+
+        self.__layers.append(layer)
+
+    def add_moderation_layer(self):
+        """Add a moderation layer to the network"""
+        self.__log('Adding moderation layer...')
+
+        reshape = isinstance(self.__last_layer(), layers.convLayer) or isinstance(self.__last_layer(), layers.poolingLayer)
+        feat_size = self.__all_moderation_features.shape[1]
+
+        layer = layers.moderationLayer(self.__last_layer().output_size, feat_size, reshape, self.__batch_size)
 
         self.__layers.append(layer)
 
@@ -828,7 +861,7 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # split data
-        train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+        train_images, train_labels, test_images, test_labels, self.all_training_filenames = loaders.split_raw_data(image_files, labels, self.__train_test_split)
 
         # create batches of input data and labels for training
         self.__parse_dataset(train_images, train_labels, test_images, test_labels)

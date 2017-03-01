@@ -1,5 +1,6 @@
 import tensorflow as tf
 import xml.etree.ElementTree as tree
+import numpy as np
 import random
 import os
 
@@ -21,7 +22,11 @@ def split_raw_data(images, labels, ratio):
     train_images, test_images = tf.dynamic_partition(images, partitions, 2)
     train_labels, test_labels = tf.dynamic_partition(labels, partitions, 2)
 
-    return train_images, train_labels, test_images, test_labels
+    train_image_list = np.array(images)
+    train_image_list = train_image_list[np.array(partitions) == 1]
+    train_image_list = train_image_list.tolist()
+
+    return train_images, train_labels, test_images, test_labels, train_image_list
 
 
 def label_string_to_tensor(x, batch_size, num_outputs):
@@ -87,6 +92,13 @@ def string_labels_to_sequential(labels):
     seq_labels = dict(zip(unique, num_labels))
 
     return [seq_labels[label.strip()] for label in labels]
+
+
+def indices_to_onehot_array(idx):
+    onehot = np.zeros(idx.size(), idx.max+1)
+    onehot[np.arrange(idx.size), idx] = 1
+
+    return onehot
 
 
 def read_single_bounding_box_from_pascal_voc(file_name):

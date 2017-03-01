@@ -3,6 +3,7 @@
 #
 
 import deepplantphenomics as dpp
+import numpy as np
 
 model = dpp.DPPModel(debug=True, save_checkpoints=False, tensorboard_dir='/home/jordan/tensorlogs', report_rate=20)
 
@@ -32,6 +33,22 @@ model.set_augmentation_crop(True)
 # Load dataset
 model.load_ippn_dataset_from_directory('./data/Ara2013-Canon', 'DAG')
 
+# Use the species network to get one-hot class labels for all of the training images
+print('Performing strain classification...')
+
+net = dpp.networks.arabidopsisStrainClassifier()
+raw_species = net.forward_pass(model.all_training_filenames)
+net.shut_down()
+
+# Convert network responses to one-hot matrix
+idx = np.argmax(raw_species, axis=1)
+onehot = np.zeros((idx.size, idx.max()+1))
+onehot[np.arange(idx.size), idx] = 1
+
+model.add_moderation_features(onehot)
+
+print('Done')
+
 # Define a model architecture
 model.add_input_layer()
 
@@ -46,6 +63,8 @@ model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
+
+model.add_moderation_layer()
 
 model.add_fully_connected_layer(output_size=128, activation_function='relu')
 model.add_fully_connected_layer(output_size=128, activation_function='relu')
