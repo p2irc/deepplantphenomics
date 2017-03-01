@@ -127,9 +127,6 @@ class rosetteLeafRegressor(object):
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
 
-        # round for leaf counts
-        y = np.round(y)
-
         return y[:,0]
 
     def shut_down(self):
@@ -186,12 +183,7 @@ class arabidopsisStrainClassifier(object):
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
 
-        # Convert from class probabilities to labels
-        indices = np.argmax(y, axis=1)
-        mapping = {0: 'Col-0', 1: 'ein2', 2: 'pgm', 3: 'adh1', 4: 'ctr'}
-        labels = [mapping[index] for index in indices]
-
-        return labels
+        return y
 
     def shut_down(self):
         self.model.shut_down()
