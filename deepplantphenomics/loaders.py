@@ -13,6 +13,7 @@ def split_raw_data(images, labels, ratio):
     else:
         total_samples = labels.get_shape().as_list()[0]
 
+    # calculate and perform random split
     num_training = int(total_samples * ratio)
 
     partitions = [0] * total_samples
@@ -97,7 +98,7 @@ def string_labels_to_sequential(labels):
 
 def indices_to_onehot_array(idx):
     onehot = np.zeros(idx.size(), idx.max+1)
-    onehot[np.arrange(idx.size), idx] = 1
+    onehot[np.arange(idx.size), idx] = 1
 
     return onehot
 
