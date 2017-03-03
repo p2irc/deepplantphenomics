@@ -55,6 +55,8 @@ class DPPModel(object):
 
     __all_moderation_features = None
     __has_moderation = False
+    __moderation_features_size = None
+
     all_training_filenames = None
 
     # Network internal representation
@@ -226,7 +228,11 @@ class DPPModel(object):
     def add_moderation_features(self, moderation_features):
         """Specify moderation features for examples in the dataset"""
         self.__has_moderation = True
-        self.__moderation_features = tf.train.input_producer(moderation_features, shuffle=False)
+        self.__moderation_features_size = moderation_features.shape[1]
+
+        mod_const = tf.constant(moderation_features)
+        moderation_queue = tf.train.input_producer(mod_const, shuffle=False)
+        self.__all_moderation_features = moderation_queue.dequeue_many(self.__batch_size)
 
     def add_preprocessor(self, selection):
         """Add a data preprocessing step"""
@@ -257,7 +263,7 @@ class DPPModel(object):
 
         # Define batches
         if self.__has_moderation:
-            x, y, mod_w = tf.train.shuffle_batch([self.__train_images, self.__train_labels, self.__moderation_features],
+            x, y, mod_w = tf.train.shuffle_batch([self.__train_images, self.__train_labels, self.__all_moderation_features],
                                                  batch_size=self.__batch_size,
                                                  num_threads=self.__num_threads,
                                                  capacity=self.__queue_capacity,
@@ -494,6 +500,8 @@ class DPPModel(object):
 
         self.__session.close()
 
+        tf.reset_default_graph()
+
     def __get_weights_as_image(self, kernel):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
 
@@ -651,7 +659,7 @@ class DPPModel(object):
         self.__log('Adding moderation layer...')
 
         reshape = isinstance(self.__last_layer(), layers.convLayer) or isinstance(self.__last_layer(), layers.poolingLayer)
-        feat_size = self.__all_moderation_features.shape[1]
+        feat_size = self.__moderation_features_size
 
         layer = layers.moderationLayer(self.__last_layer().output_size, feat_size, reshape, self.__batch_size)
 

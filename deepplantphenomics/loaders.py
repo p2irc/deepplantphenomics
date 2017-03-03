@@ -22,6 +22,7 @@ def split_raw_data(images, labels, ratio):
     train_images, test_images = tf.dynamic_partition(images, partitions, 2)
     train_labels, test_labels = tf.dynamic_partition(labels, partitions, 2)
 
+    # same thing for the train_image_list but this one is a ndarray
     train_image_list = np.array(images)
     train_image_list = train_image_list[np.array(partitions) == 1]
     train_image_list = train_image_list.tolist()
