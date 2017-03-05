@@ -56,8 +56,8 @@ class DPPModel(object):
     __all_moderation_features = None
     __has_moderation = False
     __moderation_features_size = None
-
-    all_training_filenames = None
+    __train_moderation_features = None
+    __test_moderation_features = None
 
     # Network internal representation
     __session = None
@@ -232,10 +232,7 @@ class DPPModel(object):
         """Specify moderation features for examples in the dataset"""
         self.__has_moderation = True
         self.__moderation_features_size = moderation_features.shape[1]
-
-        with self.__graph.as_default():
-            moderation_queue = tf.train.slice_input_producer([moderation_features], shuffle=False)
-            self.__all_moderation_features = moderation_queue[0]
+        self.__all_moderation_features = moderation_features
 
     def add_preprocessor(self, selection):
         """Add a data preprocessing step"""
@@ -267,7 +264,7 @@ class DPPModel(object):
         with self.__graph.as_default():
             # Define batches
             if self.__has_moderation:
-                x, y, mod_w = tf.train.shuffle_batch([self.__train_images, self.__train_labels, self.__all_moderation_features],
+                x, y, mod_w = tf.train.shuffle_batch([self.__train_images, self.__train_labels, self.__train_moderation_features],
                                                      batch_size=self.__batch_size,
                                                      num_threads=self.__num_threads,
                                                      capacity=self.__queue_capacity,
@@ -288,7 +285,7 @@ class DPPModel(object):
 
             # Run the network operations
             if self.__has_moderation:
-                xx = self.forward_pass(x, deterministic=False, moderation_weights=mod_w)
+                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
             else:
                 xx = self.forward_pass(x, deterministic=False)
 
@@ -326,18 +323,28 @@ class DPPModel(object):
                 accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
             # Calculate validation accuracy
-            x_test, y_test = tf.train.shuffle_batch([self.__test_images, self.__test_labels],
-                                                    batch_size=self.__batch_size,
-                                                    num_threads=self.__num_threads,
-                                                    capacity=self.__queue_capacity,
-                                                    min_after_dequeue=self.__batch_size)
+            if self.__has_moderation:
+                x_test, y_test, mod_w_test = tf.train.shuffle_batch([self.__test_images, self.__test_labels, self.__test_moderation_features],
+                                                        batch_size=self.__batch_size,
+                                                        num_threads=self.__num_threads,
+                                                        capacity=self.__queue_capacity,
+                                                        min_after_dequeue=self.__batch_size)
+            else:
+                x_test, y_test = tf.train.shuffle_batch([self.__test_images, self.__test_labels],
+                                                        batch_size=self.__batch_size,
+                                                        num_threads=self.__num_threads,
+                                                        capacity=self.__queue_capacity,
+                                                        min_after_dequeue=self.__batch_size)
 
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
 
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
-            x_test_predicted = self.forward_pass(x_test, deterministic=True)
+            if self.__has_moderation:
+                x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
+            else:
+                x_test_predicted = self.forward_pass(x_test, deterministic=True)
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
@@ -473,13 +480,21 @@ class DPPModel(object):
             sum = 0.0
 
             for i in range(num_batches):
-                x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
-                                                        batch_size=self.__batch_size,
-                                                        num_threads=self.__num_threads)
+                if self.__has_moderation:
+                    x_test, y_test, mod_w_test = tf.train.batch([self.__test_images, self.__test_labels, self.__test_moderation_features],
+                                                            batch_size=self.__batch_size,
+                                                            num_threads=self.__num_threads)
+                else:
+                    x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
+                                                            batch_size=self.__batch_size,
+                                                            num_threads=self.__num_threads)
 
                 x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
-                x_test_predicted = self.forward_pass(x_test, deterministic=True)
+                if self.__has_moderation:
+                    x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
+                else:
+                    x_test_predicted = self.forward_pass(x_test, deterministic=True)
 
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                     test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
@@ -570,7 +585,7 @@ class DPPModel(object):
 
             tf.summary.scalar('learning_rate', self.__learning_rate)
 
-    def forward_pass(self, x, deterministic=False, moderation_weights=None):
+    def forward_pass(self, x, deterministic=False, moderation_features=None):
         """
         Perform a forward pass of the network with an input tensor.
         In general, this is only used when the model is integrated into a Tensorflow graph.
@@ -582,8 +597,8 @@ class DPPModel(object):
         """
         with self.__graph.as_default():
             for layer in self.__layers:
-                if isinstance(layer, layers.moderationLayer) and moderation_weights is not None:
-                    x = layer.forward_pass(x, deterministic, moderation_weights)
+                if isinstance(layer, layers.moderationLayer) and moderation_features is not None:
+                    x = layer.forward_pass(x, deterministic, moderation_features)
                 else:
                     x = layer.forward_pass(x, deterministic)
 
@@ -892,11 +907,13 @@ class DPPModel(object):
 
         # split data
         with self.__graph.as_default():
-            train_images, train_labels, test_images, test_labels, self.all_training_filenames = loaders.split_raw_data(image_files, labels, self.__train_test_split)
-
-        # create batches of input data and labels for training
-        with self.__graph.as_default():
-            self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            if self.__has_moderation:
+                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                    loaders.split_raw_data(image_files, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
+            else:
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_tray_dataset_from_directory(self, dirname):
         """
@@ -1197,7 +1214,7 @@ class DPPModel(object):
 
         return images
 
-    def __parse_dataset(self, train_images, train_labels, test_images, test_labels, image_type='png'):
+    def __parse_dataset(self, train_images, train_labels, test_images, test_labels, image_type='png', train_mf=None, test_mf=None):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self.__graph.as_default():
             # house keeping
@@ -1208,6 +1225,15 @@ class DPPModel(object):
 
             if self.__total_training_samples is None:
                 self.__total_training_samples = int(self.__total_raw_samples * self.__train_test_split)
+
+            # moderation features queues
+            if train_mf is not None:
+                train_moderation_queue = tf.train.slice_input_producer([train_mf], shuffle=False)
+                self.__train_moderation_features = tf.cast(train_moderation_queue[0], tf.float32)
+
+            if test_mf is not None:
+                test_moderation_queue = tf.train.slice_input_producer([test_mf], shuffle=False)
+                self.__test_moderation_features = tf.cast(test_moderation_queue[0], tf.float32)
 
             # calculate number of batches to run
             batches_per_epoch = self.__total_training_samples / float(self.__batch_size)

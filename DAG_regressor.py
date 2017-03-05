@@ -11,7 +11,7 @@ model = dpp.DPPModel(debug=True, save_checkpoints=False, tensorboard_dir='/home/
 channels = 3
 
 # Setup and hyperparameters
-model.set_batch_size(8)
+model.set_batch_size(16)
 model.set_number_of_threads(8)
 model.set_image_dimensions(128, 128, channels)
 model.set_resize_images(True)
@@ -19,8 +19,8 @@ model.set_resize_images(True)
 model.set_problem_type('regression')
 model.set_num_regression_outputs(1)
 model.set_train_test_split(0.8)
-model.set_regularization_coefficient(0.01)
-model.set_learning_rate(0.0001)
+model.set_regularization_coefficient(0.04)
+model.set_learning_rate(0.00001)
 model.set_weight_initializer('normal')
 model.set_maximum_training_epochs(1000)
 
@@ -30,24 +30,192 @@ model.set_augmentation_flip_horizontal(True)
 model.set_augmentation_flip_vertical(True)
 model.set_augmentation_crop(True)
 
-# Load dataset
-model.load_ippn_dataset_from_directory('./data/Ara2013-Canon', 'DAG')
-
 # Use the species network to get one-hot class labels for all of the training images
-print('Performing strain classification...')
+# print('Performing strain classification...')
+#
+# net = dpp.networks.arabidopsisStrainClassifier()
+# raw_species = net.forward_pass(model.all_training_filenames)
+# net.shut_down()
+#
+# # Convert network responses to one-hot matrix
+# idx = np.argmax(raw_species, axis=1)
+# onehot = np.zeros((idx.size, idx.max()+1))
+# onehot[np.arange(idx.size), idx] = 1
+#
+# print('Done')
 
-net = dpp.networks.arabidopsisStrainClassifier()
-raw_species = net.forward_pass(model.all_training_filenames)
-net.shut_down()
+# LOL jk here it is hardcoded
 
-# Convert network responses to one-hot matrix
-idx = np.argmax(raw_species, axis=1)
-onehot = np.zeros((idx.size, idx.max()+1))
-onehot[np.arange(idx.size), idx] = 1
+onehot = np.array([[ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  0,  1,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  1,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  0,  1,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  0,  0,  0,  1],
+ [ 1,  0,  0,  0,  0],
+ [ 0,  1,  0,  0,  0],
+ [ 0,  0,  0,  1,  0],
+ [ 0,  0,  1,  0,  0]])
 
 model.add_moderation_features(onehot)
 
-print('Done')
+# Load dataset
+model.load_ippn_dataset_from_directory('./data/Ara2013-Canon', 'DAG')
 
 # Define a model architecture
 model.add_input_layer()

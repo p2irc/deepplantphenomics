@@ -228,6 +228,6 @@ class moderationLayer(object):
             x = tf.reshape(x, [self.__batch_size, -1])
 
         # Append the moderating features onto the vector
-        x = tf.concat([x, features], 0)
+        x = tf.concat(1, [x, features])
 
         return x

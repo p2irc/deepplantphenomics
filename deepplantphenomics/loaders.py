@@ -5,7 +5,7 @@ import random
 import os
 
 
-def split_raw_data(images, labels, ratio):
+def split_raw_data(images, labels, ratio, moderation_features=None):
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         labels = [' '.join(map(str, label)) for label in labels]
@@ -23,12 +23,12 @@ def split_raw_data(images, labels, ratio):
     train_images, test_images = tf.dynamic_partition(images, partitions, 2)
     train_labels, test_labels = tf.dynamic_partition(labels, partitions, 2)
 
-    # same thing for the train_image_list but this one is a ndarray
-    train_image_list = np.array(images)
-    train_image_list = train_image_list[np.array(partitions) == 1]
-    train_image_list = train_image_list.tolist()
+    if moderation_features is not None:
+        train_mf, test_mf = tf.dynamic_partition(moderation_features, partitions, 2)
 
-    return train_images, train_labels, test_images, test_labels, train_image_list
+        return train_images, train_labels, test_images, test_labels, train_mf, test_mf
+    else:
+        return train_images, train_labels, test_images, test_labels
 
 
 def label_string_to_tensor(x, batch_size, num_outputs):
@@ -97,7 +97,7 @@ def string_labels_to_sequential(labels):
 
 
 def indices_to_onehot_array(idx):
-    onehot = np.zeros(idx.size(), idx.max+1)
+    onehot = np.zeros((idx.size, idx.max()+1))
     onehot[np.arange(idx.size), idx] = 1
 
     return onehot
