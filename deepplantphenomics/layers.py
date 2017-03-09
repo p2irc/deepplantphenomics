@@ -197,7 +197,10 @@ class dropoutLayer(object):
 
     def forward_pass(self, x, deterministic):
         if deterministic:
-            return x * self.p
+            # This breaks regressors in test
+            # return x * self.p
+            
+            return x
         else:
             return tf.nn.dropout(x, self.p)
 

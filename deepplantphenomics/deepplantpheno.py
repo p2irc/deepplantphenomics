@@ -351,7 +351,8 @@ class DPPModel(object):
                 test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
                 test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                test_cost = self.__batch_mean_l2_loss(tf.sub(x_test_predicted, y_test))
+                test_batch_loss = tf.sub(x_test_predicted, y_test)
+                test_cost = self.__batch_mean_l2_loss(test_batch_loss)
 
             full_test_op = self.compute_full_test_accuracy()
 
@@ -374,6 +375,7 @@ class DPPModel(object):
                 # Summaries for regression
                 if self.__problem_type == definitions.ProblemType.REGRESSION:
                     tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
+                    tf.summary.histogram('test/batch_loss', test_batch_loss, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
@@ -657,7 +659,7 @@ class DPPModel(object):
     def __batch_mean_l2_loss(self, x):
         """Given a batch of vectors, calculates the mean per-vector L2 norm"""
         with self.__graph.as_default():
-            agg = tf.map_fn(lambda ex: tf.nn.l2_loss(ex), x)
+            agg = tf.map_fn(lambda ex: tf.sqrt(tf.reduce_sum(ex ** 2)), x)
             mean = tf.reduce_mean(agg)
 
         return mean
