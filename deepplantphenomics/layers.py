@@ -197,6 +197,40 @@ class dropoutLayer(object):
 
     def forward_pass(self, x, deterministic):
         if deterministic:
-            return x * self.p
+            # This breaks regressors in test
+            # return x * self.p
+
+            return x
         else:
             return tf.nn.dropout(x, self.p)
+
+
+class moderationLayer(object):
+    """Layer for fusing moderating data into the input vector"""
+    input_size = None
+    output_size = None
+    __reshape = None
+    __batch_size = None
+
+    def __init__(self, input_size, feature_size, reshape, batch_size):
+        self.input_size = input_size
+        self.__reshape = reshape
+        self.__batch_size = batch_size
+
+        # compute the vectorized size for weights if we will need to reshape it
+        if reshape:
+            vec_size = input_size[1] * input_size[2] * input_size[3]
+        else:
+            vec_size = input_size
+
+        self.output_size = vec_size + feature_size
+
+    def forward_pass(self, x, deterministic, features):
+        # Reshape into a column vector if necessary
+        if self.__reshape is True:
+            x = tf.reshape(x, [self.__batch_size, -1])
+
+        # Append the moderating features onto the vector
+        x = tf.concat(1, [x, features])
+
+        return x

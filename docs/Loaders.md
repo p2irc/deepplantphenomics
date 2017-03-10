@@ -52,12 +52,12 @@ Put your images in a directory, organized with images of each class in a separat
 load_dataset_from_directory_with_auto_labels(dirname)
 ```
 
-### Load Dataset from IPPN for Classification
+### Load Dataset from IPPN for Classification or Regression
 
 Loads the RGB images and classification labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/). Depending on the task you want labels for, you can pass the values `strain`, `treatment`, or `DAG` (Days After Germination).
 
 ```
-load_ippn_classification_dataset_from_directory(dirname, column)
+load_ippn_dataset_from_directory(dirname, column)
 ```
 
 ### Load Dataset from IPPN for Tray Segmentation
