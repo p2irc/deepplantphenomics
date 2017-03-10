@@ -35,6 +35,7 @@ class boundingBoxRegressor(object):
         self.model.set_resize_images(True)
 
         self.model.set_problem_type('regression')
+        self.model.set_num_regression_outputs(4)
 
         # Define a model architecture
         self.model.add_input_layer()

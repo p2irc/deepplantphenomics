@@ -900,8 +900,9 @@ class DPPModel(object):
             self.__total_classes = len(set(labels))
 
             # transform into numerical one-hot labels
-            labels = loaders.string_labels_to_sequential(labels)
-            labels = tf.one_hot(labels, self.__total_classes)
+            with self.__graph.as_default():
+                labels = loaders.string_labels_to_sequential(labels)
+                labels = tf.one_hot(labels, self.__total_classes)
 
             self.__log('Total classes is %d' % self.__total_classes)
         elif self.__problem_type == definitions.ProblemType.REGRESSION:
@@ -1124,13 +1125,15 @@ class DPPModel(object):
         # prepare images for training (if there are any labels loaded)
 
         if self.__all_labels is not None:
+            labels = self.__all_labels
+
             with self.__graph.as_default():
                 if self.__has_moderation:
                     train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                        loaders.split_raw_data(image_files, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                        loaders.split_raw_data(images, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
                     self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
                 else:
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels, self.__train_test_split)
                     self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_images_from_list(self, image_files):
@@ -1155,13 +1158,10 @@ class DPPModel(object):
 
                 if self.__has_moderation:
                     train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                        loaders.split_raw_data(image_files, labels, self.__train_test_split,
-                                               moderation_features=self.__all_moderation_features)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                         test_mf=test_mf)
+                        loaders.split_raw_data(images, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
                 else:
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
-                                                                                                  self.__train_test_split)
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels, self.__train_test_split)
                     self.__parse_dataset(train_images, train_labels, test_images, test_labels)
         else:
             with self.__graph.as_default():
