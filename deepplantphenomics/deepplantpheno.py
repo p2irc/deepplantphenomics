@@ -870,13 +870,14 @@ class DPPModel(object):
         self.__log('Total classes is %d' % self.__total_classes)
         self.__log('Parsing dataset...')
 
-        # split data
         with self.__graph.as_default():
-            train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
-
-        # create batches of input data and labels for training
-        with self.__graph.as_default():
-            self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            if self.__has_moderation:
+                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                    loaders.split_raw_data(image_files, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
+            else:
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
@@ -948,13 +949,14 @@ class DPPModel(object):
 
         # prepare images for training (if there are any labels loaded)
         if self.__all_labels is not None:
-            # split data
             with self.__graph.as_default():
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
+                # split data
+                with self.__graph.as_default():
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
 
-            # create batches of input data and labels for training
-            with self.__graph.as_default():
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+                # create batches of input data and labels for training
+                with self.__graph.as_default():
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
@@ -971,12 +973,8 @@ class DPPModel(object):
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
-        # split data
         with self.__graph.as_default():
             train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
-
-        # create batches of input data and labels for training
-        with self.__graph.as_default():
             self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_inra_dataset_from_directory(self, dirname):
@@ -1003,11 +1001,13 @@ class DPPModel(object):
 
         # split data
         with self.__graph.as_default():
-            train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
-
-        # create batches of input data and labels for training
-        with self.__graph.as_default():
-            self.__parse_dataset(train_images, train_labels, test_images, test_labels, image_type='jpg')
+            if self.__has_moderation:
+                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                    loaders.split_raw_data(image_files, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
+            else:
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_cifar10_dataset_from_directory(self, dirname):
         """
@@ -1075,11 +1075,13 @@ class DPPModel(object):
 
         # split data
         with self.__graph.as_default():
-            train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
-
-        # create batches of input data and labels for training
-        with self.__graph.as_default():
-            self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            if self.__has_moderation:
+                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                    loaders.split_raw_data(image_files, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
+            else:
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_lemnatec_images_from_directory(self, dirname):
         """
@@ -1120,14 +1122,16 @@ class DPPModel(object):
         images = self.__apply_preprocessing(sorted_paths)
 
         # prepare images for training (if there are any labels loaded)
-        if self.__all_labels is not None:
-            # split data
-            with self.__graph.as_default():
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
 
-            # create batches of input data and labels for training
+        if self.__all_labels is not None:
             with self.__graph.as_default():
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+                if self.__has_moderation:
+                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                        loaders.split_raw_data(image_files, labels, self.__train_test_split, moderation_features=self.__all_moderation_features)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
+                else:
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_images_from_list(self, image_files):
         """
@@ -1147,11 +1151,18 @@ class DPPModel(object):
         if self.__all_labels is not None:
             # split data
             with self.__graph.as_default():
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
+                labels = self.__all_labels
 
-            # create batches of input data and labels for training
-            with self.__graph.as_default():
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+                if self.__has_moderation:
+                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                        loaders.split_raw_data(image_files, labels, self.__train_test_split,
+                                               moderation_features=self.__all_moderation_features)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
+                                         test_mf=test_mf)
+                else:
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
+                                                                                                  self.__train_test_split)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
         else:
             with self.__graph.as_default():
                 self.__parse_images(images)
