@@ -375,7 +375,9 @@ class DPPModel(object):
                 # Summaries for regression
                 if self.__problem_type == definitions.ProblemType.REGRESSION:
                     tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
-                    tf.summary.histogram('test/batch_loss', test_batch_loss, collections=['custom_summaries'])
+
+                    if test_batch_loss.get_shape().as_list()[1] == 1:
+                        tf.summary.histogram('test/batch_loss', test_batch_loss, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:

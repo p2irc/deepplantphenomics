@@ -199,7 +199,7 @@ class dropoutLayer(object):
         if deterministic:
             # This breaks regressors in test
             # return x * self.p
-            
+
             return x
         else:
             return tf.nn.dropout(x, self.p)
