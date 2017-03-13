@@ -107,19 +107,16 @@ class rosetteLeafRegressor(object):
         # Define a model architecture
         self.model.add_input_layer()
 
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 3, 16], stride_length=1, activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 3, 32], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 16, 32], stride_length=1, activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu')
-        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
         self.model.add_output_layer()

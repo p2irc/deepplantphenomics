@@ -19,8 +19,8 @@ model.set_problem_type('regression')
 model.set_num_regression_outputs(1)
 model.set_train_test_split(0.8)
 model.set_learning_rate(0.0001)
-model.set_weight_initializer('normal')
-model.set_maximum_training_epochs(1000)
+model.set_weight_initializer('xavier')
+model.set_maximum_training_epochs(500)
 
 # Augmentation options
 model.set_augmentation_brightness_and_contrast(True)
@@ -34,19 +34,16 @@ model.load_ippn_leaf_count_dataset_from_directory('./data/Ara2013-Canon')
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[3, 3, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 16, 32], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
-model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-model.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_output_layer()
