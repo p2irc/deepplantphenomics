@@ -1,10 +1,11 @@
 import tensorflow as tf
 import xml.etree.ElementTree as tree
+import numpy as np
 import random
 import os
 
 
-def split_raw_data(images, labels, ratio):
+def split_raw_data(images, labels, ratio, moderation_features=None):
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         labels = [' '.join(map(str, label)) for label in labels]
@@ -12,6 +13,7 @@ def split_raw_data(images, labels, ratio):
     else:
         total_samples = labels.get_shape().as_list()[0]
 
+    # calculate and perform random split
     num_training = int(total_samples * ratio)
 
     partitions = [0] * total_samples
@@ -21,7 +23,12 @@ def split_raw_data(images, labels, ratio):
     train_images, test_images = tf.dynamic_partition(images, partitions, 2)
     train_labels, test_labels = tf.dynamic_partition(labels, partitions, 2)
 
-    return train_images, train_labels, test_images, test_labels
+    if moderation_features is not None:
+        train_mf, test_mf = tf.dynamic_partition(moderation_features, partitions, 2)
+
+        return train_images, train_labels, test_images, test_labels, train_mf, test_mf
+    else:
+        return train_images, train_labels, test_images, test_labels
 
 
 def label_string_to_tensor(x, batch_size, num_outputs):
@@ -87,6 +94,13 @@ def string_labels_to_sequential(labels):
     seq_labels = dict(zip(unique, num_labels))
 
     return [seq_labels[label.strip()] for label in labels]
+
+
+def indices_to_onehot_array(idx):
+    onehot = np.zeros((idx.size, idx.max()+1))
+    onehot[np.arange(idx.size), idx] = 1
+
+    return onehot
 
 
 def read_single_bounding_box_from_pascal_voc(file_name):

@@ -29,7 +29,7 @@ model.set_augmentation_flip_vertical(True)
 model.set_augmentation_crop(True)
 
 # Load all VIS images from a Lemnatec image repository
-model.load_ippn_classification_dataset_from_directory('./data/Ara2013-Canon', column='strain')
+model.load_ippn_dataset_from_directory('./data/Ara2013-Canon', column='strain')
 
 # Define a model architecture
 model.add_input_layer()
