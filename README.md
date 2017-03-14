@@ -26,14 +26,14 @@ For example, using a few lines of code you can easily use your data to train a c
 
 - Several pre-made networks for common plant phenotyping tasks.
 - Automatic batching and input pipeline.
-- Loaders for some popular plant phenotyping datasets.
+    - Loaders for some popular plant phenotyping datasets.
 - Automatic segmentation using PlantCV and bounding box regression.
 - Multi-threading for pre-processing tasks.
-- Many ready-to-use neural network layers.
 - Tensorboard integration.
-- Support for both classification and regression problems.
-- Data augmentation options.
 - Easy-to-use API for building new models.
+    - Support for both classification and regression problems.
+    - Data augmentation options.
+    - Many ready-to-use neural network layers.
 
 ## Example Usage
 
