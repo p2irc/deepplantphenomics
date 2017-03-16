@@ -1,8 +1,8 @@
-import layers
-import loaders
-import preprocessing
-import definitions
-import networks
+from . import layers
+from . import loaders
+from . import preprocessing
+from . import definitions
+from . import networks
 import tensorflow as tf
 import numpy as np
 from joblib import Parallel, delayed
