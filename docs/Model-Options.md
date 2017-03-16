@@ -41,6 +41,12 @@ set_learning_rate_decay(decay_factor, epochs_per_decay)
 Manually anneal the learning rate every `epochs_per_decay` epochs. This isn't necessary for gradient-adaptive optimizers like `'Adam'`.
 
 ```
+set_regularization_coefficient()
+```
+
+Set the coefficient for L2 weight decay (regularization).
+
+```
 set_weight_initializer()
 ```
 
