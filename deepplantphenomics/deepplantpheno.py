@@ -952,12 +952,10 @@ class DPPModel(object):
         if self.__all_labels is not None:
             with self.__graph.as_default():
                 # split data
-                with self.__graph.as_default():
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
 
                 # create batches of input data and labels for training
-                with self.__graph.as_default():
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
