@@ -303,7 +303,7 @@ class DPPModel(object):
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                cost = self.__batch_mean_l2_loss(tf.sub(xx, y))
+                cost = self.__batch_mean_l2_loss(tf.subtract(xx, y))
 
             if self.__optimizer == 'Adagrad':
                 optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -351,7 +351,7 @@ class DPPModel(object):
                 test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
                 test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                test_batch_loss = tf.sub(x_test_predicted, y_test)
+                test_batch_loss = tf.subtract(x_test_predicted, y_test)
                 test_cost = self.__batch_mean_l2_loss(test_batch_loss)
 
             full_test_op = self.compute_full_test_accuracy()
@@ -509,7 +509,7 @@ class DPPModel(object):
                     sum = sum + test_acc
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
                     y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
-                    test_loss = self.__batch_mean_l2_loss(tf.sub(x_test_predicted, y_test))
+                    test_loss = self.__batch_mean_l2_loss(tf.subtract(x_test_predicted, y_test))
 
                     sum = sum + test_loss
 
@@ -540,9 +540,9 @@ class DPPModel(object):
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
-            x3 = tf.reshape(x2, tf.pack([grid_X, Y * grid_Y, X, 3]))
+            x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, 3]))
             x4 = tf.transpose(x3, (0, 2, 1, 3))
-            x5 = tf.reshape(x4, tf.pack([1, X * grid_X, Y * grid_Y, 3]))
+            x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, 3]))
             x6 = tf.transpose(x5, (2, 1, 3, 0))
             x7 = tf.transpose(x6, (3, 0, 1, 2))
 
