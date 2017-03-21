@@ -1173,6 +1173,47 @@ class DPPModel(object):
 
         self.__all_labels, self.__all_ids = loaders.read_csv_multi_labels_and_ids(filepath, id_column)
 
+    def load_images_with_ids_from_directory(self, dir):
+        """Loads images from a directroy, relating them to labels by the IDs which were loaded from a CSV file"""
+
+        # Load all images in directory
+        image_files = [os.path.join(dir, name) for name in os.listdir(dir) if
+                  os.path.isfile(os.path.join(dir, name)) & name.endswith('.png')]
+
+        # Put the image files in the order of the IDs (if there are any labels loaded)
+        sorted_paths = []
+
+        if self.__all_labels is not None:
+            for image_id in self.__all_ids:
+                path = filter(lambda item: item.endswith(image_id), [p for p in image_files])
+                assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
+                sorted_paths.append(path[0])
+        else:
+            sorted_paths = image_files
+
+        self.__total_raw_samples = len(sorted_paths)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        # do preprocessing
+        images = self.__apply_preprocessing(sorted_paths)
+
+        # prepare images for training (if there are any labels loaded)
+        if self.__all_labels is not None:
+            labels = self.__all_labels
+
+            with self.__graph.as_default():
+                if self.__has_moderation:
+                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                        loaders.split_raw_data(images, labels, self.__train_test_split,
+                                               moderation_features=self.__all_moderation_features)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
+                                         test_mf=test_mf)
+                else:
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels, self.__train_test_split)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+
     def load_pascal_voc_labels_from_directory(self, dir):
         """Loads single per-image bounding boxes from XML files in Pascal VOC format."""
 
