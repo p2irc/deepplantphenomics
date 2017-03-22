@@ -301,7 +301,8 @@ class DPPModel(object):
 
             # Define cost function and set optimizer
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
+                sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+                cost = tf.reduce_mean(tf.concat([sf_logits, l2_cost], axis=0))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 cost = self.__batch_mean_l2_loss(tf.subtract(xx, y))
 
