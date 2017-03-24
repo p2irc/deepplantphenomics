@@ -1,8 +1,8 @@
-import layers
-import loaders
-import preprocessing
-import definitions
-import networks
+from . import layers
+from . import loaders
+from . import preprocessing
+from . import definitions
+from . import networks
 import tensorflow as tf
 import numpy as np
 from joblib import Parallel, delayed
@@ -301,9 +301,10 @@ class DPPModel(object):
 
             # Define cost function and set optimizer
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                cost = tf.reduce_mean(tf.concat(0, [tf.nn.sparse_softmax_cross_entropy_with_logits(xx, tf.argmax(y, 1)), l2_cost]))
+                sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+                cost = tf.reduce_mean(tf.concat([sf_logits, l2_cost], axis=0))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                cost = self.__batch_mean_l2_loss(tf.sub(xx, y))
+                cost = self.__batch_mean_l2_loss(tf.subtract(xx, y))
 
             if self.__optimizer == 'Adagrad':
                 optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -351,7 +352,7 @@ class DPPModel(object):
                 test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
                 test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                test_batch_loss = tf.sub(x_test_predicted, y_test)
+                test_batch_loss = tf.subtract(x_test_predicted, y_test)
                 test_cost = self.__batch_mean_l2_loss(test_batch_loss)
 
             full_test_op = self.compute_full_test_accuracy()
@@ -509,7 +510,7 @@ class DPPModel(object):
                     sum = sum + test_acc
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
                     y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
-                    test_loss = self.__batch_mean_l2_loss(tf.sub(x_test_predicted, y_test))
+                    test_loss = self.__batch_mean_l2_loss(tf.subtract(x_test_predicted, y_test))
 
                     sum = sum + test_loss
 
@@ -540,9 +541,9 @@ class DPPModel(object):
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
-            x3 = tf.reshape(x2, tf.pack([grid_X, Y * grid_Y, X, 3]))
+            x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, 3]))
             x4 = tf.transpose(x3, (0, 2, 1, 3))
-            x5 = tf.reshape(x4, tf.pack([1, X * grid_X, Y * grid_Y, 3]))
+            x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, 3]))
             x6 = tf.transpose(x5, (2, 1, 3, 0))
             x7 = tf.transpose(x6, (3, 0, 1, 2))
 
@@ -952,12 +953,10 @@ class DPPModel(object):
         if self.__all_labels is not None:
             with self.__graph.as_default():
                 # split data
-                with self.__graph.as_default():
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels, self.__train_test_split)
 
                 # create batches of input data and labels for training
-                with self.__graph.as_default():
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
@@ -1174,6 +1173,47 @@ class DPPModel(object):
         """
 
         self.__all_labels, self.__all_ids = loaders.read_csv_multi_labels_and_ids(filepath, id_column)
+
+    def load_images_with_ids_from_directory(self, dir):
+        """Loads images from a directroy, relating them to labels by the IDs which were loaded from a CSV file"""
+
+        # Load all images in directory
+        image_files = [os.path.join(dir, name) for name in os.listdir(dir) if
+                  os.path.isfile(os.path.join(dir, name)) & name.endswith('.png')]
+
+        # Put the image files in the order of the IDs (if there are any labels loaded)
+        sorted_paths = []
+
+        if self.__all_labels is not None:
+            for image_id in self.__all_ids:
+                path = filter(lambda item: item.endswith(image_id), [p for p in image_files])
+                assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
+                sorted_paths.append(path[0])
+        else:
+            sorted_paths = image_files
+
+        self.__total_raw_samples = len(sorted_paths)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        # do preprocessing
+        images = self.__apply_preprocessing(sorted_paths)
+
+        # prepare images for training (if there are any labels loaded)
+        if self.__all_labels is not None:
+            labels = self.__all_labels
+
+            with self.__graph.as_default():
+                if self.__has_moderation:
+                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                        loaders.split_raw_data(images, labels, self.__train_test_split,
+                                               moderation_features=self.__all_moderation_features)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
+                                         test_mf=test_mf)
+                else:
+                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels, self.__train_test_split)
+                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_pascal_voc_labels_from_directory(self, dir):
         """Loads single per-image bounding boxes from XML files in Pascal VOC format."""

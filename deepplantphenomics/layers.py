@@ -197,9 +197,6 @@ class dropoutLayer(object):
 
     def forward_pass(self, x, deterministic):
         if deterministic:
-            # This breaks regressors in test
-            # return x * self.p
-
             return x
         else:
             return tf.nn.dropout(x, self.p)
@@ -231,6 +228,6 @@ class moderationLayer(object):
             x = tf.reshape(x, [self.__batch_size, -1])
 
         # Append the moderating features onto the vector
-        x = tf.concat(1, [x, features])
+        x = tf.concat([x, features], axis=1)
 
         return x

@@ -1,4 +1,4 @@
-import loaders
+from . import loaders
 import numpy as np
 import plantcv as pcv
 import os
