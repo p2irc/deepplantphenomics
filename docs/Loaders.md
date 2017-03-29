@@ -1,5 +1,7 @@
 ## Image Loaders
 
+These loaders can be used to load images, typically after you have already loaded labels for those images.
+
 ### Load Images from a List of Filenames
 
 Load images from a Python list of filename strings.
@@ -16,11 +18,23 @@ Loads the side-view VIS images from a collection of images provided by a Lemnate
 load_lemnatec_images_from_directory(dirname)
 ```
 
+### Load Images for Pre-specified IDs from Directory
+
+If you have specified a list of files (for example, using the ID column in `load_multiple_labels_from_csv()`), then you can use this function to load those images from a directory. 
+
+```
+load_images_with_ids_from_directory(dirname)
+```
+
 ## Label Loaders
+
+These functions load labels for the dataset, in multiple formats.
 
 ### Load Multiple Labels from a CSV File
 
-Load multiple labels from a CSV file, for instance values for regression. Parameter `id_column` (optional, zero-indexed, default 0) is the column number specifying the image file name.
+Load one or more labels per instance from a CSV file, for instance, values for regression. Parameter `id_column` (optional, zero-indexed, default 0) is the column number specifying the image file name.
+
+Following this step, you can proceed to load the images specified by filename in `id_column` with `load_images_with_ids_from_directory(dirname)`
 
 ```
 load_multiple_labels_from_csv(filepath, id_column)
@@ -34,7 +48,9 @@ Loads single per-image bounding boxes from XML files in Pascal VOC format. The c
 load_pascal_voc_labels_from_directory(dirname)
 ```
 
-## Dataset (Image+Labels) Loaders
+## Dataset Loaders
+
+These functions load both images and labels simultaneously.
 
 ### Load Dataset From Directory With CSV Labels
 
@@ -78,7 +94,7 @@ load_ippn_leaf_count_dataset_from_directory(dirname)
 
 ### Load Dataset from INRA
 
-Loads a dataset downloaded from INRA.
+Loads an arabidopsis dataset downloaded from INRA.
 
 ```
 load_inra_dataset_from_directory(dirname)
