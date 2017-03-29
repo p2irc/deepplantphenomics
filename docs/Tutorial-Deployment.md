@@ -22,9 +22,7 @@ class rosetteLeafRegressor(object):
 
         import deepplantpheno as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved=dir_name)
-
-        self.model.clear_preprocessors()
+        self.model = dpp.DPPModel(debug=False, load_from_saved=self.__dir_name)
 
         # Define model hyperparameters
         self.model.set_batch_size(batch_size)
@@ -67,7 +65,7 @@ Note that the `__init__()` function builds the full network, exactly the same as
 The important line here is:
 
 ```python
-self.model = dpp.DPPModel(debug=False, load_from_saved=dir_name)
+self.model = dpp.DPPModel(debug=False, load_from_saved=self.__dir_name)
 ```
 
 The parameter `debug=False` suppresses any console output when we use this class. The parameter `load_from_saved=dir_name` loads all of the parameters from the trained network, so the model is exactly as it was when we finished training.
@@ -94,3 +92,5 @@ for k,v in zip(images, leaf_counts):
     
 print('Done')
 ```
+
+It's worth noting that if you are performing inference on the same data you trained on, the performance is not representative as you are including images that the model has already fit.

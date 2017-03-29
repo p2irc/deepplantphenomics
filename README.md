@@ -87,7 +87,6 @@ model.begin_training()
     - [PlantCV](http://plantcv.danforthcenter.org/)
 3. `git clone https://github.com/jubbens/deepplantphenomics.git` 
 4. `python setup.py install`
-5. Test installation using `python -c 'import deepplantphenomics'`
 
 ## Contributing
 
