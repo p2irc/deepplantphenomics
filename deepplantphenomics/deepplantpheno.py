@@ -397,11 +397,22 @@ class DPPModel(object):
                 self.__initialize_queue_runners()
 
                 self.__log('Computing total test accuracy/regression loss...')
-                tt_error = self.__session.run(full_test_op)
+
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    self.__log('Average test accuracy: {:.5f}'.format(tt_error))
+                    mean = self.__session.run(full_test_op)
+
+                    self.__log('Average test accuracy: {:.5f}'.format(mean))
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                    self.__log('Average test loss: {:.5f}'.format(tt_error))
+                    mean, std, abs_mean, abs_std, min, max, hist = self.__session.run(full_test_op)
+
+                    self.__log('Mean loss: {}'.format(mean))
+                    self.__log('Loss standard deviation: {}'.format(std))
+                    self.__log('Mean absolute loss: {}'.format(abs_mean))
+                    self.__log('Absolute loss standard deviation: {}'.format(abs_std))
+                    self.__log('Min error: {}'.format(min))
+                    self.__log('Max error: {}'.format(max))
+                    self.__log('Histogram of L2 losses:')
+                    self.__log(hist)
 
                 self.shut_down()
             else:
@@ -464,25 +475,38 @@ class DPPModel(object):
                 self.save_state()
 
                 self.__log('Computing total test accuracy/regression loss...')
-                tt_error = self.__session.run(full_test_op)
+
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    self.__log('Average test accuracy: {:.5f}'.format(tt_error))
+                    mean = self.__session.run(full_test_op)
+
+                    self.__log('Average test accuracy: {:.5f}'.format(mean))
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                    self.__log('Average test loss: {:.5f}'.format(tt_error))
+                    mean, std, abs_mean, abs_std, min, max, hist = self.__session.run(full_test_op)
+
+                    self.__log('Mean loss: {}'.format(mean))
+                    self.__log('Loss standard deviation: {}'.format(std))
+                    self.__log('Mean absolute loss: {}'.format(abs_mean))
+                    self.__log('Absolute loss standard deviation: {}'.format(abs_std))
+                    self.__log('Min error: {}'.format(min))
+                    self.__log('Max error: {}'.format(max))
+                    self.__log('Histogram of L2 losses:')
+                    self.__log(hist)
 
                 self.shut_down()
 
     def compute_full_test_accuracy(self):
-        """Returns the network's mean classification (top-1) or regression (L2) accuracy on the entire training set."""
+        """Returns statistics of the test losses depending on the type of task"""
+
         with self.__graph.as_default():
             num_test = self.__total_raw_samples - self.__total_training_samples
-            num_batches = int(num_test/self.__batch_size)
+            num_batches = int(num_test/self.__batch_size)+1
 
             if num_batches == 0:
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
             sum = 0.0
+            all_losses = np.empty(shape=(4, 1))
 
             for i in range(num_batches):
                 if self.__has_moderation:
@@ -510,11 +534,27 @@ class DPPModel(object):
                     sum = sum + test_acc
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
                     y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
-                    test_loss = self.__batch_mean_l2_loss(tf.subtract(x_test_predicted, y_test))
+                    losses = tf.subtract(x_test_predicted, y_test)
+                    all_losses = tf.concat([all_losses, losses], axis=0)
 
-                    sum = sum + test_loss
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
+                mean = (sum / num_batches)
 
-        return sum / num_batches
+                return mean
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
+                abs_mean, abs_var = tf.nn.moments(tf.abs(all_losses), axes=[0])
+                abs_std = tf.sqrt(abs_var)
+
+                mean, var = tf.nn.moments(all_losses, axes=[0])
+                std = tf.sqrt(var)
+
+                max = tf.reduce_max(all_losses)
+                min = tf.reduce_min(all_losses)
+                hist = tf.histogram_fixed_width(all_losses, [min, max], nbins=100)
+
+                return mean, std, abs_mean, abs_std, min, max, hist
 
     def shut_down(self):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
