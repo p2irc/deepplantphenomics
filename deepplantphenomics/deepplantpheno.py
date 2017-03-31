@@ -506,7 +506,7 @@ class DPPModel(object):
                 exit()
 
             sum = 0.0
-            all_losses = np.empty(shape=(4, 1))
+            all_losses = np.empty(shape=(self.__num_regression_outputs))
 
             for i in range(num_batches):
                 if self.__has_moderation:
@@ -534,7 +534,13 @@ class DPPModel(object):
                     sum = sum + test_acc
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
                     y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
-                    losses = tf.subtract(x_test_predicted, y_test)
+
+                    # If we are just doing 1 output, we might want to know absolute values, so don't do L2 norm
+                    if self.__num_regression_outputs == 1:
+                        losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, y_test)))
+                    else:
+                        losses = self.__l2_norm(tf.subtract(x_test_predicted, y_test))
+
                     all_losses = tf.concat([all_losses, losses], axis=0)
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
@@ -702,10 +708,17 @@ class DPPModel(object):
     def __batch_mean_l2_loss(self, x):
         """Given a batch of vectors, calculates the mean per-vector L2 norm"""
         with self.__graph.as_default():
-            agg = tf.map_fn(lambda ex: tf.sqrt(tf.reduce_sum(ex ** 2)), x)
+            agg = self.__l2_norm(x)
             mean = tf.reduce_mean(agg)
 
         return mean
+
+    def __l2_norm(self, x):
+        """Returns the L2 norm of a tensor"""
+        with self.__graph.as_default():
+            y = tf.map_fn(lambda ex: tf.sqrt(tf.reduce_sum(ex ** 2)), x)
+
+        return y
 
     def add_input_layer(self):
         """Add an input layer to the network"""
