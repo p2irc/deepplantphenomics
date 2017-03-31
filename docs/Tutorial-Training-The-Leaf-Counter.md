@@ -1,4 +1,4 @@
-One of the functions provided in the `tools` class is `tools.estimate_rosette_leaf_count()`. This implements a pre-trained convolutional neural network to count the number of leaves on a rosette-type plant.
+One of the functions provided in the `tools` class is `tools.estimate_rosette_leaf_count()`. This implements a pre-trained convolutional neural network (which is accessible directly at `networks.rosetteLeafRegressor()`) to count the number of leaves on a rosette-type plant.
 
 This guide reviews the basic process which was used to train the regression model to perform this leaf-counting task. It is intended to help users who wish to train their own models for similar tasks. The full code for this model appears in the `models/leaf_counter_regressor.py` source file.
 
@@ -68,11 +68,19 @@ At test time, the images will be cropped to center in order to maintain the same
 
 ## Loading the Data
 
-A function is included specifically for loading the data for this task. For other tasks, your own images and labels can be loaded via loaders for directories and CSV files.
+A function is included specifically for loading the data for this task.
 
 ```python
-# Load all VIS images from a Lemnatec image repository
+# Load all data for IPPN leaf counting dataset
 model.load_ippn_leaf_count_dataset_from_directory('./data/Ara2013-Canon')
+```
+
+For other tasks, your own images and labels can be loaded via loaders for directories and CSV files. For example, if you had your images in a directory called `data` and a CSV file `data/my_labels.csv` where the first column is the filename and the second column is the number of leaves, you could do this instead:
+
+```python
+# ALTERNATIVELY - Load labels and images
+model.load_multiple_labels_from_csv('./data/my_labels.csv', id_column=0)
+model.load_images_with_ids_from_directory('./data')
 ```
 
 ## Building the Network Architecture

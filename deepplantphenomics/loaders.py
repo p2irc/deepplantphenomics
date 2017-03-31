@@ -83,7 +83,7 @@ def read_csv_multi_labels_and_ids(file_name, id_column_number, character=','):
 
         temp.pop(id_column_number)
 
-        ids.append(temp)
+        labels.append(temp)
 
     return labels, ids
 

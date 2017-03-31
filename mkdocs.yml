@@ -11,5 +11,6 @@ pages:
     - Tools: Tools.md
     - Tutorials:
       - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
+      - Tutotial - Deploying your Trained Model: Tutorial-Deployment.md
 
 theme: readthedocs
