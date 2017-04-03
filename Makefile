@@ -4,3 +4,6 @@ clean:
 
 documentation:
 	mkdocs build
+
+install:
+	python setup.py install
