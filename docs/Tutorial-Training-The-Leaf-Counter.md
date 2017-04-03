@@ -46,7 +46,7 @@ These are hyperparameters to use for training. The first two lines specify that 
 
 We are going to use 80% of the examples for training, and 20% for testing. We are not using any regularization. We will use an initial learning rate of 0.0001. We are going to initialize our layer weights using the Xavier (Glorot) initialization scheme.
 
-We will train until 500 epochs - i.e. until we have seen all of the examples in the training set 200 times.
+We will train until 500 epochs - i.e. until we have seen all of the examples in the training set 500 times.
 
 ## Specifying Augmentation Options
 
