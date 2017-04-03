@@ -147,6 +147,8 @@ For regression problems, the loss value is **the L2 norm of the ground truth lab
 
 Also, for one-dimensional output, notice that the L2 norm is reported as the "absolute" loss, while the relative difference is also reported. This is useful in cases (such as leaf counting) where we are interested in over- and under-prediction. For multi-dimensional outputs, the mean/std and absolute mean/std will be identical, since the L2 norm is never negative.
 
+An error histogram is output as a vector of frequencies for 100 bins. Note that the min and max loss are also reported. The first bin corresponds to the interval (-inf, min] and the last bin corresponds to the inerval [max, inf). The area between these bins is divided into 98 bins of equal size.
+
 ## My Model's Not Converging, What Can I Do?
 
 This model seems to do quite well on this task, as you can see the loss rapidly decreasing until it settles around a particular value. In other cases, your model may thrash around, never improving.
