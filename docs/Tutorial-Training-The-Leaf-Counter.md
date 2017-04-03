@@ -119,7 +119,33 @@ We begin training the model by simply calling the training function.
 model.begin_training()
 ```
 
-The model will train until 500 epochs. We will see updates both in the console as well as in Tensorboard. At the end, the mean test loss will be reported for the entire test set.
+The model will train until 500 epochs. We will see updates both in the console as well as in Tensorboard. At the end, loss statistics will be reported for the entire test set.
+
+```
+12:18PM: Results for batch 16400 (epoch 496) - Regression Loss: 0.18489, samples/sec: 207.76
+12:18PM: Results for batch 16420 (epoch 497) - Regression Loss: 0.70228, samples/sec: 194.58
+12:18PM: Results for batch 16440 (epoch 498) - Regression Loss: 0.20067, samples/sec: 255.98
+12:18PM: Results for batch 16460 (epoch 498) - Regression Loss: 0.36997, samples/sec: 233.45
+12:18PM: Results for batch 16480 (epoch 499) - Regression Loss: 0.42173, samples/sec: 212.57
+12:18PM: Stopping due to maximum epochs
+12:18PM: Saving parameters...
+12:18PM: Computing total test accuracy/regression loss...
+12:18PM: Mean loss: 0.25281727314
+12:18PM: Loss standard deviation: 1.01810562611
+12:18PM: Mean absolute loss: 0.802363336086
+12:18PM: Absolute loss standard deviation: 0.675772547722
+12:18PM: Min error: -3.21537303925
+12:18PM: Max error: 1.78374052048
+12:18PM: Histogram of L2 losses:
+12:18PM: [1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 2 1 0 0 0 0 0 1 0 0 0 1 0 0 2 0 0 1 0 1 1 1 1 2 1 1 0 0 1
+ 1 2 0 1 1 1 2 2 0 0 1 1 1 1 0 0 0 1 0 0 0 1 0 1 0 1]
+12:18PM: Shutdown requested, ending session...
+```
+
+For regression problems, the loss value is **the L2 norm of the ground truth label subtracted from the regression output**. This means that for a one-dimensional output, like leaf count, we can interpret the loss as the absolute difference in count.
+
+Also, for one-dimensional output, notice that the L2 norm is reported as the "absolute" loss, while the relative difference is also reported. This is useful in cases (such as leaf counting) where we are interested in over- and under-prediction. For multi-dimensional outputs, the mean/std and absolute mean/std will be identical, since the L2 norm is never negative.
 
 ## My Model's Not Converging, What Can I Do?
 
