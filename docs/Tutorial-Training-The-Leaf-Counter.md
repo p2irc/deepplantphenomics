@@ -91,24 +91,22 @@ We are going to use a small convolutional neural network for this task. It is co
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_output_layer(regularization_coefficient=0.0)
+model.add_output_layer()
 ```
 
 Depending on your task, you may have better results with larger or smaller networks. Don't assume that a large model is better, especially with small datasets! Try a few different configurations with different feature extractors (the convolutional layers and accompanying machinery) and classifiers (the fully connected layers).
-
-The `regularization_coefficient=0.0` arguments prevent the L2 weight decay from being applied to the convolutional layers and the output layer.
 
 ## Training
 
