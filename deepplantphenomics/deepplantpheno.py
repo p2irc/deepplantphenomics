@@ -603,9 +603,14 @@ class DPPModel(object):
         """Save all trainable variables as a checkpoint in the current working path"""
         self.__log('Saving parameters...')
 
+        dir = './saved_state'
+
+        if not os.path.isdir(dir):
+            os.mkdir(dir)
+
         with self.__graph.as_default():
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.save(self.__session, 'tfhSaved')
+            saver.save(self.__session, dir+'/tfSaved')
 
         self.__has_trained = True
 
