@@ -258,9 +258,6 @@ class DPPModel(object):
         the session is shut down.
         Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
         """
-
-        self.__log('Beginning training...')
-
         with self.__graph.as_default():
             # Define batches
             if self.__has_moderation:
@@ -421,6 +418,8 @@ class DPPModel(object):
                 self.__session.run(init_op)
 
                 self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
 
                 for i in range(self.__maximum_training_batches):
                     start_time = time.time()
