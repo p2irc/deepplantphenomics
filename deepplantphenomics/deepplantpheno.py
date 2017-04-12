@@ -610,7 +610,7 @@ class DPPModel(object):
 
         with self.__graph.as_default():
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.save(self.__session, dir+'/tfSaved')
+            saver.save(self.__session, dir+'/tfhSaved')
 
         self.__has_trained = True
 
