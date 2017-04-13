@@ -258,9 +258,6 @@ class DPPModel(object):
         the session is shut down.
         Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
         """
-
-        self.__log('Beginning training...')
-
         with self.__graph.as_default():
             # Define batches
             if self.__has_moderation:
@@ -421,6 +418,8 @@ class DPPModel(object):
                 self.__session.run(init_op)
 
                 self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
 
                 for i in range(self.__maximum_training_batches):
                     start_time = time.time()
@@ -604,9 +603,14 @@ class DPPModel(object):
         """Save all trainable variables as a checkpoint in the current working path"""
         self.__log('Saving parameters...')
 
+        dir = './saved_state'
+
+        if not os.path.isdir(dir):
+            os.mkdir(dir)
+
         with self.__graph.as_default():
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.save(self.__session, 'tfhSaved')
+            saver.save(self.__session, dir+'/tfhSaved')
 
         self.__has_trained = True
 

@@ -2,7 +2,7 @@ After training a model, if you are happy with the performance, you can deploy it
 
 ## Move the Network State to a Safe Place
 
-By default, DPP will dump out the full network state to the working directory when it finishes training. Move this directory somewhere where it will not get overwritten. Let's move it to a directory called `rosette-leaf-regressor`.
+By default, DPP will dump out the full network state (the values for all trainable parameters) to a directory called `saved_state` in the working path when it finishes training. Move these state files somewhere where they will not get overwritten. Let's move the files to a directory called `rosette-leaf-regressor`.
 
 ## Create a Network Class
 

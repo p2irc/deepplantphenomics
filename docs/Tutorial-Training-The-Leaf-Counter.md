@@ -46,7 +46,7 @@ These are hyperparameters to use for training. The first two lines specify that 
 
 We are going to use 80% of the examples for training, and 20% for testing. We are not using any regularization. We will use an initial learning rate of 0.0001. We are going to initialize our layer weights using the Xavier (Glorot) initialization scheme.
 
-We will train until 500 epochs - i.e. until we have seen all of the examples in the training set 200 times.
+We will train until 500 epochs - i.e. until we have seen all of the examples in the training set 500 times.
 
 ## Specifying Augmentation Options
 
@@ -91,24 +91,22 @@ We are going to use a small convolutional neural network for this task. It is co
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_output_layer(regularization_coefficient=0.0)
+model.add_output_layer()
 ```
 
 Depending on your task, you may have better results with larger or smaller networks. Don't assume that a large model is better, especially with small datasets! Try a few different configurations with different feature extractors (the convolutional layers and accompanying machinery) and classifiers (the fully connected layers).
-
-The `regularization_coefficient=0.0` arguments prevent the L2 weight decay from being applied to the convolutional layers and the output layer.
 
 ## Training
 
@@ -119,7 +117,35 @@ We begin training the model by simply calling the training function.
 model.begin_training()
 ```
 
-The model will train until 500 epochs. We will see updates both in the console as well as in Tensorboard. At the end, the mean test loss will be reported for the entire test set.
+The model will train until 500 epochs. We will see updates both in the console as well as in Tensorboard. At the end, loss statistics will be reported for the entire test set.
+
+```
+12:18PM: Results for batch 16400 (epoch 496) - Regression Loss: 0.18489, samples/sec: 207.76
+12:18PM: Results for batch 16420 (epoch 497) - Regression Loss: 0.70228, samples/sec: 194.58
+12:18PM: Results for batch 16440 (epoch 498) - Regression Loss: 0.20067, samples/sec: 255.98
+12:18PM: Results for batch 16460 (epoch 498) - Regression Loss: 0.36997, samples/sec: 233.45
+12:18PM: Results for batch 16480 (epoch 499) - Regression Loss: 0.42173, samples/sec: 212.57
+12:18PM: Stopping due to maximum epochs
+12:18PM: Saving parameters...
+12:18PM: Computing total test accuracy/regression loss...
+12:18PM: Mean loss: 0.25281727314
+12:18PM: Loss standard deviation: 1.01810562611
+12:18PM: Mean absolute loss: 0.802363336086
+12:18PM: Absolute loss standard deviation: 0.675772547722
+12:18PM: Min error: -3.21537303925
+12:18PM: Max error: 1.78374052048
+12:18PM: Histogram of L2 losses:
+12:18PM: [1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 0 0 0 0 0 0 0 0 2 1 0 0 0 0 0 1 0 0 0 1 0 0 2 0 0 1 0 1 1 1 1 2 1 1 0 0 1
+ 1 2 0 1 1 1 2 2 0 0 1 1 1 1 0 0 0 1 0 0 0 1 0 1 0 1]
+12:18PM: Shutdown requested, ending session...
+```
+
+For regression problems, the loss value is **the L2 norm of the ground truth label subtracted from the regression output**. This means that for a one-dimensional output, like leaf count, we can interpret the loss as the absolute difference in count.
+
+Also, for one-dimensional output, notice that the L2 norm is reported as the "absolute" loss, while the relative difference is also reported. This is useful in cases (such as leaf counting) where we are interested in over- and under-prediction. For multi-dimensional outputs, the mean/std and absolute mean/std will be identical, since the L2 norm is never negative.
+
+An error histogram is output as a vector of frequencies for 100 bins. Note that the min and max loss are also reported. The first bin corresponds to the interval (-inf, min] and the last bin corresponds to the inerval [max, inf). The area between these bins is divided into 98 bins of equal size.
 
 ## My Model's Not Converging, What Can I Do?
 
