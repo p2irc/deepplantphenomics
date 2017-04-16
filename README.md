@@ -82,6 +82,7 @@ model.begin_training()
 
 ## Installation
 
+0. The package should work on Python 2.7 or 3.x, but if using 2.7 you need the [enum34](https://pypi.python.org/pypi/enum34) package installed.
 1. Install the following dependencies, following the directions provided according to your platform and requirements:
     - [Tensorflow](https://www.tensorflow.org/) (1.0 or later)
     - [PlantCV](http://plantcv.danforthcenter.org/)
