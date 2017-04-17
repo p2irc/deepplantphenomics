@@ -249,7 +249,8 @@ class DPPModel(object):
         elif type == 'regression':
             self.__problem_type = definitions.ProblemType.REGRESSION
         else:
-            warnings.warn('Problem type specified not supported', stacklevel=2)
+            warnings.warn('Problem type specified not supported')
+            exit()
 
     def begin_training(self):
         """
@@ -286,9 +287,6 @@ class DPPModel(object):
             else:
                 xx = self.forward_pass(x, deterministic=False)
 
-            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
-
             # Define regularization cost
             if self.__reg_coeff is not None:
                 l2_cost = [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
@@ -312,11 +310,15 @@ class DPPModel(object):
             elif self.__optimizer == 'SGD':
                 optimizer = tf.train.GradientDescentOptimizer(self.__learning_rate).minimize(cost)
                 self.__log('Using SGD optimizer')
-            else:
+            elif self.__optimizer == 'Adam':
                 optimizer = tf.train.AdamOptimizer(self.__learning_rate).minimize(cost)
                 self.__log('Using Adam optimizer')
+            else:
+                warnings.warn('Unrecognized optimizer requested')
+                exit()
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
                 correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
                 accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
@@ -629,6 +631,7 @@ class DPPModel(object):
             self.__has_trained = True
         else:
             warnings.warn('Tried to load state with no file given. Make sure load_from_saved is set in constructor.')
+            exit()
 
     def __set_learning_rate(self):
         if self.__lr_decay_factor is not None:
@@ -675,6 +678,7 @@ class DPPModel(object):
                 total_outputs = np.empty([1, self.__num_regression_outputs])
             else:
                 warnings.warn('Problem type is not recognized')
+                exit()
 
             num_batches = len(x) / self.__batch_size
             remainder = len(x) % self.__batch_size
@@ -889,6 +893,7 @@ class DPPModel(object):
                 num_out = self.__num_regression_outputs
             else:
                 warnings.warn('Problem type is not recognized')
+                exit()
         else:
             num_out = output_size
 
