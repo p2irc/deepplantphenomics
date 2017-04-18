@@ -16,15 +16,16 @@ def split_raw_data(images, labels, ratio, moderation_features=None):
     # calculate and perform random split
     num_training = int(total_samples * ratio)
 
-    partitions = [0] * total_samples
-    partitions[:num_training] = [1] * num_training
-    random.shuffle(partitions)
+    mask = [0] * total_samples
+    mask[:num_training] = [1] * num_training
+    random.shuffle(mask)
 
-    train_images, test_images = tf.dynamic_partition(images, partitions, 2)
-    train_labels, test_labels = tf.dynamic_partition(labels, partitions, 2)
+    train_images, test_images = tf.dynamic_partition(images, mask, 2)
+    train_labels, test_labels = tf.dynamic_partition(labels, mask, 2)
 
+    # Also partition moderation features if present
     if moderation_features is not None:
-        train_mf, test_mf = tf.dynamic_partition(moderation_features, partitions, 2)
+        train_mf, test_mf = tf.dynamic_partition(moderation_features, mask, 2)
 
         return train_images, train_labels, test_images, test_labels, train_mf, test_mf
     else:

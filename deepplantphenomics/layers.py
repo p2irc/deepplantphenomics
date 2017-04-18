@@ -186,7 +186,7 @@ class normLayer(object):
         self.output_size = input_size
 
     def forward_pass(self, x, deterministic):
-        x = tf.nn.lrn(x, bias=1.0, alpha=0.001/9.0, beta=0.75)
+        x = tf.nn.lrn(x)
         return x
 
 

@@ -1,3 +1,8 @@
+#
+# Demonstrates training a general-purpose image classifier on the popular CIFAR10 image classification dataset.
+# Assumes that you downloaded CIFAR10 image files via nvidia DIGITS.
+#
+
 import deepplantphenomics as dpp
 
 model = dpp.DPPModel(debug=True, load_from_saved=False)
