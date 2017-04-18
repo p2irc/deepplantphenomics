@@ -1,3 +1,8 @@
+#
+# This example shows a model which uses the auto-segmentation pre-processor.
+# The model is never defined, so running this file only demonstrates auto-segmentation.
+#
+
 import deepplantphenomics as dpp
 
 model = dpp.DPPModel(debug=True, load_from_saved=False, initialize=False)
