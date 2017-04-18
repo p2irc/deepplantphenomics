@@ -1,9 +1,8 @@
 #
-# Used to train the DAG-regressor model
+# An example of training a model for the Days After Germination (DAG) task from the IPPN dataset.
 #
 
 import deepplantphenomics as dpp
-import numpy as np
 
 model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=20)
 
@@ -41,7 +40,6 @@ model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_convolutional_layer(filter_dimension=[3, 3, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
 model.add_pooling_layer(kernel_size=3, stride_length=2)
-
 
 model.add_fully_connected_layer(output_size=2048, activation_function='relu')
 

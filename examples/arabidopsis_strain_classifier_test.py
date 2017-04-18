@@ -1,3 +1,8 @@
+#
+# Demonstrates the use of tools.classify_arabidopsis_strain on images of rosettes.
+# Loads filenames from the IPPN dataset by default.
+#
+
 import deepplantphenomics as dpp
 import os
 
