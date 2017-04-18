@@ -4,6 +4,8 @@ Deep Plant Phenomics (DPP) is a platform for plant phenotyping using deep learni
 
 DPP integrates [Tensorflow](https://www.tensorflow.org/) for learning and [PlantCV](http://plantcv.danforthcenter.org/) for image processing. This means that it is able to run on both CPUs and GPUs, and scale easily across devices.
 
+Read the [doumentation](http://deep-plant-phenomics.readthedocs.io/en/latest/) for tutorials, or see the included examples.
+
 DPP is maintained at the [Plant Phenotyping and Imaging Research Center (P2IRC)](http://p2irc.usask.ca/) at the [University of Saskatchewan](https://www.usask.ca/). 🌾🇨🇦
 
 ## What's Deep Learning?
