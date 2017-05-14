@@ -1248,7 +1248,7 @@ class DPPModel(object):
 
         if self.__all_labels is not None:
             for image_id in self.__all_ids:
-                path = filter(lambda item: item.endswith(image_id), [p for p in image_files])
+                path = filter(lambda item: item.endswith('/'+image_id), [p for p in image_files])
                 assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
                 sorted_paths.append(path[0])
         else:
