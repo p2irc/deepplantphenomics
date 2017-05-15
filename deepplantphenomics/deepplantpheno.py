@@ -59,6 +59,9 @@ class DPPModel(object):
     __train_moderation_features = None
     __test_moderation_features = None
 
+    __training_augmentation_images = None
+    __training_augmentation_labels = None
+
     # Network internal representation
     __session = None
     __graph = None
@@ -1277,6 +1280,33 @@ class DPPModel(object):
                     train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels, self.__train_test_split)
                     self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
+
+    def load_training_augmentation_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=1, id_column_number=0):
+        """
+        Loads the png images from a directory as training augmentation images, using the labels provided in a CSV file.
+
+        :param dirname: the path of the directory containing the images
+        :param labels_file: the path of the .csv file containing the labels
+        :param column_number: the column number (zero-indexed) of the column in the csv file representing the label
+        :param id_column_number: the column number (zero-indexed) representing the file ID
+        """
+
+        image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
+                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
+
+        labels, ids = loaders.read_csv_labels_and_ids(labels_file, column_number, id_column_number)
+
+        sorted_paths = []
+
+        for image_id in ids:
+            path = filter(lambda item: item.endswith('/'+image_id), [p for p in image_files])
+            assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
+            sorted_paths.append(path[0])
+
+        self.__training_augmentation_images = sorted_paths
+        self.__training_augmentation_labels = labels
+
+
     def load_pascal_voc_labels_from_directory(self, dir):
         """Loads single per-image bounding boxes from XML files in Pascal VOC format."""
 
@@ -1342,6 +1372,10 @@ class DPPModel(object):
 
             if self.__total_training_samples is None:
                 self.__total_training_samples = int(self.__total_raw_samples * self.__train_test_split)
+
+            if self.__training_augmentation_labels is not None:
+                train_images = train_images + self.__training_augmentation_images
+                train_labels = train_labels + self.__training_augmentation_labels
 
             # moderation features queues
             if train_mf is not None:
