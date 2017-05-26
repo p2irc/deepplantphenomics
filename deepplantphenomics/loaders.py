@@ -5,7 +5,7 @@ import random
 import os
 
 
-def split_raw_data(images, labels, ratio, moderation_features=None):
+def split_raw_data(images, labels, ratio, moderation_features=None, augmentation_images=None, augmentation_labels=None):
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         labels = [' '.join(map(str, label)) for label in labels]
@@ -15,10 +15,18 @@ def split_raw_data(images, labels, ratio, moderation_features=None):
 
     # calculate and perform random split
     num_training = int(total_samples * ratio)
+    num_testing = int(total_samples * (1-ratio))
 
     mask = [0] * total_samples
-    mask[:num_training] = [1] * num_training
+    mask[:num_testing] = [1] * num_testing
     random.shuffle(mask)
+
+    # If we're using a training augmentation set, add them to the training portion
+    if augmentation_images is not None and augmentation_labels is not None:
+        images = images + augmentation_images
+        labels = labels + augmentation_labels
+
+        mask = mask + ([0] * len(augmentation_labels))
 
     train_images, test_images = tf.dynamic_partition(images, mask, 2)
     train_labels, test_labels = tf.dynamic_partition(labels, mask, 2)
