@@ -15,9 +15,10 @@ def split_raw_data(images, labels, ratio, moderation_features=None, augmentation
 
     # calculate and perform random split
     num_training = int(total_samples * ratio)
+    num_testing = int(total_samples * (1-ratio))
 
     mask = [0] * total_samples
-    mask[:num_training] = [1] * num_training
+    mask[:num_testing] = [1] * num_testing
     random.shuffle(mask)
 
     # If we're using a training augmentation set, add them to the training portion
