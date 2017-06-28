@@ -88,7 +88,7 @@ model.begin_training()
 1. Install the following dependencies, following the directions provided according to your platform and requirements:
     - [Tensorflow](https://www.tensorflow.org/) (1.0 or later)
     - [PlantCV](http://plantcv.danforthcenter.org/) (Only required for the `auto-segmentation` preprocessor)
-3. `git clone https://github.com/usaskdapper/deepplantphenomics.git` 
+3. `git clone https://github.com/p2irc/deepplantphenomics.git` 
 4. `python setup.py install`
 
 ## Downloading Pre-trained Networks
