@@ -1,3 +1,5 @@
+### The [DPP paper](http://journal.frontiersin.org/article/10.3389/fpls.2017.01190/full) is now available online!
+
 # Deep Plant Phenomics
 
 Deep Plant Phenomics (DPP) is a platform for plant phenotyping using deep learning. Think of it as [Keras](https://keras.io/) for plant scientists.
