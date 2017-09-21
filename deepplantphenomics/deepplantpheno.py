@@ -297,9 +297,9 @@ class DPPModel(object):
             # Define cost function and set optimizer
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-                cost = tf.reduce_mean(tf.concat([sf_logits, l2_cost], axis=0))
+                cost = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), tf.reduce_sum(l2_cost))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                cost = self.__batch_mean_l2_loss(tf.subtract(xx, y))
+                cost = tf.add(self.__batch_mean_l2_loss(tf.subtract(xx, y)), tf.reduce_sum(l2_cost))
 
             if self.__optimizer == 'Adagrad':
                 optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -324,17 +324,15 @@ class DPPModel(object):
 
             # Calculate validation accuracy
             if self.__has_moderation:
-                x_test, y_test, mod_w_test = tf.train.shuffle_batch([self.__test_images, self.__test_labels, self.__test_moderation_features],
+                x_test, y_test, mod_w_test = tf.train.batch([self.__test_images, self.__test_labels, self.__test_moderation_features],
                                                         batch_size=self.__batch_size,
                                                         num_threads=self.__num_threads,
-                                                        capacity=self.__queue_capacity,
-                                                        min_after_dequeue=self.__batch_size)
+                                                        capacity=self.__queue_capacity)
             else:
-                x_test, y_test = tf.train.shuffle_batch([self.__test_images, self.__test_labels],
+                x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
                                                         batch_size=self.__batch_size,
                                                         num_threads=self.__num_threads,
-                                                        capacity=self.__queue_capacity,
-                                                        min_after_dequeue=self.__batch_size)
+                                                        capacity=self.__queue_capacity)
 
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
@@ -351,10 +349,12 @@ class DPPModel(object):
                 test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
                 test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                test_batch_loss = tf.subtract(x_test_predicted, y_test)
-                test_cost = self.__batch_mean_l2_loss(test_batch_loss)
+                if self.__num_regression_outputs == 1:
+                    test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, y_test)))
+                else:
+                    test_losses = self.__l2_norm(tf.subtract(x_test_predicted, y_test))
 
-            full_test_op = self.compute_full_test_accuracy()
+                test_cost = tf.reduce_mean(tf.abs(test_losses))
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
@@ -374,10 +374,8 @@ class DPPModel(object):
 
                 # Summaries for regression
                 if self.__problem_type == definitions.ProblemType.REGRESSION:
-                    tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
-
-                    if test_batch_loss.get_shape().as_list()[1] == 1:
-                        tf.summary.histogram('test/batch_loss', test_batch_loss, collections=['custom_summaries'])
+                    if self.__num_regression_outputs == 1:
+                        tf.summary.histogram('test/batch_loss', test_cost, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
@@ -395,23 +393,7 @@ class DPPModel(object):
 
                 self.__initialize_queue_runners()
 
-                self.__log('Computing total test accuracy/regression loss...')
-
-                if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    mean = self.__session.run(full_test_op)
-
-                    self.__log('Average test accuracy: {:.5f}'.format(mean))
-                elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                    mean, std, abs_mean, abs_std, min, max, hist = self.__session.run(full_test_op)
-
-                    self.__log('Mean loss: {}'.format(mean))
-                    self.__log('Loss standard deviation: {}'.format(std))
-                    self.__log('Mean absolute loss: {}'.format(abs_mean))
-                    self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-                    self.__log('Min error: {}'.format(min))
-                    self.__log('Max error: {}'.format(max))
-                    self.__log('Histogram of L2 losses:')
-                    self.__log(hist)
+                self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
 
                 self.shut_down()
             else:
@@ -475,28 +457,14 @@ class DPPModel(object):
 
                 self.save_state()
 
-                self.__log('Computing total test accuracy/regression loss...')
-
-                if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    mean = self.__session.run(full_test_op)
-
-                    self.__log('Average test accuracy: {:.5f}'.format(mean))
-                elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                    mean, std, abs_mean, abs_std, min, max, hist = self.__session.run(full_test_op)
-
-                    self.__log('Mean loss: {}'.format(mean))
-                    self.__log('Loss standard deviation: {}'.format(std))
-                    self.__log('Mean absolute loss: {}'.format(abs_mean))
-                    self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-                    self.__log('Min error: {}'.format(min))
-                    self.__log('Max error: {}'.format(max))
-                    self.__log('Histogram of L2 losses:')
-                    self.__log(hist)
+                self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
 
                 self.shut_down()
 
-    def compute_full_test_accuracy(self):
+    def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
         """Returns statistics of the test losses depending on the type of task"""
+
+        self.__log('Computing total test accuracy/regression loss...')
 
         with self.__graph.as_default():
             num_test = self.__total_raw_samples - self.__total_training_samples
@@ -508,60 +476,68 @@ class DPPModel(object):
 
             sum = 0.0
             all_losses = np.empty(shape=(self.__num_regression_outputs))
+            all_y = np.empty(shape=(self.__num_regression_outputs))
+            all_predictions = np.empty(shape=(self.__num_regression_outputs))
 
+            # Main test loop
             for i in range(num_batches):
-                if self.__has_moderation:
-                    x_test, y_test, mod_w_test = tf.train.batch([self.__test_images, self.__test_labels, self.__test_moderation_features],
-                                                            batch_size=self.__batch_size,
-                                                            num_threads=self.__num_threads)
-                else:
-                    x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
-                                                            batch_size=self.__batch_size,
-                                                            num_threads=self.__num_threads)
-
-                x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
-
-                if self.__has_moderation:
-                    x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
-                else:
-                    x_test_predicted = self.forward_pass(x_test, deterministic=True)
-
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
-
-                    test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
-                    test_acc = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
-
-                    sum = sum + test_acc
+                    batch_mean = self.__session.run([test_losses])
+                    sum = sum + batch_mean
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                    y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
+                    r_losses, r_y, r_predicted = self.__session.run([test_losses, y_test, x_test_predicted])
 
-                    # If we are just doing 1 output, we might want to know absolute values, so don't do L2 norm
-                    if self.__num_regression_outputs == 1:
-                        losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, y_test)))
-                    else:
-                        losses = self.__l2_norm(tf.subtract(x_test_predicted, y_test))
+                    all_losses = np.concatenate((all_losses, r_losses), axis=0)
+                    all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
+                    all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
 
-                    all_losses = tf.concat([all_losses, losses], axis=0)
+            # Delete the weird first entries
+            all_losses = np.delete(all_losses, 0)
+            all_y = np.delete(all_y, 0)
+            all_predictions = np.delete(all_predictions, 0)
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
                 mean = (sum / num_batches)
 
-                return mean
+                self.__log('Average test accuracy: {:.5f}'.format(mean))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
-                abs_mean, abs_var = tf.nn.moments(tf.abs(all_losses), axes=[0])
-                abs_std = tf.sqrt(abs_var)
+                abs_mean = np.mean(np.abs(all_losses))
+                abs_var = np.var(np.abs(all_losses))
+                abs_std = np.sqrt(abs_var)
 
-                mean, var = tf.nn.moments(all_losses, axes=[0])
-                std = tf.sqrt(var)
+                mean = np.mean(all_losses)
+                var = np.var(all_losses)
+                mse = np.mean(np.square(all_losses))
+                std = np.sqrt(var)
 
-                max = tf.reduce_max(all_losses)
-                min = tf.reduce_min(all_losses)
-                hist = tf.histogram_fixed_width(all_losses, [min, max], nbins=100)
+                all_y_mean = np.mean(all_y)
+                total_error = np.sum(np.square(all_y - all_y_mean))
+                unexplained_error = np.sum(np.square(all_losses))
 
-                return mean, std, abs_mean, abs_std, min, max, hist
+                max = np.amax(all_losses)
+                min = np.amin(all_losses)
+                R2 = 1. - (unexplained_error / total_error)
+                hist, _ = np.histogram(all_losses, bins=100)
+
+                self.__log('Mean loss: {}'.format(mean))
+                self.__log('Loss standard deviation: {}'.format(std))
+                self.__log('Mean absolute loss: {}'.format(abs_mean))
+                self.__log('Absolute loss standard deviation: {}'.format(abs_std))
+                self.__log('Min error: {}'.format(min))
+                self.__log('Max error: {}'.format(max))
+                self.__log('MSE: {}'.format(mse))
+                self.__log('R^2: {}'.format(R2))
+                self.__log('Histogram of L2 losses:')
+                self.__log('All test labels:')
+                self.__log(all_y)
+                self.__log('All predictions:')
+                self.__log(all_predictions)
+                self.__log('Histogram of L2 losses:')
+                self.__log(hist)
+
+            return
 
     def shut_down(self):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
