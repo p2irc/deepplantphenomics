@@ -302,7 +302,8 @@ class DPPModel(object):
                 sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
                 cost = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), tf.reduce_sum(l2_cost))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                cost = tf.add(self.__batch_mean_l2_loss(tf.subtract(xx, y)), tf.reduce_sum(l2_cost))
+                regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
+                cost = tf.add(regression_loss, tf.reduce_sum(l2_cost))
 
             if self.__optimizer == 'Adagrad':
                 optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -378,7 +379,9 @@ class DPPModel(object):
                 # Summaries for regression
                 if self.__problem_type == definitions.ProblemType.REGRESSION:
                     if self.__num_regression_outputs == 1:
-                        tf.summary.histogram('test/batch_loss', test_cost, collections=['custom_summaries'])
+                        tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
+                        tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
+                        tf.summary.histogram('test/batch_losses', test_losses, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
