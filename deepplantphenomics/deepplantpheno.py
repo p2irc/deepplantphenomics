@@ -294,10 +294,10 @@ class DPPModel(object):
 
             # Define regularization cost
             if self.__reg_coeff is not None:
-                l2_cost = tf.reduce_sum([layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
-                           if isinstance(layer, layers.fullyConnectedLayer) or isinstance(layer, layers.convLayer)])
+                l2_cost = tf.squeeze(tf.reduce_sum([layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
+                           if isinstance(layer, layers.fullyConnectedLayer) or isinstance(layer, layers.convLayer)]))
             else:
-                l2_cost = [0.0]
+                l2_cost = 0.0
 
             # Define cost function and set optimizer
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
@@ -307,8 +307,8 @@ class DPPModel(object):
                 regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
                 cost = tf.add(regression_loss, l2_cost)
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                pixel_loss = tf.reduce_mean(tf.subtract(xx, y))
-                cost = tf.add(pixel_loss, l2_cost)
+                pixel_loss = tf.reduce_mean(tf.abs(tf.subtract(xx, y)))
+                cost = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
             if self.__optimizer == 'Adagrad':
                 optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -365,8 +365,8 @@ class DPPModel(object):
 
                 test_cost = tf.reduce_mean(tf.abs(test_losses))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                test_pixel_loss = tf.reduce_mean(tf.subtract(x_test_predicted, y_test))
-                test_cost = tf.reduce_mean(test_pixel_loss)
+                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, y_test)), axis=2)
+                test_cost = tf.reduce_mean(tf.abs(test_losses))
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
@@ -390,6 +390,10 @@ class DPPModel(object):
                         tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
                         tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
                         tf.summary.histogram('test/batch_losses', test_losses, collections=['custom_summaries'])
+
+                # Summaries for semantic segmentation
+                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                        tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:

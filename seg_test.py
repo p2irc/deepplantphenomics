@@ -4,7 +4,7 @@
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=1)
+model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=1, tensorboard_dir='/home/jordan/tensorlogs')
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
@@ -20,7 +20,7 @@ model.set_train_test_split(0.8)
 #model.set_regularization_coefficient(0.001)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('normal')
-model.set_maximum_training_epochs(1000)
+model.set_maximum_training_epochs(100)
 
 # Augmentation options
 model.set_augmentation_brightness_and_contrast(True)
@@ -29,13 +29,13 @@ model.set_augmentation_brightness_and_contrast(True)
 #model.set_augmentation_crop(True, crop_ratio=0.8)
 
 # Load dataset
-model.load_dataset_from_directory_with_segmentation_masks('./data/Ara2013-Canon', './data/Ara2013-Canon/segmented')
+model.load_dataset_from_directory_with_segmentation_masks('./data/Ara2013-Canon-semantic', './data/Ara2013-Canon-semantic/segmented')
 
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[3, 3, channels, 4], stride_length=1, activation_function='tanh')
-model.add_convolutional_layer(filter_dimension=[3, 3, 4, 8], stride_length=1, activation_function='tanh')
+model.add_convolutional_layer(filter_dimension=[3, 3, channels, 4], stride_length=1, activation_function='relu')
+model.add_convolutional_layer(filter_dimension=[3, 3, 4, 8], stride_length=1, activation_function='relu')
 
 model.add_output_layer()
 
