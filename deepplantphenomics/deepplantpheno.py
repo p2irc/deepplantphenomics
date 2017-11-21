@@ -251,6 +251,8 @@ class DPPModel(object):
             self.__problem_type = definitions.ProblemType.CLASSIFICATION
         elif type == 'regression':
             self.__problem_type = definitions.ProblemType.REGRESSION
+        elif type == 'semantic_segmentation':
+            self.__problem_type = definitions.ProblemType.SEMANTICSEGMETNATION
         else:
             warnings.warn('Problem type specified not supported')
             exit()
@@ -292,18 +294,21 @@ class DPPModel(object):
 
             # Define regularization cost
             if self.__reg_coeff is not None:
-                l2_cost = [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
-                           if isinstance(layer, layers.fullyConnectedLayer) or isinstance(layer, layers.convLayer)]
+                l2_cost = tf.reduce_sum([layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
+                           if isinstance(layer, layers.fullyConnectedLayer) or isinstance(layer, layers.convLayer)])
             else:
                 l2_cost = [0.0]
 
             # Define cost function and set optimizer
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-                cost = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), tf.reduce_sum(l2_cost))
+                cost = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
-                cost = tf.add(regression_loss, tf.reduce_sum(l2_cost))
+                cost = tf.add(regression_loss, l2_cost)
+            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                pixel_loss = tf.reduce_mean(tf.subtract(xx, y))
+                cost = tf.add(pixel_loss, l2_cost)
 
             if self.__optimizer == 'Adagrad':
                 optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
@@ -326,7 +331,7 @@ class DPPModel(object):
                 correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
                 accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
-            # Calculate validation accuracy
+            # Calculate test accuracy
             if self.__has_moderation:
                 x_test, y_test, mod_w_test = tf.train.batch([self.__test_images, self.__test_labels, self.__test_moderation_features],
                                                         batch_size=self.__batch_size,
@@ -359,13 +364,16 @@ class DPPModel(object):
                     test_losses = self.__l2_norm(tf.subtract(x_test_predicted, y_test))
 
                 test_cost = tf.reduce_mean(tf.abs(test_losses))
+            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                test_pixel_loss = tf.reduce_mean(tf.subtract(x_test_predicted, y_test))
+                test_cost = tf.reduce_mean(test_pixel_loss)
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
                 # Summaries for any problem type
                 tf.summary.scalar('train/loss', cost, collections=['custom_summaries'])
                 tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', tf.reduce_mean(l2_cost), collections=['custom_summaries'])
+                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
                 filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
                 tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
 
@@ -873,6 +881,8 @@ class DPPModel(object):
                 num_out = self.__total_classes
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 num_out = self.__num_regression_outputs
+            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                filter_dimension = [1, 1, self.__last_layer().output_size[3], 1]
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
@@ -880,14 +890,23 @@ class DPPModel(object):
             num_out = output_size
 
         with self.__graph.as_default():
-            layer = layers.fullyConnectedLayer('output',
-                                               self.__last_layer().output_size,
-                                               num_out,
-                                               reshape,
-                                               self.__batch_size,
-                                               None,
-                                               self.__weight_initializer,
-                                               regularization_coefficient)
+            if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
+                layer = layers.convLayer('output',
+                                         self.__last_layer().output_size,
+                                         filter_dimension,
+                                         1,
+                                         None,
+                                         self.__weight_initializer,
+                                         regularization_coefficient)
+            else:
+                layer = layers.fullyConnectedLayer('output',
+                                                   self.__last_layer().output_size,
+                                                   num_out,
+                                                   reshape,
+                                                   self.__batch_size,
+                                                   None,
+                                                   self.__weight_initializer,
+                                                   regularization_coefficient)
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 
@@ -922,6 +941,39 @@ class DPPModel(object):
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
             else:
                 train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels, self.__train_test_split, None, self.__training_augmentation_images, self.__training_augmentation_labels)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+
+    def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
+        """
+        Loads the png images in the given directory into an internal representation, using binary segmentation
+        masks from another file with the same filename as ground truth.
+
+        :param dirname: the path of the directory containing the images
+        :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
+        """
+
+        if self.__problem_type is not definitions.ProblemType.SEMANTICSEGMETNATION:
+            warnings.warn('Trying to load a segmentation dataset, but the problem type is not properly set.')
+            exit()
+
+        image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
+                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
+
+        seg_files = [os.path.join(seg_dirname, name) for name in os.listdir(seg_dirname) if
+                       os.path.isfile(os.path.join(seg_dirname, name)) & name.endswith('.png')]
+
+        self.__total_raw_samples = len(image_files)
+
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        with self.__graph.as_default():
+            if self.__has_moderation:
+                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                    loaders.split_raw_data(image_files, seg_files, self.__train_test_split, self.__all_moderation_features, self.__training_augmentation_images, self.__training_augmentation_labels)
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
+            else:
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, seg_files, self.__train_test_split, None, self.__training_augmentation_images, self.__training_augmentation_labels)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
@@ -1375,8 +1427,28 @@ class DPPModel(object):
             train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
             test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
 
-            self.__test_labels = test_input_queue[1]
-            self.__train_labels = train_input_queue[1]
+            if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
+                self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=self.__image_depth)
+                self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]), channels=self.__image_depth)
+
+                # normalize to 1.0
+                self.__train_labels = tf.image.convert_image_dtype(self.__train_labels, dtype=tf.float32)
+                self.__test_labels = tf.image.convert_image_dtype(self.__test_labels, dtype=tf.float32)
+
+                # resize if we are using that
+                if self.__resize_images is True:
+                    self.__train_labels = tf.image.resize_images(self.__train_labels, [self.__image_height, self.__image_width])
+                    self.__test_labels = tf.image.resize_images(self.__test_labels, [self.__image_height, self.__image_width])
+
+                # make into a binary mask
+                self.__test_labels = tf.reduce_sum(self.__test_labels, axis=2)
+                self.__train_labels = tf.reduce_sum(self.__train_labels, axis=2)
+
+                #self.__test_labels.set_shape([self.__image_height, self.__image_width])
+                #self.__train_labels.set_shape([self.__image_height, self.__image_width])
+            else:
+                self.__test_labels = test_input_queue[1]
+                self.__train_labels = train_input_queue[1]
 
             # pre-processing for training and testing images
 
