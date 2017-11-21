@@ -394,6 +394,10 @@ class DPPModel(object):
                 # Summaries for semantic segmentation
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                         tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
+                        train_images_summary = self.__get_weights_as_image(tf.transpose(tf.expand_dims(xx, -1), (1,2,3,0)))
+                        tf.summary.image('masks/test', train_images_summary, collections=['custom_summaries'])
+                        test_images_summary = self.__get_weights_as_image(tf.transpose(tf.expand_dims(x_test_predicted, -1), (1,2,3,0)))
+                        tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
@@ -572,6 +576,7 @@ class DPPModel(object):
             pad = 1
             grid_X = 4
             grid_Y = (kernel.get_shape().as_list()[-1] / 4)
+            num_channels = kernel.get_shape().as_list()[2]
 
             # pad X and Y
             x1 = tf.pad(kernel, tf.constant([[pad, 0], [pad, 0], [0, 0], [0, 0]]))
@@ -582,9 +587,11 @@ class DPPModel(object):
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
-            x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, 3]))
+            #x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, 3]))
+            x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, num_channels]))
             x4 = tf.transpose(x3, (0, 2, 1, 3))
-            x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, 3]))
+            #x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, 3]))
+            x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, num_channels]))
             x6 = tf.transpose(x5, (2, 1, 3, 0))
             x7 = tf.transpose(x6, (3, 0, 1, 2))
 
