@@ -396,7 +396,7 @@ class DPPModel(object):
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                         tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
                         train_images_summary = self.__get_weights_as_image(tf.transpose(tf.expand_dims(xx, -1), (1,2,3,0)))
-                        tf.summary.image('masks/test', train_images_summary, collections=['custom_summaries'])
+                        tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
                         test_images_summary = self.__get_weights_as_image(tf.transpose(tf.expand_dims(x_test_predicted, -1), (1,2,3,0)))
                         tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
 
