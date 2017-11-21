@@ -366,7 +366,8 @@ class DPPModel(object):
                 test_cost = tf.reduce_mean(tf.abs(test_losses))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, y_test)), axis=2)
-                test_cost = tf.reduce_mean(tf.abs(test_losses))
+                test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
+                test_cost = tf.reduce_mean(test_losses)
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
@@ -453,13 +454,14 @@ class DPPModel(object):
                                         loss,
                                         epoch_accuracy,
                                         samples_per_sec))
-                        elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                        elif self.__problem_type == definitions.ProblemType.REGRESSION or \
+                                        self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                             loss, epoch_test_loss = self.__session.run([cost, test_cost])
 
                             samples_per_sec = self.__batch_size / elapsed
 
                             self.__log(
-                                'Results for batch {} (epoch {}) - Regression Loss: {:.5f}, samples/sec: {:.2f}'
+                                'Results for batch {} (epoch {}) - Loss: {:.5f}, samples/sec: {:.2f}'
                                     .format(i,
                                             i / (self.__total_training_samples / self.__batch_size),
                                             loss,
@@ -512,6 +514,10 @@ class DPPModel(object):
                     all_losses = np.concatenate((all_losses, r_losses), axis=0)
                     all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
                     all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
+                elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    r_losses = self.__session.run([test_losses])
+
+                    all_losses = np.concatenate((all_losses, r_losses[0]), axis=0)
 
             # Delete the weird first entries
             all_losses = np.delete(all_losses, 0)
@@ -523,7 +529,8 @@ class DPPModel(object):
                 mean = (sum / num_batches)
 
                 self.__log('Average test accuracy: {:.5f}'.format(mean))
-            elif self.__problem_type == definitions.ProblemType.REGRESSION:
+            elif self.__problem_type == definitions.ProblemType.REGRESSION or \
+                            self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
                 abs_mean = np.mean(np.abs(all_losses))
                 abs_var = np.var(np.abs(all_losses))
@@ -533,14 +540,9 @@ class DPPModel(object):
                 var = np.var(all_losses)
                 mse = np.mean(np.square(all_losses))
                 std = np.sqrt(var)
-
-                all_y_mean = np.mean(all_y)
-                total_error = np.sum(np.square(all_y - all_y_mean))
-                unexplained_error = np.sum(np.square(all_losses))
-
                 max = np.amax(all_losses)
                 min = np.amin(all_losses)
-                R2 = 1. - (unexplained_error / total_error)
+
                 hist, _ = np.histogram(all_losses, bins=100)
 
                 self.__log('Mean loss: {}'.format(mean))
@@ -550,12 +552,21 @@ class DPPModel(object):
                 self.__log('Min error: {}'.format(min))
                 self.__log('Max error: {}'.format(max))
                 self.__log('MSE: {}'.format(mse))
-                self.__log('R^2: {}'.format(R2))
-                self.__log('Histogram of L2 losses:')
-                self.__log('All test labels:')
-                self.__log(all_y)
-                self.__log('All predictions:')
-                self.__log(all_predictions)
+
+                if len(all_y) > 0:
+                    all_y_mean = np.mean(all_y)
+                    total_error = np.sum(np.square(all_y - all_y_mean))
+                    unexplained_error = np.sum(np.square(all_losses))
+                    R2 = 1. - (unexplained_error / total_error)
+
+                    self.__log('R^2: {}'.format(R2))
+                    self.__log('All test labels:')
+                    self.__log(all_y)
+
+                if len(all_predictions) > 0:
+                    self.__log('All predictions:')
+                    self.__log(all_predictions)
+
                 self.__log('Histogram of L2 losses:')
                 self.__log(hist)
 
@@ -587,10 +598,8 @@ class DPPModel(object):
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
-            #x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, 3]))
             x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, num_channels]))
             x4 = tf.transpose(x3, (0, 2, 1, 3))
-            #x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, 3]))
             x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, num_channels]))
             x6 = tf.transpose(x5, (2, 1, 3, 0))
             x7 = tf.transpose(x6, (3, 0, 1, 2))
