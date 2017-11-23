@@ -1,8 +1,12 @@
+### The [DPP paper](http://journal.frontiersin.org/article/10.3389/fpls.2017.01190/full) is now available online!
+
 # Deep Plant Phenomics
 
 Deep Plant Phenomics (DPP) is a platform for plant phenotyping using deep learning. Think of it as [Keras](https://keras.io/) for plant scientists.
 
 DPP integrates [Tensorflow](https://www.tensorflow.org/) for learning and [PlantCV](http://plantcv.danforthcenter.org/) for image processing. This means that it is able to run on both CPUs and GPUs, and scale easily across devices.
+
+Read the [doumentation](http://deep-plant-phenomics.readthedocs.io/en/latest/) for tutorials, or see the included examples.
 
 DPP is maintained at the [Plant Phenotyping and Imaging Research Center (P2IRC)](http://p2irc.usask.ca/) at the [University of Saskatchewan](https://www.usask.ca/). 🌾🇨🇦
 
@@ -87,8 +91,14 @@ model.begin_training()
 1. Install the following dependencies, following the directions provided according to your platform and requirements:
     - [Tensorflow](https://www.tensorflow.org/) (1.0 or later)
     - [PlantCV](http://plantcv.danforthcenter.org/) (Only required for the `auto-segmentation` preprocessor)
-3. `git clone https://github.com/usaskdapper/deepplantphenomics.git` 
+3. `git clone https://github.com/p2irc/deepplantphenomics.git` 
 4. `python setup.py install`
+
+## Downloading Pre-trained Networks
+
+The package uses [Git Large File Storage](https://git-lfs.github.com/) (git-lfs) to handle the saved network states included in this repository, as they can sometimes be very large.
+
+If you had git-lfs installed when you installed the packages, then you automatically downloaded the saved networks. If you want to download the states after installing the package, then install git-lfs and run ``git lfs fetch`` and then ``git lfs pull``.
 
 ## Contributing
 
