@@ -15,9 +15,6 @@ output_dir = './segmented-images'
 images = [os.path.join(dir, name) for name in os.listdir(dir) if
           os.path.isfile(os.path.join(dir, name)) & name.endswith('_rgb.png')]
 
-# Sort so the outputs match the order in the labels file
-images = sorted(images)
-
 print('Performing segmentation...')
 
 y = dpp.tools.segment_vegetation(images)
