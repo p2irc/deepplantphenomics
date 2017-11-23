@@ -992,10 +992,10 @@ class DPPModel(object):
         with self.__graph.as_default():
             if self.__has_moderation:
                 train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(image_files, seg_files, self.__train_test_split, self.__all_moderation_features, self.__training_augmentation_images, self.__training_augmentation_labels)
+                    loaders.split_raw_data(image_files, seg_files, self.__train_test_split, self.__all_moderation_features, self.__training_augmentation_images, self.__training_augmentation_labels, split_labels=True)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf, test_mf=test_mf)
             else:
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, seg_files, self.__train_test_split, None, self.__training_augmentation_images, self.__training_augmentation_labels)
+                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, seg_files, self.__train_test_split, None, self.__training_augmentation_images, self.__training_augmentation_labels, split_labels=True)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
@@ -1465,9 +1465,6 @@ class DPPModel(object):
                 # make into a binary mask
                 self.__test_labels = tf.reduce_sum(self.__test_labels, axis=2)
                 self.__train_labels = tf.reduce_sum(self.__train_labels, axis=2)
-
-                #self.__test_labels.set_shape([self.__image_height, self.__image_width])
-                #self.__train_labels.set_shape([self.__image_height, self.__image_width])
             else:
                 self.__test_labels = test_input_queue[1]
                 self.__train_labels = train_input_queue[1]
