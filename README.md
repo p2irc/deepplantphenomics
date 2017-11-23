@@ -27,6 +27,7 @@ For example, using a few lines of code you can easily use your data to train a c
 - Several pre-made networks for common plant phenotyping tasks.
 - Automatic batching and input pipeline.
     - Loaders for some popular plant phenotyping datasets.
+- Support for semantic segmentation with fully convolutional networks.
 - Automatic segmentation using PlantCV and bounding box regression.
 - Multi-threading for pre-processing tasks.
 - Tensorboard integration.

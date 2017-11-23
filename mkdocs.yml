@@ -9,6 +9,7 @@ pages:
         - Preprocessing Steps: Preprocessing-Steps.md
         - Model Options: Model-Options.md
         - Data Fusion Options: Data-Fusion-Options.md
+        - Semantic Segmentation: Semantic-Segmentation.md
       - Tools: Tools.md
       - Tutorials:
         - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
