@@ -129,6 +129,7 @@ class rosetteLeafRegressor(object):
     def shut_down(self):
         self.model.shut_down()
 
+
 class arabidopsisStrainClassifier(object):
     model = None
 
@@ -176,6 +177,49 @@ class arabidopsisStrainClassifier(object):
         self.model.add_dropout_layer(0.5)
 
         self.model.add_output_layer(output_size=5)
+
+    def forward_pass(self, x):
+        y = self.model.forward_pass_with_file_inputs(x)
+
+        return y
+
+    def shut_down(self):
+        self.model.shut_down()
+
+
+class vegetationSegmentationNetwork(object):
+    model = None
+
+    img_height = 128
+    img_width = 128
+
+    __dir_name = 'vegetation-segmentation-network'
+
+    def __init__(self, batch_size=32):
+        """A network which provides segmentation masks from plant images"""
+
+        m_path, _ = os.path.split(__file__)
+        checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
+
+        import deepplantpheno as dpp
+
+        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
+
+        # Define model hyperparameters
+        self.model.set_problem_type('semantic_segmentation')
+        self.model.set_batch_size(batch_size)
+        self.model.set_number_of_threads(1)
+        self.model.set_image_dimensions(self.img_height, self.img_width, 3)
+        self.model.set_resize_images(True)
+
+        # Define a model architecture
+        self.model.add_input_layer()
+
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 3, 16], stride_length=1,activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 16, 32], stride_length=1, activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu')
+
+        self.model.add_output_layer()
 
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)

@@ -686,6 +686,8 @@ class DPPModel(object):
                 total_outputs = np.empty([1, self.__last_layer().output_size])
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 total_outputs = np.empty([1, self.__num_regression_outputs])
+            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                total_outputs = np.empty([1, self.__image_height, self.__image_width])
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
