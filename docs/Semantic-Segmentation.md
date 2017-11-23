@@ -1,8 +1,8 @@
-Semantic segmentation refers to the task of assigning a label to each pixel in the image. This can be used, for example, to segment organs from a plant. Although it may be overkill compared to standard thresholding methods like Excess Green Index, it can also be used to segment plants from the background as in this example.
+Semantic segmentation refers to the task of assigning a label to each pixel in the image. This can be used, for example, to segment organs from a plant. Although it may be overkill compared to standard thresholding methods like Excess Green Index, it can also be used to segment plants from the background as in this example, which is the basis of the [vegetation segmentation tool](/Tools/).
 
 ![results](./semantic-output.png)
 
-DPP provides the option to use fully convolutional networks in order to perform this task. As of now, only binary segmentations are supported (pixels are assigned a number between 1 and 0, which can be rounded or thresholded to get a mask).
+DPP provides the option to use fully convolutional networks in order to perform the semantic segmentation task. As of now, only binary segmentations are supported (pixels are assigned a number between 1 and 0, which can be rounded or thresholded to get a mask).
 
 ## Example
 
