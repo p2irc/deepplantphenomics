@@ -22,6 +22,7 @@ class tools(object):
 
         return predictions
 
+
     @staticmethod
     def classify_arabidopsis_strain(x, batch_size=32):
         """
@@ -38,3 +39,19 @@ class tools(object):
         labels = [mapping[index] for index in indices]
 
         return labels
+
+
+    @staticmethod
+    def segment_vegetation(x, batch_size=8):
+        """
+        Uses a pre-trained fully convolutional network to perform vegetation segmentation
+        """
+
+        net = networks.vegetationSegmentationNetwork(batch_size=batch_size)
+        predictions = net.forward_pass(x)
+        net.shut_down()
+
+        # round for binary mask
+        predictions = np.round(predictions)
+
+        return predictions

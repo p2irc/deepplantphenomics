@@ -62,7 +62,7 @@ class convLayer(object):
 
         self.activations = activations
 
-        return activations
+        return tf.squeeze(activations)
 
 
 class poolingLayer(object):
