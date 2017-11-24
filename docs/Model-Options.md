@@ -127,3 +127,10 @@ set_augmentation_brightness_and_contrast(True)
 ```
 
 Randomly adjust contrast and/or brightness on training images.
+
+
+```
+load_training_augmentation_dataset_from_directory_with_csv_labels(dirname, labels_file, column_number, id_column_number)
+```
+
+Load a second set of images with corresponding labels in a csv file to augment the training set with. This is a good option if your chosen augmentation is not listed above - you can create the augmented examples yourself and load them with this function. `column_number` should have the label and `id_column_number` should have the filename.

@@ -68,9 +68,17 @@ Put your images in a directory, organized with images of each class in a separat
 load_dataset_from_directory_with_auto_labels(dirname)
 ```
 
+### Load Dataset with Segmentation Ground-Truth
+
+Loads the `.png` images from a directory, along with the ground-truth segmentation masks from another directory. File names should match exactly between the images and the corresponding ground truth images.
+
+```
+load_dataset_from_directory_with_segmentation_masks(dirname, truth_dirname)
+```
+
 ### Load Dataset from IPPN for Classification or Regression
 
-Loads the RGB images and classification labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/). Depending on the task you want labels for, you can pass the values `strain`, `treatment`, or `DAG` (Days After Germination).
+Loads the RGB images and classification labels from the [International Plant Phenotyping Network](http://www.plant-phenotyping.org/) "PRL" dataset. Depending on the task you want labels for, you can pass the values `strain`, `treatment`, or `DAG` (Hours After Germination).
 
 ```
 load_ippn_dataset_from_directory(dirname, column)
@@ -78,7 +86,7 @@ load_ippn_dataset_from_directory(dirname, column)
 
 ### Load Dataset from IPPN for Tray Segmentation
 
-Loads the RGB tray images and plant bounding box labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/).
+Loads the RGB tray images and plant bounding box labels from the [International Plant Phenotyping Network](http://www.plant-phenotyping.org/) datasets.
 
 ```
 load_ippn_tray_dataset_from_directory(dirname):
@@ -86,7 +94,7 @@ load_ippn_tray_dataset_from_directory(dirname):
 
 ### Load Dataset from IPPN for Leaf Counting
 
-Loads the RGB images and leaf count labels from the [International Plant Phenotyping Network dataset](http://www.plant-phenotyping.org/).
+Loads the RGB images and leaf count labels from the [International Plant Phenotyping Network](http://www.plant-phenotyping.org/) datasets.
 
 ```
 load_ippn_leaf_count_dataset_from_directory(dirname)

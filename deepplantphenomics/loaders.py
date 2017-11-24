@@ -5,10 +5,12 @@ import random
 import os
 
 
-def split_raw_data(images, labels, ratio, moderation_features=None, augmentation_images=None, augmentation_labels=None):
+def split_raw_data(images, labels, ratio, moderation_features=None, augmentation_images=None, augmentation_labels=None, split_labels=True):
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
-        labels = [' '.join(map(str, label)) for label in labels]
+	if split_labels:
+        	labels = [' '.join(map(str, label)) for label in labels]
+
         total_samples = len(labels)
     else:
         total_samples = labels.get_shape().as_list()[0]

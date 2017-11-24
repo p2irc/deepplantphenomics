@@ -24,20 +24,21 @@ For example, calling `tools.predict_rosette_leaf_count(my_files)` will use a pre
 
 ### 2. An easy way to train your own models
 
-For example, using a few lines of code you can easily use your data to train a convolutional neural network to rate plants for biotic stress. See the tutorial for how the leaf counting model was built.
+For example, using a few lines of code you can easily use your data to train a convolutional neural network to rate plants for biotic stress. See the [tutorial](http://deep-plant-phenomics.readthedocs.io/en/latest/Tutorial-Training-The-Leaf-Counter/) for how the leaf counting model was built.
 
 ## Features
 
-- Several pre-made networks for common plant phenotyping tasks.
+- Several [pre-made networks](http://deep-plant-phenomics.readthedocs.io/en/latest/Tools/) for common plant phenotyping tasks.
 - Automatic batching and input pipeline.
     - Loaders for some popular plant phenotyping datasets.
-- Automatic segmentation using PlantCV and bounding box regression.
-- Multi-threading for pre-processing tasks.
+    - Plenty of [different loaders](http://deep-plant-phenomics.readthedocs.io/en/latest/Loaders/) for your own data, however it exists.
+    - Predict classes, values, bounding boxes, or segmentations.
+- Support for [semantic segmentation](http://deep-plant-phenomics.readthedocs.io/en/latest/Semantic-Segmentation/) with fully convolutional networks.
 - Tensorboard integration.
 - Easy-to-use API for building new models.
-    - Support for both classification and regression problems.
-    - Data augmentation options.
-    - Many ready-to-use neural network layers.
+    - Several data augmentation options.
+    - Many ready-to-use [neural network layers](http://deep-plant-phenomics.readthedocs.io/en/latest/Neural-Network-Layers/).
+- Easy to [deploy](http://deep-plant-phenomics.readthedocs.io/en/latest/Tutorial-Deployment/) your own models as a Python function!
 
 ## Example Usage
 
