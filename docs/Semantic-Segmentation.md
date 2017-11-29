@@ -1,10 +1,8 @@
-Semantic segmentation refers to the task of assigning a label to each pixel in the image. This can be used, for example, to segment organs from a plant by using the labelling as a segmentation mask. Although it may be overkill compared to standard thresholding methods like Excess Green Index, it can be used to segment plants from the background as in this example, which is the basis of the [vegetation segmentation tool](/Tools/).
+Semantic segmentation refers to the task of assigning a label to each pixel in the image. This can be used, for example, to segment organs from a plant by using the labelling as a segmentation mask. Although it may be overkill compared to standard thresholding indices, it can also be used to segment plants from the background as in this example, which is the basis of the [vegetation segmentation tool](/Tools/).
 
 ![results](./semantic-output.png)
 
 DPP provides the option to use fully convolutional networks in order to perform the semantic segmentation task. As of now, only binary segmentations are supported (pixels are assigned a number between 1 and 0, which can be rounded or thresholded to get a mask).
-
-Since the size of the output layer cannot change, the masks are always output in the same dimensions. This means that the mask must be resized to the same width and height as the original image before being applied.
 
 ## Example
 
@@ -51,3 +49,9 @@ model.begin_training()
 The crucial part here is ``model.set_problem_type('semantic_segmentation')``. This will automatically make the output layer into a convolutional layer, which is what you need to output masks instead of scalar values. Also important is the use of ``model.load_dataset_from_directory_with_segmentation_masks()``, which loads binary images of ground-truth segmentations as the labels, instead of something like numbers from a csv file. 
 
 These ground-truth images are `.png` files, with the value 0 in every channel for negative pixels, and the value 255 in every channel for positive pixels.
+
+## Generating and Applying the Segmentation Mask
+
+Since the fully connected output is a one-channel greyscale image, it must be rounded or thresholded to get a binary segmentation mask. The [vegetation segmentation tool](/Tools/) does this using the Otsu thresholding method in OpenCV.
+
+Since the size of the output layer cannot change, the masks are always output in the same dimensions. This means that the mask must be resized to the same width and height as the original image before being applied. See the [vegetation segmentation tool](/Tools/) for an example of how to do this.
