@@ -6,21 +6,34 @@ The vegetaion segmentation network can perform automatic segmentation of foregro
 
 ```
 import deepplantphenomics as dpp
-import numpy
+import numpy as np
 from PIL import Image
 import os
 
 output_dir = './segmented-images'
 
 my_files = ['one.png', 'two.png', 'three.png']
+
 y = dpp.tools.segment_vegetation(images)
 
 for i, img in enumerate(y):
-    filename = os.path.join(output_dir, os.path.basename(images[i]))
-    result = Image.fromarray((img * 255).astype(numpy.uint8))
-    result.save(filename)
+    # Get original image dimensions
+    org_filename = my_files[i]
+    org_img = Image.open(org_filename)
+    org_width, org_height = org_img.size
+    org_array = np.array(org_img)
 
-print('Done')
+    # Resize mask
+    mask_img = Image.fromarray((img * 255).astype(np.uint8))
+    mask_array = np.array(mask_img.resize((org_width, org_height))) / 255
+
+    # Apply mask
+    img_seg = np.array([org_array[:,:,0] * mask_array, org_array[:,:,1] * mask_array, org_array[:,:,2] * mask_array]).transpose()
+
+    # Write output file
+    filename = os.path.join(output_dir, os.path.basename(images[i]))
+    result = Image.fromarray(img_seg.astype(np.uint8))
+    result.save(filename)
 ```
 
 ## Rosette Leaf Counter
