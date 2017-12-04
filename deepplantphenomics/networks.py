@@ -102,7 +102,7 @@ class rosetteLeafRegressor(object):
 
         self.model.set_problem_type('regression')
 
-        self.model.set_augmentation_crop(True)
+        self.model.set_augmentation_crop(True, crop_ratio=0.9)
 
         # Define a model architecture
         self.model.add_input_layer()
@@ -110,14 +110,16 @@ class rosetteLeafRegressor(object):
         self.model.add_convolutional_layer(filter_dimension=[5, 5, 3, 32], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh')
+        self.model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='tanh')
+        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
+
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 32, 64], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
         self.model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
-        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
+	self.model.add_fully_connected_layer(output_size=1024, activation_function='tanh')
 
         self.model.add_output_layer()
 
@@ -190,8 +192,8 @@ class arabidopsisStrainClassifier(object):
 class vegetationSegmentationNetwork(object):
     model = None
 
-    img_height = 128
-    img_width = 128
+    img_height = 256
+    img_width = 256
 
     __dir_name = 'vegetation-segmentation-network'
 
