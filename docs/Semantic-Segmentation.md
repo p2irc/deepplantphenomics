@@ -18,7 +18,7 @@ channels = 3
 
 # Setup and hyperparameters
 model.set_batch_size(4)
-model.set_image_dimensions(128, 128, channels)
+model.set_image_dimensions(256, 256, channels)
 model.set_resize_images(True)
 
 model.set_problem_type('semantic_segmentation')
@@ -46,9 +46,9 @@ model.add_output_layer()
 model.begin_training()
 ```
 
-The crucial part here is ``model.set_problem_type('semantic_segmentation')``. This will automatically make the output layer into a convolutional layer, which is what you need to output masks instead of scalar values. Also important is the use of ``model.load_dataset_from_directory_with_segmentation_masks()``, which loads binary images of ground-truth segmentations as the labels, instead of something like numbers from a csv file. 
+The crucial part here is ``model.set_problem_type('semantic_segmentation')``. This will automatically make the output layer into a convolutional layer, which is what you need to output masks instead of scalar values. Also important is the use of ``model.load_dataset_from_directory_with_segmentation_masks()``, which loads binary images of ground-truth segmentations as the labels, instead of something like numbers from a csv file. These ground-truth images are `.png` files, with the value 0 in every channel for negative pixels, and the value 255 in every channel for positive pixels.
 
-These ground-truth images are `.png` files, with the value 0 in every channel for negative pixels, and the value 255 in every channel for positive pixels.
+The only augmentation strategy currently compatible with fully convolutional networks is the brightness and contrast option.
 
 ## Generating and Applying the Segmentation Mask
 

@@ -56,7 +56,7 @@ Set the weight initialization scheme for convolutional and fully connected layer
 set_problem_type()
 ```
 
-Set the type of problem for the model. Default is `'classification'`, other option is `'regression'`.
+Set the type of problem for the model. Default is `'classification'`, other options are `'regression'` or `'semantic_segmentation'` (really just pixel-wise regression with a fully convolutional network, but useful for segmentation applications. See [semantic segmentation](/Semantic-Segmentation/)).
 
 ```
 set_train_test_split()
