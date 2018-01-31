@@ -237,3 +237,38 @@ class moderationLayer(object):
         x = tf.concat([x, features], axis=1)
 
         return x
+
+
+class batchNormLayer(object):
+    """Batch normalization layer"""
+    input_size = None
+    output_size = None
+
+    __scale = None
+    __offset = None
+    __epsilon = 1e-3
+
+    __ema = tf.train.ExponentialMovingAverage(decay=0.5)
+
+    def __init__(self, input_size):
+        self.input_size = input_size
+        self.output_size = input_size
+
+        if isinstance(self.output_size, (list,)):
+            shape = self.output_size
+        else:
+            shape = [self.output_size]
+
+        self.__offset = tf.Variable(tf.constant(0.0, shape=shape), trainable=True)
+        self.__scale = tf.Variable(tf.constant(1.0, shape=shape), trainable=True)
+
+    def forward_pass(self, x, deterministic):
+        mean, var = tf.nn.moments(x, axes=[0])
+        self.__ema.apply([mean, var])
+
+        if deterministic:
+            mean, var = self.__ema.average(mean), self.__ema.average(var)
+
+        x = tf.nn.batch_normalization(x, mean, var, self.__offset, self.__scale, self.__epsilon)
+
+        return x
