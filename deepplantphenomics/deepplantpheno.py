@@ -415,7 +415,7 @@ class DPPModel(object):
 
                 # Summaries for each layer
                 for layer in self.__layers:
-                    if hasattr(layer, 'name'):
+                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
                         tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
                         tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
@@ -869,7 +869,7 @@ class DPPModel(object):
         self.__log('Adding batch norm layer %s...' % layer_name)
 
         with self.__graph.as_default():
-            layer = layers.batchNormLayer(self.__last_layer().output_size)
+            layer = layers.batchNormLayer(layer_name, self.__last_layer().output_size)
 
         self.__layers.append(layer)
 
