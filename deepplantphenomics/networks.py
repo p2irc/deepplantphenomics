@@ -88,7 +88,7 @@ class rosetteLeafRegressor(object):
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
 
-        import deepplantpheno as dpp
+        import deepplantphenomics as dpp
 
         self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
@@ -146,7 +146,7 @@ class arabidopsisStrainClassifier(object):
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
 
-        import deepplantpheno as dpp
+        import deepplantphenomics as dpp
 
         self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
@@ -203,7 +203,7 @@ class vegetationSegmentationNetwork(object):
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
 
-        import deepplantpheno as dpp
+        import deepplantphenomics as dpp
 
         self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 

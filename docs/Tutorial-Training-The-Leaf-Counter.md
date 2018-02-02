@@ -120,25 +120,36 @@ model.begin_training()
 The model will train until 500 epochs. We will see updates both in the console as well as in Tensorboard. At the end, loss statistics will be reported for the entire test set.
 
 ```
-12:18PM: Results for batch 16400 (epoch 496) - Regression Loss: 0.18489, samples/sec: 207.76
-12:18PM: Results for batch 16420 (epoch 497) - Regression Loss: 0.70228, samples/sec: 194.58
-12:18PM: Results for batch 16440 (epoch 498) - Regression Loss: 0.20067, samples/sec: 255.98
-12:18PM: Results for batch 16460 (epoch 498) - Regression Loss: 0.36997, samples/sec: 233.45
-12:18PM: Results for batch 16480 (epoch 499) - Regression Loss: 0.42173, samples/sec: 212.57
-12:18PM: Stopping due to maximum epochs
-12:18PM: Saving parameters...
-12:18PM: Computing total test accuracy/regression loss...
-12:18PM: Mean loss: 0.25281727314
-12:18PM: Loss standard deviation: 1.01810562611
-12:18PM: Mean absolute loss: 0.802363336086
-12:18PM: Absolute loss standard deviation: 0.675772547722
-12:18PM: Min error: -3.21537303925
-12:18PM: Max error: 1.78374052048
-12:18PM: Histogram of L2 losses:
-12:18PM: [1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
- 0 0 0 0 0 0 0 0 2 1 0 0 0 0 0 1 0 0 0 1 0 0 2 0 0 1 0 1 1 1 1 2 1 1 0 0 1
- 1 2 0 1 1 1 2 2 0 0 1 1 1 1 0 0 0 1 0 0 0 1 0 1 0 1]
-12:18PM: Shutdown requested, ending session...
+09:40AM: Results for batch 32980 (epoch 499) - Loss: 0.19386, samples/sec: 871.05
+09:40AM: Stopping due to maximum epochs
+09:40AM: Saving parameters...
+09:40AM: Computing total test accuracy/regression loss...
+09:40AM: Mean loss: -0.0272586610582
+09:40AM: Loss standard deviation: 0.624978633174
+09:40AM: Mean absolute loss: 0.480917639203
+09:40AM: Absolute loss standard deviation: 0.400074431613
+09:40AM: Min error: -1.19493865967
+09:40AM: Max error: 1.5458946228
+09:40AM: MSE: 0.391341326526
+09:40AM: R^2: 0.904088812561
+09:40AM: All test labels:
+09:40AM: [  9.   6.   6.   7.   9.   7.  10.   7.   9.   7.   9.   8.  11.   8.   9.
+  10.  13.   8.   9.  11.  13.  10.  11.  13.   7.   7.   8.   8.   6.   7.
+   6.   7.   9.   6.   6.   7.]
+09:40AM: All predictions:
+09:40AM: [  8.1905098    6.8377347    6.05786324   6.85530901   9.53642273
+   6.90101051   9.07618999   7.18060684   9.11283112   7.32292271
+  10.06754875   9.54589462  10.39970398   8.09113407   8.87572861
+   9.58766937  11.90369415   7.8541441    8.67022324  11.41111469
+  11.82732868  10.79200935  11.04158878  11.80506134   6.51270151
+   7.24674559   7.92943382   8.56169319   5.93615294   6.48214674
+   6.16266203   7.30149126   8.1905098    6.8377347    6.05786324
+   6.85530901]
+09:40AM: Histogram of L2 losses:
+09:40AM: [2 0 0 1 0 0 0 0 0 1 0 0 0 0 2 0 0 0 0 0 0 1 0 0 1 1 0 0 1 0 0 1 0 0 0 0 0
+ 0 3 2 0 2 0 0 0 3 1 1 0 1 1 0 1 0 1 1 0 0 1 0 0 0 0 1 1 0 0 0 0 0 0 0 1 0
+ 2 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1]
+09:40AM: Shutdown requested, ending session...
 ```
 
 For regression problems, the loss value is **the L2 norm of the ground truth label subtracted from the regression output**. This means that for a one-dimensional output, like leaf count, we can interpret the loss as the absolute difference in count.
@@ -146,6 +157,8 @@ For regression problems, the loss value is **the L2 norm of the ground truth lab
 Also, for one-dimensional output, notice that the L2 norm is reported as the "absolute" loss, while the relative difference is also reported. This is useful in cases (such as leaf counting) where we are interested in over- and under-prediction. For multi-dimensional outputs, the mean/std and absolute mean/std will be identical, since the L2 norm is never negative.
 
 An error histogram is output as a vector of frequencies for 100 bins. Note that the min and max loss are also reported. The first bin corresponds to the interval (-inf, min] and the last bin corresponds to the inerval [max, inf). The area between these bins is divided into 98 bins of equal size.
+
+MSE (mean squared error) and R squared are also provided. For smaller test sets, the whole set of ground truth and predicted values are provided so that you can calculate whatever other statistics you need.
 
 ## My Model's Not Converging, What Can I Do?
 

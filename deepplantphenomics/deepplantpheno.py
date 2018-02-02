@@ -73,6 +73,7 @@ class DPPModel(object):
     __num_layers_pool = 0
     __num_layers_fc = 0
     __num_layers_dropout = 0
+    __num_layers_batchnorm = 0
 
     # Network options
     __batch_size = None
@@ -138,6 +139,9 @@ class DPPModel(object):
 
     def __last_layer(self):
         return self.__layers[-1]
+
+    def __last_layer_outputs_volume(self):
+        return isinstance(self.__last_layer().output_size, (list,))
 
     def __first_layer(self):
         return next(layer for layer in self.__layers if
@@ -411,7 +415,7 @@ class DPPModel(object):
 
                 # Summaries for each layer
                 for layer in self.__layers:
-                    if hasattr(layer, 'name'):
+                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
                         tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
                         tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
@@ -771,8 +775,8 @@ class DPPModel(object):
         """Add a moderation layer to the network"""
         self.__log('Adding moderation layer...')
 
-        reshape = isinstance(self.__last_layer(), layers.convLayer) or isinstance(self.__last_layer(),
-                                                                                  layers.poolingLayer)
+        reshape = self.__last_layer_outputs_volume()
+
         feat_size = self.__moderation_features_size
 
         with self.__graph.as_default():
@@ -858,6 +862,17 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
+    def add_batch_norm_layer(self):
+        """Add a batch normalization layer to the model."""
+        self.__num_layers_batchnorm += 1
+        layer_name = 'bn%d' % self.__num_layers_batchnorm
+        self.__log('Adding batch norm layer %s...' % layer_name)
+
+        with self.__graph.as_default():
+            layer = layers.batchNormLayer(layer_name, self.__last_layer().output_size)
+
+        self.__layers.append(layer)
+
     def add_fully_connected_layer(self, output_size, activation_function, regularization_coefficient=None):
         """
         Add a fully connected layer to the model.
@@ -871,8 +886,7 @@ class DPPModel(object):
         layer_name = 'fc%d' % self.__num_layers_fc
         self.__log('Adding fully connected layer %s...' % layer_name)
 
-        reshape = isinstance(self.__last_layer(), layers.convLayer) or isinstance(self.__last_layer(),
-                                                                                  layers.poolingLayer)
+        reshape = self.__last_layer_outputs_volume()
 
         if regularization_coefficient is None and self.__reg_coeff is not None:
             regularization_coefficient = self.__reg_coeff
@@ -904,8 +918,7 @@ class DPPModel(object):
         """
         self.__log('Adding output layer...')
 
-        reshape = isinstance(self.__last_layer(), layers.convLayer) or isinstance(self.__last_layer(),
-                                                                                  layers.poolingLayer)
+        reshape = self.__last_layer_outputs_volume()
 
         if regularization_coefficient is None and self.__reg_coeff is not None:
             regularization_coefficient = self.__reg_coeff

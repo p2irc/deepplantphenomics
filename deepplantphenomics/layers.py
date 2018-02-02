@@ -237,3 +237,48 @@ class moderationLayer(object):
         x = tf.concat([x, features], axis=1)
 
         return x
+
+
+class batchNormLayer(object):
+    """Batch normalization layer"""
+    input_size = None
+    output_size = None
+    name = None
+
+    __scale = None
+    __offset = None
+    __epsilon = 1e-3
+
+    __test_mean = None
+    __test_var = None
+
+    def __init__(self, name, input_size):
+        self.input_size = input_size
+        self.output_size = input_size
+        self.name = name
+
+        if isinstance(self.output_size, (list,)):
+            shape = self.output_size
+        else:
+            shape = [self.output_size]
+
+        with tf.variable_scope(name, reuse=False):
+            self.__offset = tf.Variable(tf.zeros(shape), trainable=True)
+            self.__scale = tf.Variable(tf.ones(shape), trainable=True)
+
+            self.__test_mean = tf.Variable(tf.zeros(shape))
+            self.__test_var = tf.Variable(tf.ones(shape))
+
+    def forward_pass(self, x, deterministic):
+        mean, var = tf.nn.moments(x, axes=[0])
+        decay = tf.constant(0.9)
+
+        if deterministic:
+            mean2 = tf.assign(self.__test_mean, self.__test_mean * decay + mean * (1 - decay))
+            var2 = tf.assign(self.__test_var, self.__test_var * decay + var * (1 - decay))
+        else:
+            mean2, var2 = mean, var
+
+        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon)
+
+        return x
