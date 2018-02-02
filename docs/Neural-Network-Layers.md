@@ -60,6 +60,16 @@ This layer applies the [local response normalization](https://www.tensorflow.org
 model.add_local_response_normalization_layer()
 ```
 
+## Batch Normalization Layer
+
+This layer applies batch normalization (Ioffe & Szegedy, 2015) to the activations of the previous layer. Batch norm layers can be used after convolutional, pooling, or fully connected layers.
+
+Using batch normalization may be detrimental to some regression problems. You should always try your network without batch norm before adding it in and re-tuning your hyperparameters.
+
+```
+model.add_batch_norm_layer()
+```
+
 ## Output Layer
 
 The output layer is the final layer in the network.
