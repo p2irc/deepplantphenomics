@@ -263,7 +263,7 @@ class DPPModel(object):
             warnings.warn('Problem type specified not supported')
             exit()
 
-    def begin_training(self):
+    def begin_training(self, return_test_loss=False):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables.
         The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
@@ -497,9 +497,60 @@ class DPPModel(object):
 
                 self.save_state()
 
-                self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
+                final_test_loss = self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
 
                 self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
+
+    def begin_training_with_hyperparameter_search(self, l2_reg_limits=None, lr_limits=None, num_steps=3):
+        """
+        Performs grid-based hyperparameter search given the ranges passed. Parameters are optional.
+
+        :param l2_reg_limits: array representing a range of L2 regularization coefficients in the form [low, high]
+        :param lr_limits: array representing a range of learning rates in the form [low, high]
+        :param num_steps: the size of the grid. Larger numbers are exponentially slower.
+        """
+
+        all_l2_reg = []
+        all_lr = []
+
+        # Assemble the grid
+
+        if l2_reg_limits is None:
+            all_l2_reg = [self.__reg_coeff]
+        else:
+            step_size = (l2_reg_limits[1] - l2_reg_limits[0]) / np.float32(num_steps)
+            all_l2_reg = np.arange(l2_reg_limits[0], l2_reg_limits[1], step_size)
+
+        if lr_limits is None:
+            all_lr = [self.__learning_rate]
+        else:
+            step_size = (lr_limits[1] - lr_limits[0]) / np.float32(num_steps)
+            all_lr = np.arange(lr_limits[0], lr_limits[1], step_size)
+
+        all_loss_results = np.empty([len(all_l2_reg), len(all_lr)])
+
+        for i, current_l2 in enumerate(all_l2_reg):
+            for j, current_lr in enumerate(all_lr):
+                self.__learning_rate = current_lr
+                self.__reg_coeff = current_l2
+
+                if self.__tb_dir is not None:
+                    self.__tb_dir = self.__tb_dir+'_lr:'+current_lr+'_l2:'+current_l2
+
+                current_loss = self.begin_training()
+                all_loss_results[i][j] = current_loss
+
+        self.__log('All l2 coef. tested:')
+        self.__log(all_l2_reg)
+        self.__log('All learning rates tested:')
+        self.__log(all_lr)
+        self.__log('Loss grid:')
+        self.__log(all_loss_results)
 
     def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
         """Returns statistics of the test losses depending on the type of task"""
@@ -545,6 +596,8 @@ class DPPModel(object):
                 mean = (sum / num_batches)
 
                 self.__log('Average test accuracy: {:.5f}'.format(mean))
+
+                return 1.0-mean
             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
                             self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
@@ -585,6 +638,8 @@ class DPPModel(object):
 
                 self.__log('Histogram of L2 losses:')
                 self.__log(hist)
+
+                return abs_mean
 
             return
 
