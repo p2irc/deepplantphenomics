@@ -16,6 +16,7 @@ class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
     __has_trained = False
+    __tb_summaries_done = False
     __save_checkpoints = None
 
     # Input options
@@ -131,7 +132,7 @@ class DPPModel(object):
             self.__log('TensorFlow loaded...')
 
             self.__graph = tf.Graph()
-            self.__session = tf.Session(graph=self.__graph)
+            self.__reset_session()
 
     def __log(self, message):
         if self.__debug:
@@ -146,6 +147,9 @@ class DPPModel(object):
     def __first_layer(self):
         return next(layer for layer in self.__layers if
                     isinstance(layer, layers.convLayer) or isinstance(layer, layers.fullyConnectedLayer))
+
+    def __reset_session(self):
+        self.__session = tf.Session(graph=self.__graph)
 
     def __initialize_queue_runners(self):
         self.__log('Initializing queue runners...')
@@ -380,7 +384,7 @@ class DPPModel(object):
                 test_cost = tf.reduce_mean(test_losses)
 
             # Epoch summaries for Tensorboard
-            if self.__tb_dir is not None:
+            if self.__tb_dir is not None and not self.__tb_summaries_done:
                 # Summaries for any problem type
                 tf.summary.scalar('train/loss', cost, collections=['custom_summaries'])
                 tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
@@ -421,6 +425,9 @@ class DPPModel(object):
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
                                              collections=['custom_summaries'])
 
+                self.__tb_summaries_done = True
+
+            if self.__tb_dir is not None:
                 merged = tf.summary.merge_all(key='custom_summaries')
                 train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
@@ -518,6 +525,8 @@ class DPPModel(object):
         all_l2_reg = []
         all_lr = []
 
+        base_tb_dir = self.__tb_dir
+
         # Assemble the grid
 
         if l2_reg_limits is None:
@@ -536,20 +545,23 @@ class DPPModel(object):
 
         for i, current_l2 in enumerate(all_l2_reg):
             for j, current_lr in enumerate(all_lr):
+                self.__log('HYPERPARAMETER SEARCH: Doing l2reg=%f, lr=%f' % (current_l2, current_lr))
+
+                self.__reset_session()
                 self.__learning_rate = current_lr
                 self.__reg_coeff = current_l2
 
-                if self.__tb_dir is not None:
-                    self.__tb_dir = self.__tb_dir+'_lr:'+current_lr+'_l2:'+current_l2
+                if base_tb_dir is not None:
+                    self.__tb_dir = base_tb_dir+'_lr:'+current_lr.astype('str')+'_l2:'+current_l2.astype('str')
 
-                current_loss = self.begin_training()
+                current_loss = self.begin_training(return_test_loss=True)
                 all_loss_results[i][j] = current_loss
 
         self.__log('All l2 coef. tested:')
         self.__log(all_l2_reg)
         self.__log('All learning rates tested:')
         self.__log(all_lr)
-        self.__log('Loss grid:')
+        self.__log('Loss grid:\n')
         self.__log(all_loss_results)
 
     def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
@@ -597,7 +609,7 @@ class DPPModel(object):
 
                 self.__log('Average test accuracy: {:.5f}'.format(mean))
 
-                return 1.0-mean
+                return 1.0-mean.astype(np.float32)
             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
                             self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
@@ -639,7 +651,7 @@ class DPPModel(object):
                 self.__log('Histogram of L2 losses:')
                 self.__log(hist)
 
-                return abs_mean
+                return abs_mean.astype(np.float32)
 
             return
 
