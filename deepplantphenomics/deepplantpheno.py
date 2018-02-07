@@ -561,8 +561,8 @@ class DPPModel(object):
         self.__log(all_l2_reg)
         self.__log('All learning rates tested:')
         self.__log(all_lr)
-        self.__log('Loss grid:\n')
-        self.__log(all_loss_results)
+        self.__log('Loss/error grid:')
+        self.__log('\n'+np.array2string(all_loss_results, precision=4))
 
     def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
         """Returns statistics of the test losses depending on the type of task"""
