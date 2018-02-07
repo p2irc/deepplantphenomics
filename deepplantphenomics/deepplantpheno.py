@@ -551,6 +551,11 @@ class DPPModel(object):
                 self.__learning_rate = current_lr
                 self.__reg_coeff = current_l2
 
+                # Reset the reg. coef. for all fc layers.
+                for layer in self.__layers:
+                    if isinstance(layer, layers.fullyConnectedLayer):
+                        layer.regularization_coefficient = current_l2
+
                 if base_tb_dir is not None:
                     self.__tb_dir = base_tb_dir+'_lr:'+current_lr.astype('str')+'_l2:'+current_l2.astype('str')
 
