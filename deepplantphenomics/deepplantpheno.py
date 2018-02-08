@@ -16,7 +16,6 @@ class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
     __has_trained = False
-    __tb_summaries_done = False
     __save_checkpoints = None
 
     # Input options
@@ -66,6 +65,7 @@ class DPPModel(object):
     # Network internal representation
     __session = None
     __graph = None
+    __graph_ops = {}
     __layers = []
     __global_epoch = 0
 
@@ -131,7 +131,7 @@ class DPPModel(object):
         if initialize:
             self.__log('TensorFlow loaded...')
 
-            self.__graph = tf.Graph()
+            self.__reset_graph()
             self.__reset_session()
 
     def __log(self, message):
@@ -150,6 +150,9 @@ class DPPModel(object):
 
     def __reset_session(self):
         self.__session = tf.Session(graph=self.__graph)
+
+    def __reset_graph(self):
+        self.__graph = tf.Graph()
 
     def __initialize_queue_runners(self):
         self.__log('Initializing queue runners...')
@@ -267,13 +270,7 @@ class DPPModel(object):
             warnings.warn('Problem type specified not supported')
             exit()
 
-    def begin_training(self, return_test_loss=False):
-        """
-        Initialize the network and either run training to the specified max epoch, or load trainable variables.
-        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
-        the session is shut down.
-        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
-        """
+    def __assemble_graph(self):
         with self.__graph.as_default():
             # Define batches
             if self.__has_moderation:
@@ -314,25 +311,25 @@ class DPPModel(object):
             # Define cost function and set optimizer
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-                cost = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
+                self.__graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
-                cost = tf.add(regression_loss, l2_cost)
+                self.__graph_ops['cost'] = tf.add(regression_loss, l2_cost)
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 pixel_loss = tf.reduce_mean(tf.abs(tf.subtract(xx, y)))
-                cost = tf.squeeze(tf.add(pixel_loss, l2_cost))
+                self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
             if self.__optimizer == 'Adagrad':
-                optimizer = tf.train.AdagradOptimizer(self.__learning_rate).minimize(cost)
+                self.__graph_ops['optimizer'] = tf.train.AdagradOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
                 self.__log('Using Adagrad optimizer')
             elif self.__optimizer == 'Adadelta':
-                optimizer = tf.train.AdadeltaOptimizer(self.__learning_rate).minimize(cost)
+                self.__graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
                 self.__log('Using Adadelta optimizer')
             elif self.__optimizer == 'SGD':
-                optimizer = tf.train.GradientDescentOptimizer(self.__learning_rate).minimize(cost)
+                self.__graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
                 self.__log('Using SGD optimizer')
             elif self.__optimizer == 'Adam':
-                optimizer = tf.train.AdamOptimizer(self.__learning_rate).minimize(cost)
+                self.__graph_ops['optimizer'] = tf.train.AdamOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
                 self.__log('Using Adam optimizer')
             else:
                 warnings.warn('Unrecognized optimizer requested')
@@ -341,52 +338,52 @@ class DPPModel(object):
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
                 correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
-                accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
+                self.__graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
             # Calculate test accuracy
             if self.__has_moderation:
-                x_test, y_test, mod_w_test = tf.train.batch(
+                x_test, self.__graph_ops['y_test'], mod_w_test = tf.train.batch(
                     [self.__test_images, self.__test_labels, self.__test_moderation_features],
                     batch_size=self.__batch_size,
                     num_threads=self.__num_threads,
                     capacity=self.__queue_capacity)
             else:
-                x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
+                x_test, self.__graph_ops['y_test'] = tf.train.batch([self.__test_images, self.__test_labels],
                                                 batch_size=self.__batch_size,
                                                 num_threads=self.__num_threads,
                                                 capacity=self.__queue_capacity)
 
             if self.__problem_type == definitions.ProblemType.REGRESSION:
-                y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
+                self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'], self.__batch_size, self.__num_regression_outputs)
 
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
             if self.__has_moderation:
-                x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
+                self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
             else:
-                x_test_predicted = self.forward_pass(x_test, deterministic=True)
+                self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
-                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
-                test_losses = test_correct_predictions
-                test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+                test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
+                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.__graph_ops['y_test'], 1))
+                self.__graph_ops['test_losses'] = test_correct_predictions
+                self.__graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 if self.__num_regression_outputs == 1:
-                    test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, y_test)))
+                    self.__graph_ops['test_losses'] = tf.squeeze(tf.stack(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
                 else:
-                    test_losses = self.__l2_norm(tf.subtract(x_test_predicted, y_test))
+                    self.__graph_ops['test_losses'] = self.__l2_norm(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
 
-                test_cost = tf.reduce_mean(tf.abs(test_losses))
+                self.__graph_ops['test_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['test_losses']))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, y_test)), axis=2)
-                test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
-                test_cost = tf.reduce_mean(test_losses)
+                self.__graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])), axis=2)
+                self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
+                self.__graph_ops['test_cost'] = tf.reduce_mean(self.__graph_ops['test_losses'])
 
             # Epoch summaries for Tensorboard
-            if self.__tb_dir is not None and not self.__tb_summaries_done:
+            if self.__tb_dir is not None:
                 # Summaries for any problem type
-                tf.summary.scalar('train/loss', cost, collections=['custom_summaries'])
+                tf.summary.scalar('train/loss', self.__graph_ops['cost'], collections=['custom_summaries'])
                 tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
                 tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
                 filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
@@ -394,8 +391,8 @@ class DPPModel(object):
 
                 # Summaries for classification problems
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    tf.summary.scalar('train/accuracy', accuracy, collections=['custom_summaries'])
-                    tf.summary.scalar('test/accuracy', test_accuracy, collections=['custom_summaries'])
+                    tf.summary.scalar('train/accuracy', self.__graph_ops['accuracy'], collections=['custom_summaries'])
+                    tf.summary.scalar('test/accuracy', self.__graph_ops['test_accuracy'], collections=['custom_summaries'])
                     tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
                     tf.summary.histogram('test/class_predictions', test_class_predictions,
                                          collections=['custom_summaries'])
@@ -404,17 +401,17 @@ class DPPModel(object):
                 if self.__problem_type == definitions.ProblemType.REGRESSION:
                     if self.__num_regression_outputs == 1:
                         tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
-                        tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
-                        tf.summary.histogram('test/batch_losses', test_losses, collections=['custom_summaries'])
+                        tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
+                        tf.summary.histogram('test/batch_losses', self.__graph_ops['test_losses'], collections=['custom_summaries'])
 
                 # Summaries for semantic segmentation
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                    tf.summary.scalar('test/loss', test_cost, collections=['custom_summaries'])
+                    tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
                     train_images_summary = self.__get_weights_as_image(
                         tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)))
                     tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
                     test_images_summary = self.__get_weights_as_image(
-                        tf.transpose(tf.expand_dims(x_test_predicted, -1), (1, 2, 3, 0)))
+                        tf.transpose(tf.expand_dims(self.__graph_ops['x_test_predicted'], -1), (1, 2, 3, 0)))
                     tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
 
                 # Summaries for each layer
@@ -425,11 +422,19 @@ class DPPModel(object):
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
                                              collections=['custom_summaries'])
 
-                self.__tb_summaries_done = True
+                self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+                self.__graph_ops['trainwriter'] = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
-            if self.__tb_dir is not None:
-                merged = tf.summary.merge_all(key='custom_summaries')
-                train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
+    def begin_training(self, return_test_loss=False, assemble_graph=True):
+        """
+        Initialize the network and either run training to the specified max epoch, or load trainable variables.
+        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
+        the session is shut down.
+        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        """
+        with self.__graph.as_default():
+            if assemble_graph:
+                self.__assemble_graph()
 
             # Either load the network parameters from a checkpoint file or start training
             if self.__load_from_saved is not False:
@@ -437,7 +442,9 @@ class DPPModel(object):
 
                 self.__initialize_queue_runners()
 
-                self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
+                self.compute_full_test_accuracy(self.__graph_ops['test_losses'],
+                                                self.__graph_ops['y_test'],
+                                                self.__graph_ops['x_test_predicted'])
 
                 self.shut_down()
             else:
@@ -455,18 +462,20 @@ class DPPModel(object):
                     start_time = time.time()
                     self.__global_epoch = i
 
-                    self.__session.run(optimizer)
+                    self.__session.run(self.__graph_ops['optimizer'])
 
                     if self.__global_epoch > 0 and self.__global_epoch % self.__report_rate == 0:
                         elapsed = time.time() - start_time
 
                         if self.__tb_dir is not None:
-                            summary = self.__session.run(merged)
-                            train_writer.add_summary(summary, i)
+                            summary = self.__session.run(self.__graph_ops['merged'])
+                            self.__graph_ops['train_writer'].add_summary(summary, i)
 
                         if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                             loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
-                                [cost, accuracy, test_accuracy])
+                                [self.__graph_ops['cost'],
+                                 self.__graph_ops['accuracy'],
+                                 self.__graph_ops['test_accuracy']])
 
                             samples_per_sec = self.__batch_size / elapsed
 
@@ -479,7 +488,8 @@ class DPPModel(object):
                                             samples_per_sec))
                         elif self.__problem_type == definitions.ProblemType.REGRESSION or \
                                         self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                            loss, epoch_test_loss = self.__session.run([cost, test_cost])
+                            loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
+                                                                        self.__graph_ops['test_cost']])
 
                             samples_per_sec = self.__batch_size / elapsed
 
@@ -493,7 +503,7 @@ class DPPModel(object):
                         if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
                             self.save_state()
                     else:
-                        loss = self.__session.run([cost])
+                        loss = self.__session.run([self.__graph_ops['cost']])
 
                     if loss == 0.0:
                         self.__log('Stopping due to zero loss')
@@ -504,7 +514,9 @@ class DPPModel(object):
 
                 self.save_state()
 
-                final_test_loss = self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
+                final_test_loss = self.compute_full_test_accuracy(self.__graph_ops['test_losses'],
+                                                                  self.__graph_ops['y_test'],
+                                                                  self.__graph_ops['x_test_predicted'])
 
                 self.shut_down()
 
@@ -524,10 +536,8 @@ class DPPModel(object):
 
         all_l2_reg = []
         all_lr = []
-
         base_tb_dir = self.__tb_dir
-
-        # Assemble the grid
+        assemble_graph = True
 
         if l2_reg_limits is None:
             all_l2_reg = [self.__reg_coeff]
@@ -559,13 +569,19 @@ class DPPModel(object):
                 if base_tb_dir is not None:
                     self.__tb_dir = base_tb_dir+'_lr:'+current_lr.astype('str')+'_l2:'+current_l2.astype('str')
 
-                current_loss = self.begin_training(return_test_loss=True)
-                all_loss_results[i][j] = current_loss
+                try:
+                    current_loss = self.begin_training(return_test_loss=True, assemble_graph=assemble_graph)
+                    assemble_graph = False
+                    all_loss_results[i][j] = current_loss
+                except:
+                    self.__log('HYPERPARAMETER SEARCH: Run threw an exception, this result will be NaN.')
+                    all_loss_results[i][j] = np.nan
 
+        self.__log('Finished hyperparameter search, failed runs will appear as NaN.')
         self.__log('All l2 coef. tested:')
-        self.__log(all_l2_reg)
+        self.__log('\n'+np.array2string(np.transpose(all_l2_reg)))
         self.__log('All learning rates tested:')
-        self.__log(all_lr)
+        self.__log('\n'+np.array2string(all_lr))
         self.__log('Loss/error grid:')
         self.__log('\n'+np.array2string(all_loss_results, precision=4))
 
