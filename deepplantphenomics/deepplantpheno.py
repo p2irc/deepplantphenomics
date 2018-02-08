@@ -272,6 +272,8 @@ class DPPModel(object):
 
     def __assemble_graph(self):
         with self.__graph.as_default():
+            self.__log('Assembling graph...')
+
             # Define batches
             if self.__has_moderation:
                 x, y, mod_w = tf.train.shuffle_batch(
@@ -423,7 +425,6 @@ class DPPModel(object):
                                              collections=['custom_summaries'])
 
                 self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
-                self.__graph_ops['trainwriter'] = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
     def begin_training(self, return_test_loss=False, assemble_graph=True):
         """
@@ -448,6 +449,8 @@ class DPPModel(object):
 
                 self.shut_down()
             else:
+                train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
+
                 self.__log('Initializing parameters...')
                 init_op = tf.global_variables_initializer()
                 self.__session.run(init_op)
@@ -469,7 +472,7 @@ class DPPModel(object):
 
                         if self.__tb_dir is not None:
                             summary = self.__session.run(self.__graph_ops['merged'])
-                            self.__graph_ops['train_writer'].add_summary(summary, i)
+                            train_writer.add_summary(summary, i)
 
                         if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                             loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
@@ -537,7 +540,6 @@ class DPPModel(object):
         all_l2_reg = []
         all_lr = []
         base_tb_dir = self.__tb_dir
-        assemble_graph = True
 
         if l2_reg_limits is None:
             all_l2_reg = [self.__reg_coeff]
@@ -570,8 +572,7 @@ class DPPModel(object):
                     self.__tb_dir = base_tb_dir+'_lr:'+current_lr.astype('str')+'_l2:'+current_l2.astype('str')
 
                 try:
-                    current_loss = self.begin_training(return_test_loss=True, assemble_graph=assemble_graph)
-                    assemble_graph = False
+                    current_loss = self.begin_training(return_test_loss=True, assemble_graph=(i==0 and j==0))
                     all_loss_results[i][j] = current_loss
                 except:
                     self.__log('HYPERPARAMETER SEARCH: Run threw an exception, this result will be NaN.')
