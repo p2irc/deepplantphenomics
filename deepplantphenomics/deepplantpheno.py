@@ -571,6 +571,7 @@ class DPPModel(object):
 
         unaltered_image_height = self.__image_height
         unaltered_image_width = self.__image_width
+        unaltered_epochs = self.__maximum_training_batches
 
         if l2_reg_limits is None:
             all_l2_reg = [self.__reg_coeff]
@@ -599,9 +600,10 @@ class DPPModel(object):
                 self.__learning_rate = current_lr
                 self.__reg_coeff = current_l2
 
-                # Set the image size back to its unaltered form
+                # Set calculated variables back to their unaltered form
                 self.__image_height = unaltered_image_height
                 self.__image_width = unaltered_image_width
+                self.__maximum_training_batches = unaltered_epochs
 
                 # Reset the reg. coef. for all fc layers.
                 with self.__graph.as_default():
