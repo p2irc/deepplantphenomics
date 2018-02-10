@@ -53,6 +53,16 @@ class DPPModel(object):
     __train_labels = None
     __test_labels = None
 
+    __images_only = False
+
+    __raw_image_files = None
+    __raw_labels = None
+
+    __raw_test_image_files = None
+    __raw_train_image_files = None
+    __raw_test_labels = None
+    __raw_train_labels = None
+
     __all_moderation_features = None
     __has_moderation = False
     __moderation_features_size = None
@@ -272,6 +282,27 @@ class DPPModel(object):
 
     def __assemble_graph(self):
         with self.__graph.as_default():
+            self.__log('Parsing dataset...')
+
+            if self.__images_only:
+                self.__parse_images(self.__raw_image_files)
+            elif self.__raw_test_labels is not None:
+                self.__parse_dataset(self.__raw_train_image_files, self.__raw_train_labels,
+                                     self.__raw_test_image_files, self.__raw_test_labels)
+            else:
+                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
+                    loaders.split_raw_data(self.__raw_image_files, self.__raw_labels, self.__train_test_split,
+                                           self.__all_moderation_features, self.__training_augmentation_images,
+                                           self.__training_augmentation_labels)
+
+                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf, test_mf)
+
+            self.__log('Creating layer parameters...')
+
+            for layer in self.__layers:
+                if callable(getattr(layer, 'add_to_graph', None)):
+                    layer.add_to_graph()
+
             self.__log('Assembling graph...')
 
             # Define batches
@@ -384,6 +415,7 @@ class DPPModel(object):
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
+                self.__log('Creating Tensorboard summaries...')
                 # Summaries for any problem type
                 tf.summary.scalar('train/loss', self.__graph_ops['cost'], collections=['custom_summaries'])
                 tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
@@ -426,7 +458,7 @@ class DPPModel(object):
 
                 self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
-    def begin_training(self, return_test_loss=False, assemble_graph=True):
+    def begin_training(self, return_test_loss=False):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables.
         The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
@@ -434,8 +466,7 @@ class DPPModel(object):
         Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
         """
         with self.__graph.as_default():
-            if assemble_graph:
-                self.__assemble_graph()
+            self.__assemble_graph()
 
             # Either load the network parameters from a checkpoint file or start training
             if self.__load_from_saved is not False:
@@ -443,13 +474,12 @@ class DPPModel(object):
 
                 self.__initialize_queue_runners()
 
-                self.compute_full_test_accuracy(self.__graph_ops['test_losses'],
-                                                self.__graph_ops['y_test'],
-                                                self.__graph_ops['x_test_predicted'])
+                self.compute_full_test_accuracy()
 
                 self.shut_down()
             else:
-                train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
+                if self.__tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
                 self.__log('Initializing parameters...')
                 init_op = tf.global_variables_initializer()
@@ -517,9 +547,7 @@ class DPPModel(object):
 
                 self.save_state()
 
-                final_test_loss = self.compute_full_test_accuracy(self.__graph_ops['test_losses'],
-                                                                  self.__graph_ops['y_test'],
-                                                                  self.__graph_ops['x_test_predicted'])
+                final_test_loss = self.compute_full_test_accuracy()
 
                 self.shut_down()
 
@@ -541,17 +569,22 @@ class DPPModel(object):
         all_lr = []
         base_tb_dir = self.__tb_dir
 
+        unaltered_image_height = self.__image_height
+        unaltered_image_width = self.__image_width
+
         if l2_reg_limits is None:
             all_l2_reg = [self.__reg_coeff]
         else:
-            step_size = (l2_reg_limits[1] - l2_reg_limits[0]) / np.float32(num_steps)
+            step_size = (l2_reg_limits[1] - l2_reg_limits[0]) / np.float32(num_steps-1)
             all_l2_reg = np.arange(l2_reg_limits[0], l2_reg_limits[1], step_size)
+            all_l2_reg = np.append(all_l2_reg, l2_reg_limits[1])
 
         if lr_limits is None:
             all_lr = [self.__learning_rate]
         else:
-            step_size = (lr_limits[1] - lr_limits[0]) / np.float32(num_steps)
+            step_size = (lr_limits[1] - lr_limits[0]) / np.float32(num_steps-1)
             all_lr = np.arange(lr_limits[0], lr_limits[1], step_size)
+            all_lr = np.append(all_lr, lr_limits[1])
 
         all_loss_results = np.empty([len(all_l2_reg), len(all_lr)])
 
@@ -559,20 +592,28 @@ class DPPModel(object):
             for j, current_lr in enumerate(all_lr):
                 self.__log('HYPERPARAMETER SEARCH: Doing l2reg=%f, lr=%f' % (current_l2, current_lr))
 
+                # Make a new graph, associate a new session with it.
+                self.__reset_graph()
                 self.__reset_session()
+
                 self.__learning_rate = current_lr
                 self.__reg_coeff = current_l2
 
+                # Set the image size back to its unaltered form
+                self.__image_height = unaltered_image_height
+                self.__image_width = unaltered_image_width
+
                 # Reset the reg. coef. for all fc layers.
-                for layer in self.__layers:
-                    if isinstance(layer, layers.fullyConnectedLayer):
-                        layer.regularization_coefficient = current_l2
+                with self.__graph.as_default():
+                    for layer in self.__layers:
+                        if isinstance(layer, layers.fullyConnectedLayer):
+                            layer.regularization_coefficient = current_l2
 
                 if base_tb_dir is not None:
                     self.__tb_dir = base_tb_dir+'_lr:'+current_lr.astype('str')+'_l2:'+current_l2.astype('str')
 
                 try:
-                    current_loss = self.begin_training(return_test_loss=True, assemble_graph=(i==0 and j==0))
+                    current_loss = self.begin_training(return_test_loss=True)
                     all_loss_results[i][j] = current_loss
                 except:
                     self.__log('HYPERPARAMETER SEARCH: Run threw an exception, this result will be NaN.')
@@ -586,7 +627,7 @@ class DPPModel(object):
         self.__log('Loss/error grid:')
         self.__log('\n'+np.array2string(all_loss_results, precision=4))
 
-    def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
+    def compute_full_test_accuracy(self):
         """Returns statistics of the test losses depending on the type of task"""
 
         self.__log('Computing total test accuracy/regression loss...')
@@ -607,16 +648,18 @@ class DPPModel(object):
             # Main test loop
             for i in range(num_batches):
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    batch_mean = self.__session.run([test_losses])
+                    batch_mean = self.__session.run([self.__graph_ops['test_losses']])
                     sum = sum + np.mean(batch_mean)
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                    r_losses, r_y, r_predicted = self.__session.run([test_losses, y_test, x_test_predicted])
+                    r_losses, r_y, r_predicted = self.__session.run([self.__graph_ops['test_losses'],
+                                                                     self.__graph_ops['y_test'],
+                                                                     self.__graph_ops['x_test_predicted']])
 
                     all_losses = np.concatenate((all_losses, r_losses), axis=0)
                     all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
                     all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
                 elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                    r_losses = self.__session.run([test_losses])
+                    r_losses = self.__session.run([self.__graph_ops['test_losses']])
 
                     all_losses = np.concatenate((all_losses, r_losses[0]), axis=0)
 
@@ -1070,22 +1113,6 @@ class DPPModel(object):
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Total classes is %d' % self.__total_classes)
-        self.__log('Parsing dataset...')
-
-        with self.__graph.as_default():
-            if self.__has_moderation:
-                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(image_files, labels, self.__train_test_split, self.__all_moderation_features,
-                                           self.__training_augmentation_images, self.__training_augmentation_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                     test_mf=test_mf)
-            else:
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
-                                                                                              self.__train_test_split,
-                                                                                              None,
-                                                                                              self.__training_augmentation_images,
-                                                                                              self.__training_augmentation_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """
@@ -1109,24 +1136,9 @@ class DPPModel(object):
         self.__total_raw_samples = len(image_files)
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
-        self.__log('Parsing dataset...')
 
-        with self.__graph.as_default():
-            if self.__has_moderation:
-                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(image_files, seg_files, self.__train_test_split,
-                                           self.__all_moderation_features, self.__training_augmentation_images,
-                                           self.__training_augmentation_labels, split_labels=False)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                     test_mf=test_mf)
-            else:
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, seg_files,
-                                                                                              self.__train_test_split,
-                                                                                              None,
-                                                                                              self.__training_augmentation_images,
-                                                                                              self.__training_augmentation_labels,
-                                                                                              split_labels=False)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+        self.__raw_image_files = image_files
+        self.__raw_labels = seg_files
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
@@ -1158,23 +1170,9 @@ class DPPModel(object):
             labels = [[label] for label in labels]
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
-        self.__log('Parsing dataset...')
 
-        # split data
-        with self.__graph.as_default():
-            if self.__has_moderation:
-                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(image_files, labels, self.__train_test_split, self.__all_moderation_features,
-                                           self.__training_augmentation_images, self.__training_augmentation_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                     test_mf=test_mf)
-            else:
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
-                                                                                              self.__train_test_split,
-                                                                                              None,
-                                                                                              self.__training_augmentation_images,
-                                                                                              self.__training_augmentation_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
 
     def load_ippn_tray_dataset_from_directory(self, dirname):
         """
@@ -1203,18 +1201,8 @@ class DPPModel(object):
         # do preprocessing
         images = self.__apply_preprocessing(images)
 
-        # prepare images for training (if there are any labels loaded)
-        if self.__all_labels is not None:
-            with self.__graph.as_default():
-                # split data
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, self.__all_labels,
-                                                                                              self.__train_test_split,
-                                                                                              None,
-                                                                                              self.__training_augmentation_images,
-                                                                                              self.__training_augmentation_labels)
-
-                # create batches of input data and labels for training
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+        self.__raw_image_files = images
+        self.__raw_labels = self.__all_labels
 
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
@@ -1231,12 +1219,8 @@ class DPPModel(object):
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
-        with self.__graph.as_default():
-            train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
-                                                                                          self.__train_test_split, None,
-                                                                                          self.__training_augmentation_images,
-                                                                                          self.__training_augmentation_labels)
-            self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
 
     def load_inra_dataset_from_directory(self, dirname):
         """Loads the RGB images and labels from the INRA dataset."""
@@ -1260,21 +1244,8 @@ class DPPModel(object):
         self.__log('Total classes is %d' % self.__total_classes)
         self.__log('Parsing dataset...')
 
-        # split data
-        with self.__graph.as_default():
-            if self.__has_moderation:
-                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(image_files, labels, self.__train_test_split, self.__all_moderation_features,
-                                           self.__training_augmentation_images, self.__training_augmentation_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                     test_mf=test_mf)
-            else:
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
-                                                                                              self.__train_test_split,
-                                                                                              None,
-                                                                                              self.__training_augmentation_images,
-                                                                                              self.__training_augmentation_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
 
     def load_cifar10_dataset_from_directory(self, dirname):
         """
@@ -1308,8 +1279,10 @@ class DPPModel(object):
             self.__log('Total classes is %d' % self.__total_classes)
             self.__log('Parsing dataset...')
 
-            # create batches of input data and labels for training
-            self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            self.__raw_test_image_files = test_images
+            self.__raw_train_image_files = train_images
+            self.__raw_test_labels = test_labels
+            self.__raw_train_labels = train_labels
 
     def load_dataset_from_directory_with_auto_labels(self, dirname):
         """Loads the png images in the given directory, using subdirectories to separate classes."""
@@ -1342,18 +1315,8 @@ class DPPModel(object):
         self.__log('Total classes is %d' % self.__total_classes)
         self.__log('Parsing dataset...')
 
-        # split data
-        with self.__graph.as_default():
-            if self.__has_moderation:
-                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(image_files, labels, self.__train_test_split,
-                                           moderation_features=self.__all_moderation_features)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                     test_mf=test_mf)
-            else:
-                train_images, train_labels, test_images, test_labels = loaders.split_raw_data(image_files, labels,
-                                                                                              self.__train_test_split)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
 
     def load_lemnatec_images_from_directory(self, dirname):
         """
@@ -1398,20 +1361,8 @@ class DPPModel(object):
         if self.__all_labels is not None:
             labels = self.__all_labels
 
-            with self.__graph.as_default():
-                if self.__has_moderation:
-                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                        loaders.split_raw_data(images, labels, self.__train_test_split, self.__all_moderation_features,
-                                               self.__training_augmentation_images, self.__training_augmentation_labels)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                         test_mf=test_mf)
-                else:
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels,
-                                                                                                  self.__train_test_split,
-                                                                                                  None,
-                                                                                                  self.__training_augmentation_images,
-                                                                                                  self.__training_augmentation_labels)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            self.__raw_image_files = image_files
+            self.__raw_labels = labels
 
     def load_images_from_list(self, image_files):
         """
@@ -1429,26 +1380,11 @@ class DPPModel(object):
 
         # prepare images for training (if there are any labels loaded)
         if self.__all_labels is not None:
-            # split data
-            with self.__graph.as_default():
-                labels = self.__all_labels
-
-                if self.__has_moderation:
-                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                        loaders.split_raw_data(images, labels, self.__train_test_split, self.__all_moderation_features,
-                                               self.__training_augmentation_images, self.__training_augmentation_labels)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                         test_mf=test_mf)
-                else:
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels,
-                                                                                                  self.__train_test_split,
-                                                                                                  None,
-                                                                                                  self.__training_augmentation_images,
-                                                                                                  self.__training_augmentation_labels)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            self.__raw_image_files = images
+            self.__raw_labels = self.__all_labels
         else:
-            with self.__graph.as_default():
-                self.__parse_images(images)
+            self.__raw_image_files = images
+            self.__images_only = True
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
         """
@@ -1486,22 +1422,8 @@ class DPPModel(object):
 
         # prepare images for training (if there are any labels loaded)
         if self.__all_labels is not None:
-            labels = self.__all_labels
-
-            with self.__graph.as_default():
-                if self.__has_moderation:
-                    train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                        loaders.split_raw_data(images, labels, self.__train_test_split, self.__all_moderation_features,
-                                               self.__training_augmentation_images, self.__training_augmentation_labels)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf=train_mf,
-                                         test_mf=test_mf)
-                else:
-                    train_images, train_labels, test_images, test_labels = loaders.split_raw_data(images, labels,
-                                                                                                  self.__train_test_split,
-                                                                                                  None,
-                                                                                                  self.__training_augmentation_images,
-                                                                                                  self.__training_augmentation_labels)
-                    self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+            self.__raw_image_files = image_files
+            self.__raw_labels = self.__all_labels
 
     def load_training_augmentation_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=1,
                                                                           id_column_number=0):
@@ -1667,6 +1589,7 @@ class DPPModel(object):
                                                             [self.__image_height, self.__image_width])
 
             if self.__augmentation_crop is True:
+
                 self.__image_height = int(self.__image_height * self.__crop_amount)
                 self.__image_width = int(self.__image_width * self.__crop_amount)
                 self.__train_images = tf.random_crop(self.__train_images, [self.__image_height, self.__image_width, 3])

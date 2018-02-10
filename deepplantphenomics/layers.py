@@ -6,6 +6,7 @@ class convLayer(object):
     filter_dimension = None
     __stride_length = None
     __activation_function = None
+    __initializer = None
 
     weights = None
     biases = None
@@ -21,6 +22,7 @@ class convLayer(object):
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
         self.__activation_function = activation_function
+        self.__initializer = initializer
         self.input_size = input_size
         self.output_size = input_size
         self.regularization_coefficient = regularization_coefficient
@@ -31,7 +33,8 @@ class convLayer(object):
         self.output_size[2] = int((self.output_size[2] - filter_dimension[1] + padding) / stride_length + 1)
         self.output_size[-1] = filter_dimension[-1]
 
-        if initializer == 'xavier':
+    def add_to_graph(self):
+        if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.filter_dimension,
                                            initializer=tf.contrib.layers.xavier_initializer_conv2d())
@@ -42,7 +45,7 @@ class convLayer(object):
                                            dtype=tf.float32)
 
         self.biases = tf.get_variable(self.name + '_bias',
-                                      [self.output_size[-1]],
+                                      [self.filter_dimension[-1]],
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
 
@@ -108,6 +111,7 @@ class fullyConnectedLayer(object):
     biases = None
     activations = None
     __activation_function = None
+    __initializer = None
     __reshape = None
     regularization_coefficient = None
 
@@ -122,20 +126,22 @@ class fullyConnectedLayer(object):
         self.__reshape = reshape
         self.__batch_size = batch_size
         self.__activation_function = activation_function
+        self.__initializer = initializer
         self.regularization_coefficient = regularization_coefficient
 
+    def add_to_graph(self):
         # compute the vectorized size for weights if we will need to reshape it
-        if reshape:
-            vec_size = input_size[1]*input_size[2]*input_size[3]
+        if self.__reshape:
+            vec_size = self.input_size[1] * self.input_size[2] * self.input_size[3]
         else:
-            vec_size = input_size
+            vec_size = self.input_size
 
-        if initializer == 'xavier':
-            self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, output_size],
+        if self.__initializer == 'xavier':
+            self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, self.output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
-                                           shape=[vec_size, output_size],
+                                           shape=[vec_size, self.output_size],
                                            initializer=tf.truncated_normal_initializer(stddev=math.sqrt(2.0/self.output_size)),
                                            dtype=tf.float32)
 
@@ -257,12 +263,13 @@ class batchNormLayer(object):
         self.output_size = input_size
         self.name = name
 
+    def add_to_graph(self):
         if isinstance(self.output_size, (list,)):
             shape = self.output_size
         else:
             shape = [self.output_size]
 
-        with tf.variable_scope(name, reuse=False):
+        with tf.variable_scope(self.name, reuse=False):
             self.__offset = tf.Variable(tf.zeros(shape), trainable=True)
             self.__scale = tf.Variable(tf.ones(shape), trainable=True)
 
