@@ -254,6 +254,7 @@ class batchNormLayer(object):
     __scale = None
     __offset = None
     __epsilon = 1e-3
+    __decay = 0.9
 
     __test_mean = None
     __test_var = None
@@ -269,23 +270,24 @@ class batchNormLayer(object):
         else:
             shape = [self.output_size]
 
-        with tf.variable_scope(self.name, reuse=False):
-            self.__offset = tf.Variable(tf.zeros(shape), trainable=True)
-            self.__scale = tf.Variable(tf.ones(shape), trainable=True)
+        zeros = tf.constant_initializer(0.0)
+        ones = tf.constant_initializer(1.0)
 
-            self.__test_mean = tf.Variable(tf.zeros(shape))
-            self.__test_var = tf.Variable(tf.ones(shape))
+        self.__offset = tf.get_variable(self.name+'_offset', shape=shape, initializer=zeros, trainable=True)
+        self.__scale = tf.get_variable(self.name+'_scale', shape=shape, initializer=ones, trainable=True)
+
+        self.__test_mean = tf.get_variable(self.name+'_pop_mean', shape=shape, initializer=zeros)
+        self.__test_var = tf.get_variable(self.name+'_pop_var', shape=shape, initializer=ones)
 
     def forward_pass(self, x, deterministic):
         mean, var = tf.nn.moments(x, axes=[0])
-        decay = tf.constant(0.9)
 
         if deterministic:
-            mean2 = tf.assign(self.__test_mean, self.__test_mean * decay + mean * (1 - decay))
-            var2 = tf.assign(self.__test_var, self.__test_var * decay + var * (1 - decay))
+            mean2 = tf.assign(self.__test_mean, self.__test_mean * self.__decay + mean * (1 - self.__decay))
+            var2 = tf.assign(self.__test_var, self.__test_var * self.__decay + var * (1 - self.__decay))
         else:
             mean2, var2 = mean, var
 
-        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon)
+        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon, name=self.name+'_batchnorm')
 
         return x
