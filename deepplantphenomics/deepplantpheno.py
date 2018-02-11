@@ -1260,31 +1260,32 @@ class DPPModel(object):
         self.__total_classes = 10
         self.__queue_capacity = 60000
 
-        with self.__graph.as_default():
-            train_labels, train_images = loaders.read_csv_labels_and_ids(os.path.join(train_dir, 'train.txt'), 1, 0,
+        train_labels, train_images = loaders.read_csv_labels_and_ids(os.path.join(train_dir, 'train.txt'), 1, 0,
                                                                          character=' ')
 
-            # transform into numerical one-hot labels
-            train_labels = [int(label) for label in train_labels]
-            train_labels = tf.one_hot(train_labels, self.__total_classes)
+        def one_hot(labels, num_classes):
+            return [[1 if i==label else 0 for i in range(num_classes)] for label in labels]
 
-            test_labels, test_images = loaders.read_csv_labels_and_ids(os.path.join(test_dir, 'test.txt'), 1, 0,
+        # transform into numerical one-hot labels
+        train_labels = [int(label) for label in train_labels]
+        train_labels = one_hot(train_labels, self.__total_classes)
+
+        test_labels, test_images = loaders.read_csv_labels_and_ids(os.path.join(test_dir, 'test.txt'), 1, 0,
                                                                        character=' ')
 
-            # transform into numerical one-hot labels
-            test_labels = [int(label) for label in test_labels]
-            test_labels = tf.one_hot(test_labels, self.__total_classes)
+        # transform into numerical one-hot labels
+        test_labels = [int(label) for label in test_labels]
+        test_labels = one_hot(test_labels, self.__total_classes)
 
-            self.__total_raw_samples = len(train_images) + len(test_images)
+        self.__total_raw_samples = len(train_images) + len(test_images)
 
-            self.__log('Total raw examples is %d' % self.__total_raw_samples)
-            self.__log('Total classes is %d' % self.__total_classes)
-            self.__log('Parsing dataset...')
+        self.__log('Total raw examples is %d' % self.__total_raw_samples)
+        self.__log('Total classes is %d' % self.__total_classes)
 
-            self.__raw_test_image_files = test_images
-            self.__raw_train_image_files = train_images
-            self.__raw_test_labels = test_labels
-            self.__raw_train_labels = train_labels
+        self.__raw_test_image_files = test_images
+        self.__raw_train_image_files = train_images
+        self.__raw_test_labels = test_labels
+        self.__raw_train_labels = train_labels
 
     def load_dataset_from_directory_with_auto_labels(self, dirname):
         """Loads the png images in the given directory, using subdirectories to separate classes."""
