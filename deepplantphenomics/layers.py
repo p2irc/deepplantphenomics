@@ -3,20 +3,6 @@ import math
 
 
 class convLayer(object):
-    filter_dimension = None
-    __stride_length = None
-    __activation_function = None
-    __initializer = None
-
-    weights = None
-    biases = None
-    activations = None
-
-    input_size = None
-    output_size = None
-    name = None
-    regularization_coefficient = None
-
     def __init__(self, name, input_size, filter_dimension, stride_length, activation_function, initializer, regularization_coefficient):
         self.name = name
         self.filter_dimension = filter_dimension
@@ -69,13 +55,6 @@ class convLayer(object):
 
 
 class poolingLayer(object):
-    __kernel_size = None
-    __stride_length = None
-
-    input_size = None
-    output_size = None
-    pooling_type= None
-
     def __init__(self, input_size, kernel_size, stride_length, pooling_type='max'):
         self.__kernel_size = kernel_size
         self.__stride_length = stride_length
@@ -107,18 +86,6 @@ class poolingLayer(object):
 
 
 class fullyConnectedLayer(object):
-    weights = None
-    biases = None
-    activations = None
-    __activation_function = None
-    __initializer = None
-    __reshape = None
-    regularization_coefficient = None
-
-    input_size = None
-    output_size = None
-    name = None
-
     def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer, regularization_coefficient):
         self.name = name
         self.input_size = input_size
@@ -171,9 +138,6 @@ class fullyConnectedLayer(object):
 
 class inputLayer(object):
     """An object representing the input layer so it can give information about input size to the next layer"""
-    input_size = None
-    output_size = None
-
     def __init__(self, input_size):
         self.input_size = input_size
         self.output_size = input_size
@@ -184,9 +148,6 @@ class inputLayer(object):
 
 class normLayer(object):
     """Layer which performs local response normalization"""
-    input_size = None
-    output_size = None
-
     def __init__(self, input_size):
         self.input_size = input_size
         self.output_size = input_size
@@ -198,10 +159,6 @@ class normLayer(object):
 
 class dropoutLayer(object):
     """Layer which performs dropout"""
-    input_size = None
-    output_size = None
-    p = None
-
     def __init__(self, input_size, p):
         self.input_size = input_size
         self.output_size = input_size
@@ -216,11 +173,6 @@ class dropoutLayer(object):
 
 class moderationLayer(object):
     """Layer for fusing moderating data into the input vector"""
-    input_size = None
-    output_size = None
-    __reshape = None
-    __batch_size = None
-
     def __init__(self, input_size, feature_size, reshape, batch_size):
         self.input_size = input_size
         self.__reshape = reshape
@@ -247,17 +199,8 @@ class moderationLayer(object):
 
 class batchNormLayer(object):
     """Batch normalization layer"""
-    input_size = None
-    output_size = None
-    name = None
-
-    __scale = None
-    __offset = None
     __epsilon = 1e-3
     __decay = 0.9
-
-    __test_mean = None
-    __test_var = None
 
     def __init__(self, name, input_size):
         self.input_size = input_size

@@ -10,6 +10,7 @@ import os
 import datetime
 import time
 import warnings
+import copy
 
 
 class DPPModel(object):
@@ -914,7 +915,7 @@ class DPPModel(object):
         feat_size = self.__moderation_features_size
 
         with self.__graph.as_default():
-            layer = layers.moderationLayer(self.__last_layer().output_size, feat_size, reshape, self.__batch_size)
+            layer = layers.moderationLayer(copy.deepcopy(self.__last_layer().output_size), feat_size, reshape, self.__batch_size)
 
         self.__layers.append(layer)
 
@@ -940,7 +941,7 @@ class DPPModel(object):
 
         with self.__graph.as_default():
             layer = layers.convLayer(layer_name,
-                                     self.__last_layer().output_size,
+                                     copy.deepcopy(self.__last_layer().output_size),
                                      filter_dimension,
                                      stride_length,
                                      activation_function,
@@ -964,7 +965,7 @@ class DPPModel(object):
         self.__log('Adding pooling layer %s...' % layer_name)
 
         with self.__graph.as_default():
-            layer = layers.poolingLayer(self.__last_layer().output_size, kernel_size, stride_length, pooling_type)
+            layer = layers.poolingLayer(copy.deepcopy(self.__last_layer().output_size), kernel_size, stride_length, pooling_type)
 
         self.__log('Outputs: %s' % layer.output_size)
 
@@ -977,7 +978,7 @@ class DPPModel(object):
         self.__log('Adding pooling layer %s...' % layer_name)
 
         with self.__graph.as_default():
-            layer = layers.normLayer(self.__last_layer().output_size)
+            layer = layers.normLayer(copy.deepcopy(self.__last_layer().output_size))
 
         self.__layers.append(layer)
 
@@ -992,7 +993,7 @@ class DPPModel(object):
         self.__log('Adding dropout layer %s...' % layer_name)
 
         with self.__graph.as_default():
-            layer = layers.dropoutLayer(self.__last_layer().output_size, p)
+            layer = layers.dropoutLayer(copy.deepcopy(self.__last_layer().output_size), p)
 
         self.__layers.append(layer)
 
@@ -1003,7 +1004,7 @@ class DPPModel(object):
         self.__log('Adding batch norm layer %s...' % layer_name)
 
         with self.__graph.as_default():
-            layer = layers.batchNormLayer(layer_name, self.__last_layer().output_size)
+            layer = layers.batchNormLayer(layer_name, copy.deepcopy(self.__last_layer().output_size))
 
         self.__layers.append(layer)
 
@@ -1029,7 +1030,7 @@ class DPPModel(object):
 
         with self.__graph.as_default():
             layer = layers.fullyConnectedLayer(layer_name,
-                                               self.__last_layer().output_size,
+                                               copy.deepcopy(self.__last_layer().output_size),
                                                output_size,
                                                reshape,
                                                self.__batch_size,
@@ -1065,7 +1066,7 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 num_out = self.__num_regression_outputs
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                filter_dimension = [1, 1, self.__last_layer().output_size[3], 1]
+                filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
@@ -1075,7 +1076,7 @@ class DPPModel(object):
         with self.__graph.as_default():
             if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
                 layer = layers.convLayer('output',
-                                         self.__last_layer().output_size,
+                                         copy.deepcopy(self.__last_layer().output_size),
                                          filter_dimension,
                                          1,
                                          None,
@@ -1083,7 +1084,7 @@ class DPPModel(object):
                                          regularization_coefficient)
             else:
                 layer = layers.fullyConnectedLayer('output',
-                                                   self.__last_layer().output_size,
+                                                   copy.deepcopy(self.__last_layer().output_size),
                                                    num_out,
                                                    reshape,
                                                    self.__batch_size,
