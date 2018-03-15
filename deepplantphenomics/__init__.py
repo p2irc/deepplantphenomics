@@ -3,6 +3,6 @@ Deep Plant Phenomics python module
 Copyright Jordan Ubbens, all rights reserved
 """
 
-from .deepplantpheno import *
-from .tools import *
-from .networks import *
+from deepplantphenomics.deepplantpheno import *
+from deepplantphenomics.tools import *
+from deepplantphenomics.networks import *

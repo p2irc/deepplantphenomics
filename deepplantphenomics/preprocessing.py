@@ -1,4 +1,4 @@
-from . import loaders
+from deepplantphenomics import loaders
 import plantcv as pcv
 import os
 
