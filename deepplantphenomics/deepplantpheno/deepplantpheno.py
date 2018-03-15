@@ -1003,6 +1003,9 @@ class DPPModel(object):
                                                                                               self.__training_augmentation_labels)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
+
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """
         Loads the png images in the given directory into an internal representation, using binary segmentation
