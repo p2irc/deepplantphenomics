@@ -1,6 +1,5 @@
 from . import layers
 from . import loaders
-from . import preprocessing
 from . import definitions
 from . import networks
 import tensorflow as tf
@@ -10,6 +9,13 @@ import os
 import datetime
 import time
 import warnings
+import math
+
+try:
+    from . import preprocessing
+except ModuleNotFoundError:
+    # TODO don't use print here
+    print("PlantCV not found, preprocessing will be unavailable")
 
 
 class DPPModel(object):
@@ -706,7 +712,7 @@ class DPPModel(object):
                 warnings.warn('Problem type is not recognized')
                 exit()
 
-            num_batches = len(x) / self.__batch_size
+            num_batches = int(len(x) / self.__batch_size)
             remainder = len(x) % self.__batch_size
 
             if remainder != 0:
@@ -724,7 +730,6 @@ class DPPModel(object):
             self.load_state()
 
             self.__initialize_queue_runners()
-
             for i in range(num_batches):
                 xx = self.__session.run(x_pred)
                 total_outputs = np.append(total_outputs, xx, axis=0)
