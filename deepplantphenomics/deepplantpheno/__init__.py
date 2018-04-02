@@ -1,1 +1,1 @@
-from deepplantphenomics.deepplantpheno import *
+from deepplantphenomics.deepplantpheno.deepplantpheno import *

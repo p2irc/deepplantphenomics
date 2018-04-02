@@ -19,6 +19,6 @@ print('Performing strain classification...')
 y = dpp.tools.classify_arabidopsis_strain(images)
 
 for k,v in zip(images, y):
-    print '%s: %s' % (os.path.basename(k), v)
+    print('%s: %s' % (os.path.basename(k), v))
 
 print('Done')
