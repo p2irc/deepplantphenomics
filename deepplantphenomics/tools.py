@@ -54,6 +54,6 @@ class tools(object):
 
         # round for binary mask
         #predictions = np.round(predictions)
-	_, predictions = cv2.threshold(predictions.astype(np.float32),0.5,1.0,cv2.THRESH_BINARY)
+        _, predictions = cv2.threshold(predictions.astype(np.float32),0.5,1.0,cv2.THRESH_BINARY)
 
         return predictions

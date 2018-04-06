@@ -289,6 +289,8 @@ class DPPModel(object):
             # Reshape input to the expected image dimensions
             x = tf.reshape(x, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
+            y = tf.reshape(y, shape=[4,256,256])
+
             # If this is a regression problem, unserialize the label
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 y = loaders.label_string_to_tensor(y, self.__batch_size, self.__num_regression_outputs)
@@ -356,6 +358,8 @@ class DPPModel(object):
                 y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
 
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+
+            y_test = tf.reshape(y_test, shape=[4, 256, 256])
 
             if self.__has_moderation:
                 x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
@@ -1533,24 +1537,24 @@ class DPPModel(object):
             test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
 
             if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
-                self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=self.__image_depth)
+                self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=1)
                 self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]),
-                                                          channels=self.__image_depth)
+                                                          channels=1)
 
                 # normalize to 1.0
                 self.__train_labels = tf.image.convert_image_dtype(self.__train_labels, dtype=tf.float32)
                 self.__test_labels = tf.image.convert_image_dtype(self.__test_labels, dtype=tf.float32)
 
                 # resize if we are using that
-                if self.__resize_images is True:
+                if self.__resize_images:
                     self.__train_labels = tf.image.resize_images(self.__train_labels,
                                                                  [self.__image_height, self.__image_width])
                     self.__test_labels = tf.image.resize_images(self.__test_labels,
                                                                 [self.__image_height, self.__image_width])
 
                 # make into a binary mask
-                self.__test_labels = tf.reduce_mean(self.__test_labels, axis=2)
-                self.__train_labels = tf.reduce_mean(self.__train_labels, axis=2)
+                #self.__test_labels = tf.reduce_mean(self.__test_labels, axis=2)
+                #self.__train_labels = tf.reduce_mean(self.__train_labels, axis=2)
             else:
                 self.__test_labels = test_input_queue[1]
                 self.__train_labels = train_input_queue[1]
@@ -1580,6 +1584,7 @@ class DPPModel(object):
             if self.__augmentation_crop is True:
                 self.__image_height = int(self.__image_height * self.__crop_amount)
                 self.__image_width = int(self.__image_width * self.__crop_amount)
+
                 self.__train_images = tf.random_crop(self.__train_images, [self.__image_height, self.__image_width, 3])
                 self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                             self.__image_width)
@@ -1590,6 +1595,14 @@ class DPPModel(object):
                                                                              self.__image_width)
                 self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                             self.__image_width)
+
+                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    self.__train_labels = tf.random_crop(self.__train_images,
+                                                         [self.__image_height, self.__image_width, 1])
+                    self.__test_labels = tf.random_crop(self.__test_images,
+                                                         [self.__image_height, self.__image_width, 1])
+                    # self.__test_labels = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
+                    #                                                             1)
 
             if self.__augmentation_flip_horizontal is True:
                 # apply flip horizontal augmentation
