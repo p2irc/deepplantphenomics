@@ -16,7 +16,8 @@ class convLayer(object):
     name = None
     regularization_coefficient = None
 
-    def __init__(self, name, input_size, filter_dimension, stride_length, activation_function, initializer, regularization_coefficient):
+    def __init__(self, name, input_size, filter_dimension, stride_length, activation_function, initializer,
+                 regularization_coefficient):
         self.name = name
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
@@ -45,6 +46,26 @@ class convLayer(object):
                                       [self.output_size[-1]],
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
+        if False:
+            print("Compressing %s" % self.name)
+            W_fc = self.weights
+            prune_mask = tf.get_variable(self.name + '_prune', initializer=tf.ones_like(W_fc), trainable=False,
+                                         collections=["pruning_mask"])
+            fc_pruned = tf.multiply(W_fc, prune_mask)
+            self.weights = fc_pruned
+
+            threshold = 0.0001
+            t = tf.sqrt(tf.nn.l2_loss(W_fc)) * threshold
+            indicator_matrix = tf.multiply(
+                tf.to_float(tf.greater_equal(W_fc, tf.ones_like(W_fc) * t)),
+                prune_mask)
+            self.update_mask = tf.assign(prune_mask, indicator_matrix)
+            self.prune_layer = W_fc.assign(fc_pruned)
+
+        if False:
+            nonzero_indicator = tf.to_float(tf.not_equal(fc_pruned, tf.zeros_like(fc_pruned)))
+            self.parameter_count = tf.reduce_sum(nonzero_indicator)
+            self.mask_count = tf.reduce_sum(tf.to_float(tf.not_equal(indicator_matrix, tf.zeros_like(indicator_matrix))))
 
     def forward_pass(self, x, deterministic):
         # For convention, just use a symmetrical stride with same padding
@@ -115,7 +136,8 @@ class fullyConnectedLayer(object):
     output_size = None
     name = None
 
-    def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer, regularization_coefficient):
+    def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer,
+                 regularization_coefficient):
         self.name = name
         self.input_size = input_size
         self.output_size = output_size
@@ -133,6 +155,7 @@ class fullyConnectedLayer(object):
         if initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
+
         else:
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=[vec_size, output_size],
@@ -143,6 +166,26 @@ class fullyConnectedLayer(object):
                                       [self.output_size],
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
+        if False:
+            print("Compressing %s" % self.name)
+            W_fc = self.weights
+            prune_mask = tf.get_variable(self.name + '_prune', initializer=tf.ones_like(W_fc), trainable=False,
+                                         collections=["pruning_mask"])
+            fc_pruned = tf.multiply(W_fc, prune_mask)
+            self.weights = fc_pruned
+
+            threshold = 0.0001
+            t = tf.sqrt(tf.nn.l2_loss(W_fc)) * threshold
+            indicator_matrix = tf.multiply(
+                tf.to_float(tf.greater_equal(W_fc, tf.ones_like(W_fc) * t)),
+                prune_mask)
+            self.update_mask = tf.assign(prune_mask, indicator_matrix)
+            self.prune_layer = W_fc.assign(fc_pruned)
+
+        if False:
+            nonzero_indicator = tf.to_float(tf.not_equal(fc_pruned, tf.zeros_like(fc_pruned)))
+            self.parameter_count = tf.reduce_sum(nonzero_indicator)
+            self.mask_count = tf.reduce_sum(tf.to_float(tf.not_equal(indicator_matrix, tf.zeros_like(indicator_matrix))))
 
     def forward_pass(self, x, deterministic):
         # Reshape into a column vector if necessary
@@ -206,6 +249,10 @@ class dropoutLayer(object):
             return x
         else:
             return tf.nn.dropout(x, self.p)
+
+    def set_p(self, p):
+        print("dropout: %f -> %f" % (self.p, p))
+        self.p = p
 
 
 class moderationLayer(object):
@@ -282,3 +329,18 @@ class batchNormLayer(object):
         x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon)
 
         return x
+
+class quantizeLayer(object):
+
+    def forward_pass(self, x, deterministic):
+        _max = tf.reduce_max(x)
+        _min = tf.reduce_min(x)
+        x, self.min, self.max = tf.quantize_v2(x, _min, _max, tf.quint8, mode = "MIN_FIRST")
+        return x
+
+class dequantizeLayer(object):
+    def forward_pass(self, x, deterministic):
+        _max = tf.reduce_max(x)
+        _min = tf.reduce_min(x)
+        x, self.min, self.max = tf.dequantize(x, _min, _max, tf.quint8, mode = "MIN_FIRST")
+

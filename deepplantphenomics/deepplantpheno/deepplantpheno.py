@@ -1,7 +1,10 @@
+from __future__ import print_function
+
 from deepplantphenomics import layers
 from deepplantphenomics import loaders
 from deepplantphenomics import definitions
 from deepplantphenomics import networks
+from deepplantphenomics.deepplantpheno.compression.tensorflow_graph_compression.converge_weights import converge_weights
 import tensorflow as tf
 import numpy as np
 from joblib import Parallel, delayed
@@ -347,41 +350,41 @@ class DPPModel(object):
 
             # Calculate test accuracy
             if self.__has_moderation:
-                x_test, y_test, mod_w_test = tf.train.batch(
+                self.x_test, self.y_test, mod_w_test = tf.train.batch(
                     [self.__test_images, self.__test_labels, self.__test_moderation_features],
                     batch_size=self.__batch_size,
                     num_threads=self.__num_threads,
                     capacity=self.__queue_capacity)
             else:
-                x_test, y_test = tf.train.batch([self.__test_images, self.__test_labels],
+                self.x_test, self.y_test = tf.train.batch([self.__test_images, self.__test_labels],
                                                 batch_size=self.__batch_size,
                                                 num_threads=self.__num_threads,
                                                 capacity=self.__queue_capacity)
 
             if self.__problem_type == definitions.ProblemType.REGRESSION:
-                y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
+                self.y_test = loaders.label_string_to_tensor(self.y_test, self.__batch_size, self.__num_regression_outputs)
 
-            x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+            self.x_test = tf.reshape(self.x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
             if self.__has_moderation:
-                x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
+                x_test_predicted = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
             else:
-                x_test_predicted = self.forward_pass(x_test, deterministic=True)
+                x_test_predicted = self.forward_pass(self.x_test, deterministic=True)
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
-                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(y_test, 1))
+                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.y_test, 1))
                 test_losses = test_correct_predictions
                 test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 if self.__num_regression_outputs == 1:
-                    test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, y_test)))
+                    test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, self.y_test)))
                 else:
-                    test_losses = self.__l2_norm(tf.subtract(x_test_predicted, y_test))
+                    test_losses = self.__l2_norm(tf.subtract(x_test_predicted, self.y_test))
 
                 test_cost = tf.reduce_mean(tf.abs(test_losses))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, y_test)), axis=2)
+                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, self.y_test)), axis=2)
                 test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
                 test_cost = tf.reduce_mean(test_losses)
 
@@ -427,6 +430,7 @@ class DPPModel(object):
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
                                              collections=['custom_summaries'])
 
+
                 merged = tf.summary.merge_all(key='custom_summaries')
                 train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
 
@@ -436,9 +440,9 @@ class DPPModel(object):
 
                 self.__initialize_queue_runners()
 
-                self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
+                self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
 
-                self.shut_down()
+                # self.shut_down()
             else:
                 self.__log('Initializing parameters...')
                 init_op = tf.global_variables_initializer()
@@ -503,9 +507,157 @@ class DPPModel(object):
 
                 self.save_state()
 
-                self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
+                self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
 
-                self.shut_down()
+                #self.shut_down()
+
+    def compress(self, times=1, threshold=0.00005, debug=False):
+        self.set_learning_rate(self.__learning_rate * 0.1)
+        with self.__graph.as_default():
+            tf.train.write_graph(self.__graph.as_graph_def(), './saved', 'before_compression.pb', as_text=False)
+            tf.GraphKeys.PRUNING_MASKS = "pruning_masks"  # This prevents pruning variables from being stored with the model
+            # Iterate through layers and add compression layers
+            compression_layers = []
+            for layer in self.__layers:
+                self.__log('Looking through layers')
+                self.__log('Layer: {} '.format(getattr(layer, 'name', None)))
+                if isinstance(layer, (layers.convLayer, layers.fullyConnectedLayer)):
+                    # Create pruning mask for low weight connections and prune weight layer
+                    prune_mask = tf.get_variable(layer.name + '_prune', initializer=tf.ones_like(layer.weights), trainable=False,
+                                                 collections=[tf.GraphKeys.PRUNING_MASKS])
+                    pruned_weights = tf.multiply(layer.weights, prune_mask)
+                    layer.unpruned_weights = layer.weights
+
+                    # _, variance = tf.nn.moments(layer.weights, [0, 1, 2] if isinstance(layer, layers.convLayer) else
+                    #                             [0,1])
+                    # layer.stddev = tf.sqrt(variance)
+                    t = tf.sqrt(tf.nn.l2_loss(layer.weights)) * threshold
+                    indicator_matrix = tf.multiply(tf.to_float(
+                        tf.greater_equal(tf.abs(layer.weights), tf.ones_like(layer.weights) * t)), prune_mask)
+                    # indicator_matrix = tf.multiply(tf.to_float(
+                    #     tf.greater_equal(tf.abs(layer.weights), tf.ones_like(layer.weights) * threshold * variance)), prune_mask)
+
+                    layer.update_mask = prune_mask.assign(indicator_matrix)
+                    layer.prune_layer = layer.weights.assign(pruned_weights)
+
+                    compression_layers.append(layer)
+
+                    # Keep track of the number of connections
+                    nonzero_indicator = tf.to_float(tf.not_equal(layer.weights, tf.zeros_like(layer.weights)))
+                    layer.parameter_count = tf.reduce_sum(nonzero_indicator)
+                    layer.mask_count = tf.reduce_sum(tf.to_float(tf.not_equal(indicator_matrix, tf.zeros_like(indicator_matrix))))
+
+                    layer.weights = pruned_weights
+
+
+            self.__session.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.PRUNING_MASKS)))
+            dropout_layers = [(idx, layer) for (idx, layer) in enumerate(self.__layers) if isinstance(layer, layers.dropoutLayer)]
+            for idx, dropout_layer in dropout_layers:
+                weight_layer = self.__layers[idx-1]
+                parameter_count = self.__session.run(weight_layer.parameter_count)
+
+                dropout_layer.original_parameter_count = parameter_count
+            for i in range(times):
+                self.__log("Compress run {}".format(i+1))
+
+                for layer in compression_layers:
+                    self.__session.run(layer.update_mask)
+                    if debug:
+                        self.__log('Num parameters for prune_mask {} pre-training: {}/{}'.format(
+                            layer.name, self.__session.run(layer.mask_count), self.__session.run(layer.parameter_count)))
+                    self.__session.run(layer.prune_layer)
+
+                    # tf.summary.histogram('train/unpruned_weights', layer.unpruned_weights, collections=['custom_summaries'])
+                    # tf.summary.histogram('train/pruned_weights', layer.weights, collections=['custom_summaries'])
+                    # merged = tf.summary.merge_all(key='custom_summaries')
+                    # train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
+                    # summary = self.__session.run(merged)
+                    # train_writer.add_summary(summary, i)
+
+
+                self.__log("Accuracy after pruning")
+                if self.__has_moderation:
+                    x_test_predicted = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
+                else:
+                    x_test_predicted = self.forward_pass(self.x_test, deterministic=True)
+                if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                    test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
+                    test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.y_test, 1))
+                    test_losses = test_correct_predictions
+                    test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+                elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                    if self.__num_regression_outputs == 1:
+                        test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, self.y_test)))
+                    else:
+                        test_losses = self.__l2_norm(tf.subtract(x_test_predicted, self.y_test))
+
+                    test_cost = tf.reduce_mean(tf.abs(test_losses))
+                elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, self.y_test)), axis=2)
+                    test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
+                    test_cost = tf.reduce_mean(test_losses)
+                self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
+
+                for idx, dropout_layer in dropout_layers:
+                    weight_layer = self.__layers[idx-1]
+                    parameter_count = self.__session.run(weight_layer.parameter_count)
+                    dropout_layer.set_p(1.0 - ((1.0 - dropout_layer.p) * math.sqrt(
+                        parameter_count / dropout_layer.original_parameter_count)))
+
+                if i < times-1:  # do not retrain on the last time
+                    self.begin_training()
+                    if debug:
+                        for layer in compression_layers:
+                            self.__log('Num parameters for layer {} post-training: {}'.format(
+                                layer.name, self.__session.run(layer.parameter_count)))
+                            # self.__log("variance:{} stddev: {}".format(self.__session.run(variance),
+                            #                                            self.__session.run(layer.stddev)))
+
+
+            tf.train.write_graph(self.__graph.as_graph_def(), './saved', 'before_quantization.pb', as_text=False)
+            graph = converge_weights(self.__graph.as_graph_def(), [], global_clusters=False,
+                                     n_clusters=256, min_n_weights=256)
+            tf.import_graph_def(graph)
+            # for layer in self.__layers:
+            #     if hasattr(layer, 'weights'):
+            #         _max = tf.reduce_max(layer.weights)
+            #         _min = tf.reduce_min(layer.weights)
+            #         layer.weights, layer.min, layer.max = tf.quantize_v2(layer.weights, _min, _max, tf.quint8, mode = "MIN_FIRST")
+            # self.__layers.insert(0, layers.quantizeLayer())
+            # self.__layers.append(layers.dequantizeLayer())
+            tf.train.write_graph(self.__graph.as_graph_def(), './saved', 'after_quantization.pb', as_text=False)
+
+            self.__log("Accuracy after pruning")
+            if self.__has_moderation:
+                x_test_predicted = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
+            else:
+                x_test_predicted = self.forward_pass(self.x_test, deterministic=True)
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
+                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.y_test, 1))
+                test_losses = test_correct_predictions
+                test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+            elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                if self.__num_regression_outputs == 1:
+                    test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, self.y_test)))
+                else:
+                    test_losses = self.__l2_norm(tf.subtract(x_test_predicted, self.y_test))
+
+                test_cost = tf.reduce_mean(tf.abs(test_losses))
+            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, self.y_test)), axis=2)
+                test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
+                test_cost = tf.reduce_mean(test_losses)
+            self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
+
+            for idx, dropout_layer in dropout_layers:
+                weight_layer = self.__layers[idx-1]
+                parameter_count = self.__session.run(weight_layer.parameter_count)
+                dropout_layer.set_p(1.0 - ((1.0 - dropout_layer.p) * math.sqrt(
+                    parameter_count / dropout_layer.original_parameter_count)))
+
+
+            self.shut_down()
 
     def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
         """Returns statistics of the test losses depending on the type of task"""
@@ -656,9 +808,18 @@ class DPPModel(object):
         if self.__load_from_saved is not False:
             self.__log('Loading from checkpoint file...')
 
-            with self.__graph.as_default():
-                saver = tf.train.Saver(tf.trainable_variables())
-                saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
+            if '.pb' in self.__load_from_saved:
+                with open(self.__load_from_saved, 'rb') as f:
+                    graph_def = tf.GraphDef()
+                    graph_def.ParseFromString(f.read())
+                    tf.import_graph_def(graph_def, name='')
+                    # init_op = tf.global_variables_initializer()
+                    # self.__session.run(init_op)
+
+            else:
+                with self.__graph.as_default():
+                    saver = tf.train.Saver(tf.trainable_variables())
+                    saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
 
             self.__has_trained = True
         else:
@@ -906,7 +1067,7 @@ class DPPModel(object):
                                                self.__batch_size,
                                                activation_function,
                                                self.__weight_initializer,
-                                               regularization_coefficient)
+                                               regularization_coefficient,)
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 
