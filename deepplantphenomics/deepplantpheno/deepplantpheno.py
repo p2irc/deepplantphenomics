@@ -17,7 +17,6 @@ import math
 try:
     from .. import preprocessing
 except ModuleNotFoundError:
-    # TODO don't use print here
     print("PlantCV not found, preprocessing will be unavailable")
 
 
@@ -445,6 +444,8 @@ class DPPModel(object):
                 # self.shut_down()
             else:
                 self.__log('Initializing parameters...')
+                print('create training graph')
+                tf.contrib.quantize.create_training_graph()
                 init_op = tf.global_variables_initializer()
                 self.__session.run(init_op)
 
@@ -514,7 +515,6 @@ class DPPModel(object):
     def compress(self, times=1, threshold=0.00005, debug=False):
         self.set_learning_rate(self.__learning_rate * 0.1)
         with self.__graph.as_default():
-            tf.train.write_graph(self.__graph.as_graph_def(), './saved', 'before_compression.pb', as_text=False)
             tf.GraphKeys.PRUNING_MASKS = "pruning_masks"  # This prevents pruning variables from being stored with the model
             # Iterate through layers and add compression layers
             compression_layers = []
@@ -549,14 +549,16 @@ class DPPModel(object):
 
                     layer.weights = pruned_weights
 
-
-            self.__session.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.PRUNING_MASKS)))
             dropout_layers = [(idx, layer) for (idx, layer) in enumerate(self.__layers) if isinstance(layer, layers.dropoutLayer)]
             for idx, dropout_layer in dropout_layers:
                 weight_layer = self.__layers[idx-1]
                 parameter_count = self.__session.run(weight_layer.parameter_count)
 
                 dropout_layer.original_parameter_count = parameter_count
+
+            print('create training graph')
+            tf.contrib.quantize.create_training_graph()
+            self.__session.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.PRUNING_MASKS)))
             for i in range(times):
                 self.__log("Compress run {}".format(i+1))
 
@@ -605,6 +607,8 @@ class DPPModel(object):
                         parameter_count / dropout_layer.original_parameter_count)))
 
                 if i < times-1:  # do not retrain on the last time
+
+
                     self.begin_training()
                     if debug:
                         for layer in compression_layers:
@@ -614,10 +618,11 @@ class DPPModel(object):
                             #                                            self.__session.run(layer.stddev)))
 
 
-            tf.train.write_graph(self.__graph.as_graph_def(), './saved', 'before_quantization.pb', as_text=False)
-            graph = converge_weights(self.__graph.as_graph_def(), [], global_clusters=False,
-                                     n_clusters=256, min_n_weights=256)
-            tf.import_graph_def(graph)
+            self.save_state(step=1)
+
+            print('create eval graph')
+            tf.contrib.quantize.create_eval_graph()
+            print('success')
             # for layer in self.__layers:
             #     if hasattr(layer, 'weights'):
             #         _max = tf.reduce_max(layer.weights)
@@ -625,7 +630,9 @@ class DPPModel(object):
             #         layer.weights, layer.min, layer.max = tf.quantize_v2(layer.weights, _min, _max, tf.quint8, mode = "MIN_FIRST")
             # self.__layers.insert(0, layers.quantizeLayer())
             # self.__layers.append(layers.dequantizeLayer())
-            tf.train.write_graph(self.__graph.as_graph_def(), './saved', 'after_quantization.pb', as_text=False)
+            # self.save_state(step=3)
+            with open('quantized.pb', 'w') as f:
+                f.write(str(self.__graph.as_graph_def()))
 
             self.__log("Accuracy after pruning")
             if self.__has_moderation:
@@ -785,7 +792,7 @@ class DPPModel(object):
 
         return x8
 
-    def save_state(self):
+    def save_state(self, step=0):
         """Save all trainable variables as a checkpoint in the current working path"""
         self.__log('Saving parameters...')
 
@@ -796,7 +803,7 @@ class DPPModel(object):
 
         with self.__graph.as_default():
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.save(self.__session, dir + '/tfhSaved')
+            saver.save(self.__session, dir + '/tfhSaved', global_step=step)
 
         self.__has_trained = True
 
@@ -808,18 +815,9 @@ class DPPModel(object):
         if self.__load_from_saved is not False:
             self.__log('Loading from checkpoint file...')
 
-            if '.pb' in self.__load_from_saved:
-                with open(self.__load_from_saved, 'rb') as f:
-                    graph_def = tf.GraphDef()
-                    graph_def.ParseFromString(f.read())
-                    tf.import_graph_def(graph_def, name='')
-                    # init_op = tf.global_variables_initializer()
-                    # self.__session.run(init_op)
-
-            else:
-                with self.__graph.as_default():
-                    saver = tf.train.Saver(tf.trainable_variables())
-                    saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
+            with self.__graph.as_default():
+                saver = tf.train.Saver(tf.trainable_variables())
+                saver.restore(self.__session, tf.train.latest_checkpoint(self.__load_from_saved))
 
             self.__has_trained = True
         else:
