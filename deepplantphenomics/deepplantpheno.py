@@ -81,7 +81,9 @@ class DPPModel(object):
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
-    __weight_initializer = 'normal'
+    __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
+    __weight_initializer = 'Normal'
+    __supported_weight_initializers = ['Normal', 'Xavier']
 
     __learning_rate = None
     __lr_decay_factor = None
@@ -154,76 +156,174 @@ class DPPModel(object):
 
     def set_number_of_threads(self, num_threads):
         """Set number of threads for input queue runners and preprocessing tasks"""
+        if not isinstance(num_threads, int):
+            raise TypeError("num_threads must be an int")
+        if num_threads <= 0:
+            raise ValueError("num_threads must be positive")
+
         self.__num_threads = num_threads
 
     def set_processed_images_dir(self, dir):
         """Set the directory for storing processed images when pre-processing is used"""
+        if not isinstance(dir, str):
+            raise TypeError("dir must be a str")
+
         self.__processed_images_dir = dir
 
     def set_batch_size(self, size):
         """Set the batch size"""
+        if not isinstance(size, int):
+            raise TypeError("size must be an int")
+        if size <= 0:
+            raise ValueError("size must be positive")
+
         self.__batch_size = size
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
+        if not isinstance(num, int):
+            raise TypeError("num must be an int")
+        if num <= 0:
+            raise ValueError("num must be positive")
+
         self.__num_regression_outputs = num
 
     def set_train_test_split(self, ratio):
         """Set a ratio for the number of samples to use as training set"""
+        if not isinstance(ratio, float):
+            raise TypeError("ratio must be a float")
+        if ratio <= 0 or ratio > 1:
+            raise ValueError("ratio must be between 0 and 1")
+
         self.__train_test_split = ratio
 
     def set_maximum_training_epochs(self, epochs):
         """Set the max number of training epochs"""
+        if not isinstance(epochs, int):
+            raise TypeError("epochs must be an int")
+        if epochs <= 0:
+            raise ValueError("epochs must be positive")
+
         self.__maximum_training_batches = epochs
 
     def set_learning_rate(self, rate):
         """Set the initial learning rate"""
+        if not isinstance(rate, float):
+            raise TypeError("rate must be a float")
+        if rate <= 0:
+            raise ValueError("rate must be positive")
+
         self.__learning_rate = rate
 
     def set_crop_or_pad_images(self, crop_or_pad):
         """Apply padding or cropping images to, which is required if the dataset has images of different sizes"""
+        if not isinstance(crop_or_pad, bool):
+            raise TypeError("crop_or_pad must be a bool")
+
         self.__crop_or_pad_images = crop_or_pad
 
     def set_resize_images(self, resize):
         """Up-sample or down-sample images to specified size"""
+        if not isinstance(resize, bool):
+            raise TypeError("resize must be a bool")
+
         self.__resize_images = resize
 
     def set_augmentation_flip_horizontal(self, flip):
         """Randomly flip training images horizontally"""
+        if not isinstance(flip, bool):
+            raise TypeError("flip must be a bool")
+
         self.__augmentation_flip_horizontal = flip
 
     def set_augmentation_flip_vertical(self, flip):
         """Randomly flip training images vertically"""
+        if not isinstance(flip, bool):
+            raise TypeError("flip must be a bool")
+
         self.__augmentation_flip_vertical = flip
 
     def set_augmentation_crop(self, resize, crop_ratio=0.75):
         """Randomly crop images during training, and crop images to center during testing"""
+        if not isinstance(resize, bool):
+            raise TypeError("resize must be a bool")
+        if not isinstance(crop_ratio, float):
+            raise TypeError("crop_ratio must be a float")
+        if crop_ratio <= 0 or crop_ratio > 1:
+            raise ValueError("crop_ratio must be between 0 and 1")
+
         self.__augmentation_crop = resize
         self.__crop_amount = crop_ratio
 
     def set_augmentation_brightness_and_contrast(self, contr):
         """Randomly adjust contrast and/or brightness on training images"""
+        if not isinstance(contr, bool):
+            raise TypeError("contr must be a bool")
         self.__augmentation_contrast = contr
 
     def set_regularization_coefficient(self, lamb):
         """Set lambda for L2 weight decay"""
+        if not isinstance(lamb, float):
+            raise TypeError("lamb must be a float")
+        if lamb <= 0:
+            raise ValueError("lamb must be positive")
+
         self.__reg_coeff = lamb
 
     def set_learning_rate_decay(self, decay_factor, epochs_per_decay):
         """Set learning rate decay"""
+        if not isinstance(decay_factor, float):
+            raise TypeError("decay_factor must be a float")
+        if decay_factor <= 0:
+            raise ValueError("decay_factor must be positive")
+        if not isinstance(epochs_per_decay, int):
+            raise TypeError("epochs_per_day must be an int")
+        if epochs_per_decay <= 0:
+            raise ValueError("epochs_per_day must be positive")
+        if self.__train_test_split is None:
+            raise RuntimeError("The train test split needs to be set before learning rate decay can be set."+
+                                " Use DPPModel.set_train_test_split(ratio).")
+        if self.__total_training_samples == 0:
+            raise RuntimeError("Data needs to be loaded before learning rate decay can be set.")
+
         self.__lr_decay_factor = decay_factor
         self.__lr_decay_epochs = epochs_per_decay * (self.__total_training_samples * self.__train_test_split)
 
     def set_optimizer(self, optimizer):
         """Set the optimizer to use"""
+        if not isinstance(optimizer, str):
+            raise TypeError("optimizer must be a str")
+        if not optimizer in self.__supported_optimizers:
+            raise ValueError("'"+optimizer+"' is not one of the currently supported optimizers. Choose one of "+
+                             " ".join("'"+x+"'" for x in self.__supported_optimizers))
+
         self.__optimizer = optimizer
 
     def set_weight_initializer(self, initializer):
         """Set the initialization scheme used by convolutional and fully connected layers"""
+        if not isinstance(initializer, str):
+            raise TypeError("initializer must be a str")
+        if not initializer in self.__supported_weight_initializers:
+            raise ValueError("'"+initializer+"' is not one of the currently supported weight initializers."+
+                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_weight_initializers))
+
         self.__weight_initializer = initializer
 
     def set_image_dimensions(self, image_height, image_width, image_depth):
         """Specify the image dimensions for images in the dataset (depth is the number of channels)"""
+        if not isinstance(image_height, int):
+            raise TypeError("image_height must be an int")
+        if image_height <= 0:
+            raise ValueError("image_height must be positive")
+        if not isinstance(image_width, int):
+            raise TypeError("image_width must be an int")
+        if image_width <= 0:
+            raise ValueError("image_width must be positive")
+        if not isinstance(image_depth, int):
+            raise TypeError("image_depth must be an int")
+        if image_depth <= 0:
+            raise ValueError("image_depth must be positive")
+
         self.__image_width = image_width
         self.__image_height = image_height
         self.__image_depth = image_depth
@@ -234,6 +334,15 @@ class DPPModel(object):
         This is only needed in special cases, for instance, if you are resizing input images but using image coordinate
         labels which reference the original size.
         """
+        if not isinstance(image_height, int):
+            raise TypeError("image_height must be an int")
+        if image_height <= 0:
+            raise ValueError("image_height must be positive")
+        if not isinstance(image_width, int):
+            raise TypeError("image_width must be an int")
+        if image_width <= 0:
+            raise ValueError("image_width must be positive")
+
         self.__image_width_original = image_width
         self.__image_height_original = image_height
 
@@ -725,7 +834,7 @@ class DPPModel(object):
 
             self.__initialize_queue_runners()
 
-            for i in range(num_batches):
+            for i in range(int(num_batches)):
                 xx = self.__session.run(x_pred)
                 total_outputs = np.append(total_outputs, xx, axis=0)
 
