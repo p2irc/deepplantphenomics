@@ -15,6 +15,7 @@ import warnings
 class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
+    __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
     __has_trained = False
     __save_checkpoints = None
 
@@ -33,6 +34,7 @@ class DPPModel(object):
     __resize_images = False
 
     __preprocessing_steps = []
+    __supported_preprocessing_steps = ['auto-segmentation']
     __processed_images_dir = './DPP-Processed'
 
     # Augmentation options
@@ -354,6 +356,12 @@ class DPPModel(object):
 
     def add_preprocessor(self, selection):
         """Add a data preprocessing step"""
+        if not isinstance(selection, str):
+            raise TypeError("selection must be a str")
+        if not selection in self.__supported_weight_initializers:
+            raise ValueError("'"+selection+"' is not one of the currently supported preprocessing steps."+
+                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_preprocessing_steps))
+
         self.__preprocessing_steps.append(selection)
 
     def clear_preprocessors(self):
@@ -362,6 +370,11 @@ class DPPModel(object):
 
     def set_problem_type(self, type):
         """Set the problem type to be solved, either classification or regression"""
+        if not isinstance(type, str):
+            raise TypeError("type must be a str")
+        if not type in self.__supported_problem_types:
+            raise ValueError("'"+type+"' is not one of the currently supported problem types."+
+                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_problem_types))
         if type == 'classification':
             self.__problem_type = definitions.ProblemType.CLASSIFICATION
         elif type == 'regression':

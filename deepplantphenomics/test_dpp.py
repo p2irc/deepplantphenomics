@@ -2,15 +2,16 @@ import pytest
 import datetime
 import deepplantphenomics as dpp
 from . import definitions
+from . import layers
 
 def test_init():
     model = dpp.DPPModel(tensorboard_dir="test_dir")
     # test tensorboard directory is being formatted correctly
     assert model._DPPModel__tb_dir == "test_dir/"+datetime.datetime.now().strftime("%d%B%Y%I:%M%p")
 
-# public setters, mostly testing for type and value errors
+# public setters and adders, mostly testing for type and value errors
 @pytest.fixture
-def model(scope="session"):
+def model(scope="module"):
     model = dpp.DPPModel()
     return model
 
@@ -139,8 +140,29 @@ def test_set_original_image_dimensions(model):
     with pytest.raises(ValueError):
         model.set_image_dimensions(1, -1, 1)
 
+def test_add_preprocessor(model):
+    with pytest.raises(TypeError):
+        model.add_preprocessor(5)
+    with pytest.raises(ValueError):
+        model.add_preprocessor('Nico')
 
-def test_set_problem_type():
-    model = dpp.DPPModel()
-    model.set_problem_type("regression")
+def test_set_problem_type(model):
+    with pytest.raises(TypeError):
+        model.set_problem_type(5)
+    with pytest.raises(ValueError):
+        model.set_problem_type('Nico')
+    model.set_problem_type('classification')
+    assert model._DPPModel__problem_type == definitions.ProblemType.CLASSIFICATION
+    model.set_problem_type('regression')
     assert model._DPPModel__problem_type == definitions.ProblemType.REGRESSION
+    model.set_problem_type('semantic_segmentation')
+    assert model._DPPModel__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION
+
+def test_add_input_layer(model):
+    model.add_input_layer()
+    assert isinstance(model._DPPModel__last_layer(), layers.inputLayer)
+
+# need to add exceptions to real function, and set up the layer for the test better
+# def test_add_moderation_layer(model):
+#     model.add_moderation_layer()
+#     assert isinstance(model._DPPModel__last_layer(), layers.moderationLayer)
