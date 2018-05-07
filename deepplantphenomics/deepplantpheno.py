@@ -180,8 +180,8 @@ class DPPModel(object):
         """Set the batch size"""
         if not isinstance(size, int):
             raise TypeError("size must be an int")
-        if size <= 0:
-            raise ValueError("size must be positive")
+        if size < -1:
+            raise ValueError("size must be positive or -1 (for auto-fit)")
 
         self.__batch_size = size
 
@@ -321,16 +321,16 @@ class DPPModel(object):
         """Specify the image dimensions for images in the dataset (depth is the number of channels)"""
         if not isinstance(image_height, int):
             raise TypeError("image_height must be an int")
-        if image_height <= 0:
-            raise ValueError("image_height must be positive")
+        if image_height < -1:
+            raise ValueError("image_height must be positive or -1 (for auto-fit)")
         if not isinstance(image_width, int):
             raise TypeError("image_width must be an int")
-        if image_width <= 0:
-            raise ValueError("image_width must be positive")
+        if image_width < -1:
+            raise ValueError("image_width must be positive or -1 (for auto-fit)")
         if not isinstance(image_depth, int):
             raise TypeError("image_depth must be an int")
-        if image_depth <= 0:
-            raise ValueError("image_depth must be positive")
+        if image_depth < -1:
+            raise ValueError("image_depth must be positive or -1 (for auto-fit)")
 
         self.__image_width = image_width
         self.__image_height = image_height
@@ -344,12 +344,12 @@ class DPPModel(object):
         """
         if not isinstance(image_height, int):
             raise TypeError("image_height must be an int")
-        if image_height <= 0:
-            raise ValueError("image_height must be positive")
+        if image_height < -1:
+            raise ValueError("image_height must be positive or -1 (for auto-fit)")
         if not isinstance(image_width, int):
             raise TypeError("image_width must be an int")
-        if image_width <= 0:
-            raise ValueError("image_width must be positive")
+        if image_width < -1:
+            raise ValueError("image_width must be positive or -1 (for auto-fit)")
 
         self.__image_width_original = image_width
         self.__image_height_original = image_height
