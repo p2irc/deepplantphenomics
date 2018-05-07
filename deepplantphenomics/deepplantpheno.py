@@ -299,10 +299,13 @@ class DPPModel(object):
         """Set the optimizer to use"""
         if not isinstance(optimizer, str):
             raise TypeError("optimizer must be a str")
-        optimizer = optimizer.lower().capitalize()
-        if not optimizer in self.__supported_optimizers:
-            raise ValueError("'"+optimizer+"' is not one of the currently supported optimizers. Choose one of "+
-                             " ".join("'"+x+"'" for x in self.__supported_optimizers))
+        if optimizer.lower().capitalize() in self.__supported_optimizers:
+            optimizer = optimizer.lower().capitalize()
+        elif optimizer.upper() in self.__supported_optimizers:  # 'SGD' doesn't work with the above if statement
+            optimizer = optimizer.upper()
+        else:
+            raise ValueError("'" + optimizer + "' is not one of the currently supported optimizers. Choose one of " +
+                             " ".join("'" + x + "'" for x in self.__supported_optimizers))
 
         self.__optimizer = optimizer
 
@@ -1117,6 +1120,8 @@ class DPPModel(object):
                 raise TypeError("output_size must be an int or None")
             if output_size <= 0:
                 raise ValueError("output_size must be positive")
+            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                raise RuntimeError("output_size should be None for problem_type semantic_segmentation")
 
         self.__log('Adding output layer...')
 

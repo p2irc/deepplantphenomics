@@ -117,6 +117,12 @@ def test_set_optimizer(model):
     assert model._DPPModel__optimizer == 'Adam'
     model.set_optimizer('ADAM')
     assert model._DPPModel__optimizer == 'Adam'
+    model.set_optimizer('SGD')
+    assert model._DPPModel__optimizer == 'SGD'
+    model.set_optimizer('sgd')
+    assert model._DPPModel__optimizer == 'SGD'
+    model.set_optimizer('sGd')
+    assert model._DPPModel__optimizer == 'SGD'
 
 def test_set_weight_initializer(model):
     with pytest.raises(TypeError):
@@ -285,6 +291,9 @@ def test_add_output_layer(model):
         model.add_output_layer(2.0, 3.4)
     with pytest.raises(ValueError):
         model.add_output_layer(2.0, -4)
+    model.set_problem_type('semantic_segmentation') # needed for following runetime error to occur
+    with pytest.raises(RuntimeError):
+        model.add_output_layer(2.0, 3)
     model.set_batch_size(1)
     model.set_image_dimensions(1, 1, 1)
     model.add_input_layer()
