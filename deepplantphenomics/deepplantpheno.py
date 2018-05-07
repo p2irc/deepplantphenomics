@@ -15,7 +15,6 @@ import warnings
 class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
-    __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
     __has_trained = False
     __save_checkpoints = None
 
@@ -32,10 +31,17 @@ class DPPModel(object):
 
     __crop_or_pad_images = False
     __resize_images = False
-
     __preprocessing_steps = []
-    __supported_preprocessing_steps = ['auto-segmentation']
+
     __processed_images_dir = './DPP-Processed'
+
+    # supported implementations we may add more to in future
+    __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
+    __supported_preprocessing_steps = ['auto-segmentation']
+    __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
+    __supported_weight_initializers = ['Normal', 'Xavier']
+    __supported_activation_functions = ['relu', 'tanh']
+    __supported_pooling_types = ['max', 'avg']
 
     # Augmentation options
     __augmentation_flip_horizontal = False
@@ -83,9 +89,7 @@ class DPPModel(object):
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
-    __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
     __weight_initializer = 'Normal'
-    __supported_weight_initializers = ['Normal', 'Xavier']
 
     __learning_rate = None
     __lr_decay_factor = None
@@ -295,6 +299,7 @@ class DPPModel(object):
         """Set the optimizer to use"""
         if not isinstance(optimizer, str):
             raise TypeError("optimizer must be a str")
+        optimizer = optimizer.lower().capitalize()
         if not optimizer in self.__supported_optimizers:
             raise ValueError("'"+optimizer+"' is not one of the currently supported optimizers. Choose one of "+
                              " ".join("'"+x+"'" for x in self.__supported_optimizers))
@@ -305,6 +310,7 @@ class DPPModel(object):
         """Set the initialization scheme used by convolutional and fully connected layers"""
         if not isinstance(initializer, str):
             raise TypeError("initializer must be a str")
+        initializer = initializer.lower().capitalize()
         if not initializer in self.__supported_weight_initializers:
             raise ValueError("'"+initializer+"' is not one of the currently supported weight initializers."+
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_weight_initializers))
@@ -917,6 +923,31 @@ class DPPModel(object):
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
         """
+        try:  # try to iterate through filter_dimension, checking it has 4 ints
+            for idx, dim in enumerate(filter_dimension):
+                if not (isinstance(dim, int) or isinstance(dim, np.int64)): # np.int64 numpy default int
+                    raise TypeError()
+            if idx != 3:
+                raise TypeError()
+        except:
+            raise TypeError("filter_dimension must be a list or array of 4 ints")
+        if not isinstance(stride_length, int):
+            raise TypeError("stride_length must be an int")
+        if stride_length <= 0:
+            raise ValueError("stride_length must be positive")
+        if not isinstance(activation_function, str):
+            raise TypeError("activation_function must be a str")
+        activation_function = activation_function.lower()
+        if not activation_function in self.__supported_activation_functions:
+            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
+                             " Choose one of: "+
+                             " ".join("'"+x+"'" for x in self.__supported_activation_functions))
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+
         self.__num_layers_conv += 1
         layer_name = 'conv%d' % self.__num_layers_conv
         self.__log('Adding convolutional layer %s...' % layer_name)
@@ -947,6 +978,22 @@ class DPPModel(object):
         :param stride_length: convolution stride length
         :param pooling_type: optional, the type of pooling operation
         """
+        if not isinstance(kernel_size, int):
+            raise TypeError("kernel_size must be an int")
+        if kernel_size <= 0:
+            raise ValueError("kernel_size must be positive")
+        if not isinstance(stride_length, int):
+            raise TypeError("stride_length must be an int")
+        if stride_length <= 0:
+            raise ValueError("stride_length must be positive")
+        if not isinstance(pooling_type, str):
+            raise TypeError("pooling_type must be a str")
+        pooling_type = pooling_type.lower()
+        if not pooling_type in self.__supported_pooling_types:
+            raise ValueError("'"+pooling_type+"' is not one of the currently supported pooling types."+
+                             " Choose one of: "+
+                             " ".join("'"+x+"'" for x in self.__supported_pooling_types))
+
         self.__num_layers_pool += 1
         layer_name = 'pool%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -975,6 +1022,11 @@ class DPPModel(object):
 
         :param p: the keep-probability parameter for the DropOut operation
         """
+        if not isinstance(p, float):
+            raise TypeError("p must be a float")
+        if p < 0 or p >= 1:
+            raise ValueError("p must be in range [0, 1)")
+
         self.__num_layers_dropout += 1
         layer_name = 'drop%d' % self.__num_layers_dropout
         self.__log('Adding dropout layer %s...' % layer_name)
@@ -1004,6 +1056,23 @@ class DPPModel(object):
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
         """
+        if not isinstance(output_size, int):
+            raise TypeError("output_size must be an int")
+        if output_size <= 0:
+            raise ValueError("output_size must be positive")
+        if not isinstance(activation_function, str):
+            raise TypeError("activation_function must be a str")
+        activation_function = activation_function.lower()
+        if not activation_function in self.__supported_activation_functions:
+            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
+                             " Choose one of: "+
+                             " ".join("'"+x+"'" for x in self.__supported_activation_functions))
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+
         self.__num_layers_fc += 1
         layer_name = 'fc%d' % self.__num_layers_fc
         self.__log('Adding fully connected layer %s...' % layer_name)
@@ -1038,6 +1107,17 @@ class DPPModel(object):
         :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
         use cases such as creating the output layer before loading data.
         """
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+        if output_size is not None:
+            if not isinstance(output_size, int):
+                raise TypeError("output_size must be an int or None")
+            if output_size <= 0:
+                raise ValueError("output_size must be positive")
+
         self.__log('Adding output layer...')
 
         reshape = self.__last_layer_outputs_volume()

@@ -1,5 +1,6 @@
 import pytest
 import datetime
+import numpy as np
 import deepplantphenomics as dpp
 from . import definitions
 from . import layers
@@ -109,12 +110,24 @@ def test_set_optimizer(model):
         model.set_optimizer(5)
     with pytest.raises(ValueError):
         model.set_optimizer('Nico')
+    model.set_optimizer('adam')
+    assert model._DPPModel__optimizer == 'Adam'
+    model.set_optimizer('Adam')
+    assert model._DPPModel__optimizer == 'Adam'
+    model.set_optimizer('ADAM')
+    assert model._DPPModel__optimizer == 'Adam'
 
 def test_set_weight_initializer(model):
     with pytest.raises(TypeError):
         model.set_weight_initializer(5)
     with pytest.raises(ValueError):
         model.set_weight_initializer('Nico')
+    model.set_weight_initializer('normal')
+    assert model._DPPModel__weight_initializer == 'Normal'
+    model.set_weight_initializer('Normal')
+    assert model._DPPModel__weight_initializer == 'Normal'
+    model.set_weight_initializer('NORMAL')
+    assert model._DPPModel__weight_initializer == 'Normal'
 
 def test_set_image_dimensions(model):
     with pytest.raises(TypeError):
@@ -158,11 +171,126 @@ def test_set_problem_type(model):
     model.set_problem_type('semantic_segmentation')
     assert model._DPPModel__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION
 
+# adding layers may require some more indepth testing
 def test_add_input_layer(model):
     model.add_input_layer()
     assert isinstance(model._DPPModel__last_layer(), layers.inputLayer)
 
+# need to come back to this one
 # need to add exceptions to real function, and set up the layer for the test better
 # def test_add_moderation_layer(model):
+#     mf = np.array([[0, 1, 2]])
+#     model.add_moderation_features(mf)
+#     model.add_moderation_layer()
+#     assert isintance(model._DPPModel__last_layer(), layers.moderationLayer)
 #     model.add_moderation_layer()
 #     assert isinstance(model._DPPModel__last_layer(), layers.moderationLayer)
+
+def test_add_convolutional_layer(model):
+    with pytest.raises(TypeError):
+        model.add_convolutional_layer([1, 2.0, 3, 4], 1, 'relu')
+    with pytest.raises(TypeError):
+        model.add_convolutional_layer([1, 2], 1, 'relu')
+    with pytest.raises(TypeError):
+        model.add_convolutional_layer([1, 2, 3, 4], 1.0, 'relu')
+    with pytest.raises(ValueError):
+        model.add_convolutional_layer([1, 2, 3, 4], -1, 'relu')
+    with pytest.raises(TypeError):
+        model.add_convolutional_layer([1, 2, 3, 4], 1, 555)
+    with pytest.raises(ValueError):
+        model.add_convolutional_layer([1, 2, 3, 4], 1, 'Nico')
+    with pytest.raises(TypeError):
+        model.add_convolutional_layer([1, 2, 3, 4], 1, 'relu', "5")
+    with pytest.raises(ValueError):
+        model.add_convolutional_layer([1, 2, 3, 4], 1, 'relu', -1.0)
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.add_convolutional_layer(np.array([1,1,1,1]), 1, 'relu')
+    assert isinstance(model._DPPModel__last_layer(), layers.convLayer)
+
+def test_add_pooling_layer(model):
+    with pytest.raises(TypeError):
+        model.add_pooling_layer(1.5, 1)
+    with pytest.raises(ValueError):
+        model.add_pooling_layer(-1, 1)
+    with pytest.raises(TypeError):
+        model.add_pooling_layer(1, 1.5)
+    with pytest.raises(ValueError):
+        model.add_pooling_layer(1, -1)
+    with pytest.raises(TypeError):
+        model.add_pooling_layer(1, 1, 5)
+    with pytest.raises(ValueError):
+        model.add_pooling_layer(1, 1, 'Nico')
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.add_pooling_layer(1, 1, 'avg')
+    assert isinstance(model._DPPModel__last_layer(), layers.poolingLayer)
+
+def test_add_normalization_layer(model):
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.add_normalization_layer()
+    assert isinstance(model._DPPModel__last_layer(), layers.normLayer)
+
+def test_add_dropout_layer(model):
+    with pytest.raises(TypeError):
+        model.add_dropout_layer("0.5")
+    with pytest.raises(ValueError):
+        model.add_dropout_layer(1.5)
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.add_dropout_layer(0.4)
+    assert isinstance(model._DPPModel__last_layer(), layers.dropoutLayer)
+
+def test_add_batch_norm_layer(model):
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.add_batch_norm_layer()
+    assert isinstance(model._DPPModel__last_layer(), layers.batchNormLayer)
+
+def test_add_fully_connected_layer(model):
+    with pytest.raises(TypeError):
+        model.add_fully_connected_layer(2.3, 'relu', 1.8)
+    with pytest.raises(ValueError):
+        model.add_fully_connected_layer(-3, 'relu', 1.8)
+    with pytest.raises(TypeError):
+        model.add_fully_connected_layer(2, 5, 1.8)
+    with pytest.raises(ValueError):
+        model.add_fully_connected_layer(3, 'Nico', 1.8)
+    with pytest.raises(TypeError):
+        model.add_fully_connected_layer(2, 'relu', "1.8")
+    with pytest.raises(ValueError):
+        model.add_fully_connected_layer(3, 'relu', -1.5)
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.add_fully_connected_layer(1, 'tanh', 0.3)
+    assert isinstance(model._DPPModel__last_layer(), layers.fullyConnectedLayer)
+
+def test_add_output_layer(model):
+    with pytest.raises(TypeError):
+        model.add_output_layer("2")
+    with pytest.raises(ValueError):
+        model.add_output_layer(-0.4)
+    with pytest.raises(TypeError):
+        model.add_output_layer(2.0, 3.4)
+    with pytest.raises(ValueError):
+        model.add_output_layer(2.0, -4)
+    model.set_batch_size(1)
+    model.set_image_dimensions(1, 1, 1)
+    model.add_input_layer()
+    model.set_problem_type('classification')
+    model.add_output_layer(2.5, 10)
+    assert isinstance(model._DPPModel__last_layer(), layers.fullyConnectedLayer)
+    new_model = dpp.DPPModel()
+    new_model.set_batch_size(1)
+    new_model.set_image_dimensions(1, 1, 1)
+    new_model.add_input_layer()
+    new_model.set_problem_type('semantic_segmentation')
+    new_model.add_output_layer(2.5)
+    assert isinstance(new_model._DPPModel__last_layer(), layers.convLayer)

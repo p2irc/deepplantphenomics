@@ -119,7 +119,7 @@ class rosetteLeafRegressor(object):
         self.model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
         self.model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-	self.model.add_fully_connected_layer(output_size=1024, activation_function='tanh')
+        self.model.add_fully_connected_layer(output_size=1024, activation_function='tanh')
 
         self.model.add_output_layer()
 
