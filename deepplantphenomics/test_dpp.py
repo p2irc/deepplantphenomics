@@ -30,8 +30,7 @@ def test_set_batch_size(model):
     with pytest.raises(TypeError):
         model.set_batch_size(5.0)
     with pytest.raises(ValueError):
-        model.set_batch_size(-3)
-    model.set_batch_size(-1)
+        model.set_batch_size(-1)
 
 def test_set_num_regression_outputs(model):
     with pytest.raises(TypeError):
@@ -140,28 +139,26 @@ def test_set_image_dimensions(model):
     with pytest.raises(TypeError):
         model.set_image_dimensions(1.0, 1, 1)
     with pytest.raises(ValueError):
-        model.set_image_dimensions(-2, 1, 1)
+        model.set_image_dimensions(-1, 1, 1)
     with pytest.raises(TypeError):
         model.set_image_dimensions(1, 1.0, 1)
     with pytest.raises(ValueError):
-        model.set_image_dimensions(1, -3, 1)
+        model.set_image_dimensions(1, -1, 1)
     with pytest.raises(TypeError):
         model.set_image_dimensions(1, 1, 1.0)
     with pytest.raises(ValueError):
-        model.set_image_dimensions(1, 1, -4)
-    model.set_image_dimensions(-1, -1, -1)
+        model.set_image_dimensions(1, 1, -1)
 
 
 def test_set_original_image_dimensions(model):
     with pytest.raises(TypeError):
         model.set_original_image_dimensions(1.0, 1)
     with pytest.raises(ValueError):
-        model.set_original_image_dimensions(-4, 1)
+        model.set_original_image_dimensions(-1, 1)
     with pytest.raises(TypeError):
         model.set_original_image_dimensions(1, 1.0)
     with pytest.raises(ValueError):
-        model.set_original_image_dimensions(1, -7)
-    model.set_original_image_dimensions(-1, -1)
+        model.set_original_image_dimensions(1, -1)
 
 def test_add_preprocessor(model):
     with pytest.raises(TypeError):
