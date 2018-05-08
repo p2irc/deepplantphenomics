@@ -346,9 +346,10 @@ class DPPModel(object):
                 regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
                 cost = tf.add(regression_loss, l2_cost)
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                # Added a new loss function
                 pixel_loss = tf.reduce_mean(tf.abs(tf.subtract(xx, y[:, :, :, 0])))
                 # pixel_loss = self.delta_cross_entropy(xx, y[:,:,:,0])
-                pixel_loss = tf.nn.softmax_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0])
+                pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0])
                 cost = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
             if self.__optimizer == 'Adagrad':
@@ -388,14 +389,18 @@ class DPPModel(object):
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
 
+            # Old code
             # x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
             #
             # y_test = tf.reshape(y_test, shape=[-1, self.__image_height, self.__image_width])
+
+            # Take a slice of image. Same size and location as the slice from training, if semantic.
             x_test = tf.image.extract_glimpse(x_test, [desired_height, desired_width], offsets, normalized=False,
                                               centered=False)
             if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 y_test = tf.image.extract_glimpse(y_test, [desired_height, desired_width], offsets, normalized=False,
                                                   centered=False)
+
 
             if self.__has_moderation:
                 x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
@@ -528,6 +533,7 @@ class DPPModel(object):
                     else:
                         loss = self.__session.run([cost])
 
+                    # Commented out because I added a new loss function, and it was a vector, not a scalar
                     # if loss == 0.0:
                     #     self.__log('Stopping due to zero loss')
                     #     break
@@ -539,6 +545,7 @@ class DPPModel(object):
 
                 self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
 
+                # Commented out because I wanted to test on the model directly after training on another dataset.
                 # self.shut_down()
 
     def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
@@ -746,6 +753,8 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 total_outputs = np.empty([1, self.__num_regression_outputs])
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                # Hard coded specifically for my problem.
+                # 768 is the biggest multiple of 256 that could fit within every drone image.
                 total_outputs = np.empty([1, 768, 768])  # self.__image_height, self.__image_width])
             else:
                 warnings.warn('Problem type is not recognized')
@@ -783,27 +792,9 @@ class DPPModel(object):
                 print('-a')
                 # Put them back together, to then save.
                 x1, x2, x3, x4 = np.array_split(xx, 4)  # So there are 36 tiles in xx. Divide by 9 (number of tiles per image), to get 4 total images per xx
-                # x1 = np.delete(x1, 0, 0)
-                # x1 = np.delete(x1, x1.shape[1], 0)
-                # x1 = np.delete(x1, 0, 1)
-                # x1 = np.delete(x1, x1.shape[2], 1)
-                #
-                # x2 = np.delete(x2, 0, 0)
-                # x2 = np.delete(x2, x2.shape[1], 0)
-                # x2 = np.delete(x2, 0, 1)
-                # x2 = np.delete(x2, x2.shape[2], 1)
-                #
-                # x3 = np.delete(x3, 0, 0)
-                # x3 = np.delete(x3, x3.shape[1], 0)
-                # x3 = np.delete(x3, 0, 1)
-                # x3 = np.delete(x3, x3.shape[2], 1)
-                #
-                # x4 = np.delete(x4, 0, 0)
-                # x4 = np.delete(x4, x4.shape[1], 0)
-                # x4 = np.delete(x4, 0, 1)
-                # x4 = np.delete(x4, x4.shape[2], 1)
 
-                # Put the images back together in the right order
+                # Put the images back together in the right order.
+                # Also hard coded exactly for my thing. There are 4, because I chose to have a batch size of 4. So this could easily be made into a loop.
                 x1 = np.concatenate((np.concatenate((x1[0], x1[1], x1[2]), axis=1),
                                      np.concatenate((x1[3], x1[4], x1[5]), axis=1),
                                      np.concatenate((x1[6], x1[7], x1[8]), axis=1)), axis=0)
