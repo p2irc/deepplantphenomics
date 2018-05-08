@@ -151,7 +151,6 @@ class DPPModel(object):
         self.__log('Initializing queue runners...')
         self.__coord = tf.train.Coordinator()
         self.__threads = tf.train.start_queue_runners(sess=self.__session, coord=self.__coord)
-        print("done initializing the fuckers")
 
     def set_number_of_threads(self, num_threads):
         """Set number of threads for input queue runners and preprocessing tasks"""
@@ -789,7 +788,6 @@ class DPPModel(object):
 
             for i in range(num_batches):
                 xx = self.__session.run(x_pred)
-                print('-a')
                 # Put them back together, to then save.
                 x1, x2, x3, x4 = np.array_split(xx, 4)  # So there are 36 tiles in xx. Divide by 9 (number of tiles per image), to get 4 total images per xx
 
@@ -808,17 +806,15 @@ class DPPModel(object):
                                      np.concatenate((x4[3], x4[4], x4[5]), axis=1),
                                      np.concatenate((x4[6], x4[7], x4[8]), axis=1)), axis=0)
 
-                print(total_outputs.shape, xx.shape)
                 total_outputs = np.append(total_outputs, (x1, x2, x3, x4), axis=0)
-            print('a')
+
             # delete weird first row
             total_outputs = np.delete(total_outputs, 0, 0)
-            print('b')
+
             # delete any outputs which are overruns from the last batch
             if remainder != 0:
                 for i in range(remainder):
                     total_outputs = np.delete(total_outputs, -1, 0)
-            print('c')
 
         return total_outputs
 
