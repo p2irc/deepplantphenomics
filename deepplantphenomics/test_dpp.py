@@ -323,7 +323,7 @@ def test_load_ippn_leaf_count_dataset_from_directory():
     model.set_maximum_training_epochs(1)
     model.set_learning_rate(0.0001)
     with pytest.raises(RuntimeError):
-        model.load_ippn_leaf_count_dataset_from_directory('test_data/Ara2013-Canon')
+        model.load_ippn_leaf_count_dataset_from_directory('test_data/test_Ara2013_Canon')
 
     # forgetting to set num epochs
     model = dpp.DPPModel(debug=False, save_checkpoints=False, report_rate=20)
@@ -338,7 +338,7 @@ def test_load_ippn_leaf_count_dataset_from_directory():
     # model.set_maximum_training_epochs(1)
     model.set_learning_rate(0.0001)
     with pytest.raises(RuntimeError):
-        model.load_ippn_leaf_count_dataset_from_directory('test_data/Ara2013-Canon')
+        model.load_ippn_leaf_count_dataset_from_directory('test_data/test_Ara2013_Canon')
 
     # the following shouldn't raise any issues since there should be defaults for
     # batch_size, train_test_split, and learning_rate
@@ -353,7 +353,7 @@ def test_load_ippn_leaf_count_dataset_from_directory():
     model.set_weight_initializer('xavier')
     model.set_maximum_training_epochs(1)
     # model.set_learning_rate(0.0001)
-    model.load_ippn_leaf_count_dataset_from_directory('test_data/Ara2013-Canon')
+    model.load_ippn_leaf_count_dataset_from_directory('test_data/test_Ara2013_Canon')
 
 
 
