@@ -1,9 +1,6 @@
 import pytest
-import datetime
 import os
 import numpy as np
-import tensorflow as tf
-import deepplantphenomics as dpp
 from . import loaders
 
 @pytest.fixture

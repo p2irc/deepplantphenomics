@@ -84,14 +84,14 @@ class DPPModel(object):
     __num_layers_batchnorm = 0
 
     # Network options
-    __batch_size = None
-    __train_test_split = None
+    __batch_size = 1
+    __train_test_split = 0.7
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
     __weight_initializer = 'Normal'
 
-    __learning_rate = None
+    __learning_rate = 0.01
     __lr_decay_factor = None
     __lr_decay_epochs = None
 
@@ -187,6 +187,9 @@ class DPPModel(object):
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
+        if self.__problem_type != definitions.ProblemType.REGRESSION:
+            raise RuntimeError("The problem type needs to be set to 'regression' before setting the number "+
+                               "of regression outputs. Try using DPPModel.set_problem_type() first.")
         if not isinstance(num, int):
             raise TypeError("num must be an int")
         if num <= 0:
@@ -401,6 +404,16 @@ class DPPModel(object):
         the session is shut down.
         Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
         """
+        if None in [self.__train_images, self.__test_images,
+                    self.__train_labels, self.__test_labels]:
+            raise RuntimeError("Images and Labels need to be loaded before you can begin training. "+
+                               "Try first using one of the methods starting with 'load_...' such as "+
+                               "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        if (len(self.__layers) < 1):
+            raise RuntimeError("There are no layers currently added to the model when trying to begin training. "+
+                               "Add layers first by using functions such as 'DPPModel.add_input_layer()' or "+
+                               "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of layers.")
+
         with self.__graph.as_default():
             # Define batches
             if self.__has_moderation:
@@ -887,6 +900,10 @@ class DPPModel(object):
 
     def add_input_layer(self):
         """Add an input layer to the network"""
+        if len(self.__layers) > 0:
+            raise RuntimeError("Trying to add an input layer to a model that already contains other layers. "+
+                               "Input layers need to be the first layer added to the model.")
+
         self.__log('Adding the input layer...')
 
         apply_crop = (self.__augmentation_crop and self.__all_images is None and self.__train_images is None)
@@ -926,6 +943,8 @@ class DPPModel(object):
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A convolutional layer cannot be the first layer added to the model.")
         try:  # try to iterate through filter_dimension, checking it has 4 ints
             for idx, dim in enumerate(filter_dimension):
                 if not (isinstance(dim, int) or isinstance(dim, np.int64)): # np.int64 numpy default int
@@ -981,6 +1000,8 @@ class DPPModel(object):
         :param stride_length: convolution stride length
         :param pooling_type: optional, the type of pooling operation
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A pooling layer cannot be the first layer added to the model.")
         if not isinstance(kernel_size, int):
             raise TypeError("kernel_size must be an int")
         if kernel_size <= 0:
@@ -1010,6 +1031,8 @@ class DPPModel(object):
 
     def add_normalization_layer(self):
         """Add a local response normalization layer to the model"""
+        if len(self.__layers) < 1:
+            raise RuntimeError("A normalization layer cannot be the first layer added to the model.")
         self.__num_layers_norm += 1
         layer_name = 'norm%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -1025,6 +1048,8 @@ class DPPModel(object):
 
         :param p: the keep-probability parameter for the DropOut operation
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A dropout layer cannot be the first layer added to the model.")
         if not isinstance(p, float):
             raise TypeError("p must be a float")
         if p < 0 or p >= 1:
@@ -1041,6 +1066,8 @@ class DPPModel(object):
 
     def add_batch_norm_layer(self):
         """Add a batch normalization layer to the model."""
+        if len(self.__layers) < 1:
+            raise RuntimeError("A batch norm layer cannot be the first layer added to the model.")
         self.__num_layers_batchnorm += 1
         layer_name = 'bn%d' % self.__num_layers_batchnorm
         self.__log('Adding batch norm layer %s...' % layer_name)
@@ -1059,6 +1086,8 @@ class DPPModel(object):
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A fully connected layer cannot be the first layer added to the model.")
         if not isinstance(output_size, int):
             raise TypeError("output_size must be an int")
         if output_size <= 0:
@@ -1110,6 +1139,8 @@ class DPPModel(object):
         :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
         use cases such as creating the output layer before loading data.
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model.")
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
                 raise TypeError("regularization_coefficient must be a float or None")
@@ -1177,6 +1208,12 @@ class DPPModel(object):
         :param labels_file: the path of the .csv file containing the labels
         :param column_number: the column number (zero-indexed) of the column in the csv file representing the label
         """
+        if not isinstance(dirname, str):
+            raise TypeError("dirname must be a str")
+        if not os.path.isdir(dirname):
+            raise ValueError("'"+dirname+"' does not exist")
+        if not isinstance(labels_file, str):
+            raise TypeError("labels_file must be a str")
 
         image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
                        os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
@@ -1336,6 +1373,12 @@ class DPPModel(object):
 
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
+        if self.__image_height is None or self.__image_width is None or self.__image_depth is None:
+            raise RuntimeError("Image dimensions need to be set before loading data."+
+                               " Try using DPPModel.set_image_dimensions() first.")
+        if self.__maximum_training_batches is None:
+            raise RuntimeError("The number of maximum training epochs needs to be set before loading data."+
+                               " Try using DPPModel.set_maximum_training_epochs() first.")
 
         labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Leaf_counts.csv'), 1, 0)
 
