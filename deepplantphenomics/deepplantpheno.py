@@ -743,13 +743,11 @@ class DPPModel(object):
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        if not self.__with_patching:
-            raise RuntimeError("patching dimensions were not specified."+
-                               " Need to use DPPModel.set_patch_size(height, width) before training.")
+        #if not self.__with_patching:
+        #    raise RuntimeError("patching dimensions were not specified."+
+        #                       " Need to use DPPModel.set_patch_size(height, width) before training.")
 
         with self.__graph.as_default():
-            patch_height = self.__patch_height
-            patch_width = self.__patch_width
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 total_outputs = np.empty([1, self.__last_layer().output_size])
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
@@ -757,9 +755,14 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 # we want the largest multiple of of patch height/width that is smaller than the original
                 # image height/width, for the final image dimensions
-                final_height = (self.__image_height // patch_height) * patch_height
-                final_width = (self.__image_width // patch_width) * patch_width
-                total_outputs = np.empty([1, final_height, final_width])
+                if self.__with_patching:
+                    patch_height = self.__patch_height
+                    patch_width = self.__patch_width
+                    final_height = (self.__image_height // patch_height) * patch_height
+                    final_width = (self.__image_width // patch_width) * patch_width
+                    total_outputs = np.empty([1, final_height, final_width])
+                else:
+                    total_outputs = np.empty([1, final_height, final_width])
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
@@ -774,14 +777,15 @@ class DPPModel(object):
             self.load_images_from_list(x)
 
             x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
-
-            # Split the images up into the multiple slices of size 256x256
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
-            ksizes = [1, patch_height, patch_width, 1]
-            strides = [1, patch_height, patch_width, 1]
-            rates = [1, 1, 1, 1]
-            x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-            x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self.__image_depth])
+
+            if self.__with_patching:
+                # Split the images up into the multiple slices of size patch_height x patch_width
+                ksizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]
+                rates = [1, 1, 1, 1]
+                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self.__image_depth])
 
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
@@ -791,38 +795,45 @@ class DPPModel(object):
 
             self.__initialize_queue_runners()
 
-            num_patch_rows = final_height // patch_height
-            num_patch_cols = final_width // patch_width
-            for i in range(num_batches):
-                xx = self.__session.run(x_pred)
+            if self.__with_patching:
+                num_patch_rows = final_height // patch_height
+                num_patch_cols = final_width // patch_width
+                for i in range(num_batches):
+                    xx = self.__session.run(x_pred)
 
-                # new generalized version of image stitching
-                for img in np.array_split(xx, self.__batch_size): # for each img in current batch
-                    # we are going to build a list of rows of imgs called img_rows, where each element
-                    # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
-                    # iterate through img_rows concatenating the rows vertically (axis=0) to build
-                    # the full img
+                    # new generalized version of image stitching
+                    for img in np.array_split(xx, self.__batch_size): # for each img in current batch
+                        # we are going to build a list of rows of imgs called img_rows, where each element
+                        # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
+                        # iterate through img_rows concatenating the rows vertically (axis=0) to build
+                        # the full img
 
-                    img_rows = []
-                    # for each row
-                    for j in range(num_patch_rows):
-                        curr_row = img[j*num_patch_rows] # start new row with first img
-                        # iterate through the rest of the row, concatenating img's together
-                        for k in range(1, num_patch_cols):
-                            curr_row = np.concatenate((curr_row, img[k+(j*num_patch_rows)]), axis=1) # horizontal cat
-                        img_rows.append(curr_row) # add row of img's to the list
+                        img_rows = []
+                        # for each row
+                        for j in range(num_patch_rows):
+                            curr_row = img[j*num_patch_rows] # start new row with first img
+                            # iterate through the rest of the row, concatenating img's together
+                            for k in range(1, num_patch_cols):
+                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_rows)]), axis=1) # horizontal cat
+                            img_rows.append(curr_row) # add row of img's to the list
 
-                    # start full img with the first full row of imgs
-                    full_img = img_rows[0]
-                    # iterate through rest of rows, concatenating rows together
-                    for row_num in range(1, num_patch_rows):
-                        full_img = np.concatenate((full_img, img_rows[row_num]), axis=0) # vertical cat
+                        # start full img with the first full row of imgs
+                        full_img = img_rows[0]
+                        # iterate through rest of rows, concatenating rows together
+                        for row_num in range(1, num_patch_rows):
+                            full_img = np.concatenate((full_img, img_rows[row_num]), axis=0) # vertical cat
 
-                    # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                    full_img = np.array([full_img]) # shape transformation: (x,y) --> (1,x,y)
-                    total_outputs = np.append(total_outputs, full_img, axis=0) # add the final img to the list of imgs
+                        # need to match total_outputs dimensions, so we add a dimension to the shape to match
+                        full_img = np.array([full_img]) # shape transformation: (x,y) --> (1,x,y)
+                        total_outputs = np.append(total_outputs, full_img, axis=0) # add the final img to the list of imgs
 
-            # using the same 'clean-up' travis had before
+
+            else:
+                for i in range(int(num_batches)):
+                    xx = self.__session.run(x_pred)
+                    total_outputs = np.append(total_outputs, xx, axis=0)
+
+            # delete weird first row
             total_outputs = np.delete(total_outputs, 0, 0)
 
             # delete any outputs which are overruns from the last batch
