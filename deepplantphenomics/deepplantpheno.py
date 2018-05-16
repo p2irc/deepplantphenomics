@@ -36,9 +36,17 @@ class DPPModel(object):
 
     __crop_or_pad_images = False
     __resize_images = False
-
     __preprocessing_steps = []
+
     __processed_images_dir = './DPP-Processed'
+
+    # supported implementations we may add more to in future
+    __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
+    __supported_preprocessing_steps = ['auto-segmentation']
+    __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
+    __supported_weight_initializers = ['normal', 'xavier']
+    __supported_activation_functions = ['relu', 'tanh']
+    __supported_pooling_types = ['max', 'avg']
 
     # Augmentation options
     __augmentation_flip_horizontal = False
@@ -81,14 +89,14 @@ class DPPModel(object):
     __num_layers_batchnorm = 0
 
     # Network options
-    __batch_size = None
-    __train_test_split = None
+    __batch_size = 1
+    __train_test_split = 0.7
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
-    __weight_initializer = 'normal'
+    __weight_initializer = 'Normal'
 
-    __learning_rate = None
+    __learning_rate = 0.01
     __lr_decay_factor = None
     __lr_decay_epochs = None
 
@@ -159,76 +167,180 @@ class DPPModel(object):
 
     def set_number_of_threads(self, num_threads):
         """Set number of threads for input queue runners and preprocessing tasks"""
+        if not isinstance(num_threads, int):
+            raise TypeError("num_threads must be an int")
+        if num_threads <= 0:
+            raise ValueError("num_threads must be positive")
+
         self.__num_threads = num_threads
 
     def set_processed_images_dir(self, dir):
         """Set the directory for storing processed images when pre-processing is used"""
+        if not isinstance(dir, str):
+            raise TypeError("dir must be a str")
+
         self.__processed_images_dir = dir
 
     def set_batch_size(self, size):
         """Set the batch size"""
+        if not isinstance(size, int):
+            raise TypeError("size must be an int")
+        if size <= 0:
+            raise ValueError("size must be positive")
+
         self.__batch_size = size
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
+        if self.__problem_type != definitions.ProblemType.REGRESSION:
+            raise RuntimeError("The problem type needs to be set to 'regression' before setting the number "+
+                               "of regression outputs. Try using DPPModel.set_problem_type() first.")
+        if not isinstance(num, int):
+            raise TypeError("num must be an int")
+        if num <= 0:
+            raise ValueError("num must be positive")
+
         self.__num_regression_outputs = num
 
     def set_train_test_split(self, ratio):
         """Set a ratio for the number of samples to use as training set"""
+        if not isinstance(ratio, float):
+            raise TypeError("ratio must be a float")
+        if ratio <= 0 or ratio > 1:
+            raise ValueError("ratio must be between 0 and 1")
+
         self.__train_test_split = ratio
 
     def set_maximum_training_epochs(self, epochs):
         """Set the max number of training epochs"""
+        if not isinstance(epochs, int):
+            raise TypeError("epochs must be an int")
+        if epochs <= 0:
+            raise ValueError("epochs must be positive")
+
         self.__maximum_training_batches = epochs
 
     def set_learning_rate(self, rate):
         """Set the initial learning rate"""
+        if not isinstance(rate, float):
+            raise TypeError("rate must be a float")
+        if rate <= 0:
+            raise ValueError("rate must be positive")
+
         self.__learning_rate = rate
 
     def set_crop_or_pad_images(self, crop_or_pad):
         """Apply padding or cropping images to, which is required if the dataset has images of different sizes"""
+        if not isinstance(crop_or_pad, bool):
+            raise TypeError("crop_or_pad must be a bool")
+
         self.__crop_or_pad_images = crop_or_pad
 
     def set_resize_images(self, resize):
         """Up-sample or down-sample images to specified size"""
+        if not isinstance(resize, bool):
+            raise TypeError("resize must be a bool")
+
         self.__resize_images = resize
 
     def set_augmentation_flip_horizontal(self, flip):
         """Randomly flip training images horizontally"""
+        if not isinstance(flip, bool):
+            raise TypeError("flip must be a bool")
+
         self.__augmentation_flip_horizontal = flip
 
     def set_augmentation_flip_vertical(self, flip):
         """Randomly flip training images vertically"""
+        if not isinstance(flip, bool):
+            raise TypeError("flip must be a bool")
+
         self.__augmentation_flip_vertical = flip
 
     def set_augmentation_crop(self, resize, crop_ratio=0.75):
         """Randomly crop images during training, and crop images to center during testing"""
+        if not isinstance(resize, bool):
+            raise TypeError("resize must be a bool")
+        if not isinstance(crop_ratio, float):
+            raise TypeError("crop_ratio must be a float")
+        if crop_ratio <= 0 or crop_ratio > 1:
+            raise ValueError("crop_ratio must be in (0, 1]")
+
         self.__augmentation_crop = resize
         self.__crop_amount = crop_ratio
 
     def set_augmentation_brightness_and_contrast(self, contr):
         """Randomly adjust contrast and/or brightness on training images"""
+        if not isinstance(contr, bool):
+            raise TypeError("contr must be a bool")
+
         self.__augmentation_contrast = contr
 
     def set_regularization_coefficient(self, lamb):
         """Set lambda for L2 weight decay"""
+        if not isinstance(lamb, float):
+            raise TypeError("lamb must be a float")
+        if lamb <= 0:
+            raise ValueError("lamb must be positive")
+
         self.__reg_coeff = lamb
 
     def set_learning_rate_decay(self, decay_factor, epochs_per_decay):
         """Set learning rate decay"""
+        if not isinstance(decay_factor, float):
+            raise TypeError("decay_factor must be a float")
+        if decay_factor <= 0:
+            raise ValueError("decay_factor must be positive")
+        if not isinstance(epochs_per_decay, int):
+            raise TypeError("epochs_per_day must be an int")
+        if epochs_per_decay <= 0:
+            raise ValueError("epochs_per_day must be positive")
+        if self.__total_training_samples == 0:
+            raise RuntimeError("Data needs to be loaded before learning rate decay can be set.")
+
         self.__lr_decay_factor = decay_factor
         self.__lr_decay_epochs = epochs_per_decay * (self.__total_training_samples * self.__train_test_split)
 
     def set_optimizer(self, optimizer):
         """Set the optimizer to use"""
+        if not isinstance(optimizer, str):
+            raise TypeError("optimizer must be a str")
+        if optimizer.lower().capitalize() in self.__supported_optimizers:
+            optimizer = optimizer.lower().capitalize()
+        elif optimizer.upper() in self.__supported_optimizers:  # 'SGD' doesn't work with the above if statement
+            optimizer = optimizer.upper()
+        else:
+            raise ValueError("'" + optimizer + "' is not one of the currently supported optimizers. Choose one of " +
+                             " ".join("'" + x + "'" for x in self.__supported_optimizers))
+
         self.__optimizer = optimizer
 
     def set_weight_initializer(self, initializer):
         """Set the initialization scheme used by convolutional and fully connected layers"""
+        if not isinstance(initializer, str):
+            raise TypeError("initializer must be a str")
+        initializer = initializer.lower()
+        if not initializer in self.__supported_weight_initializers:
+            raise ValueError("'"+initializer+"' is not one of the currently supported weight initializers."+
+                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_weight_initializers))
+
         self.__weight_initializer = initializer
 
     def set_image_dimensions(self, image_height, image_width, image_depth):
         """Specify the image dimensions for images in the dataset (depth is the number of channels)"""
+        if not isinstance(image_height, int):
+            raise TypeError("image_height must be an int")
+        if image_height <= 0:
+            raise ValueError("image_height must be positive")
+        if not isinstance(image_width, int):
+            raise TypeError("image_width must be an int")
+        if image_width <= 0:
+            raise ValueError("image_width must be positive")
+        if not isinstance(image_depth, int):
+            raise TypeError("image_depth must be an int")
+        if image_depth <= 0:
+            raise ValueError("image_depth must be positive")
+
         self.__image_width = image_width
         self.__image_height = image_height
         self.__image_depth = image_depth
@@ -239,6 +351,15 @@ class DPPModel(object):
         This is only needed in special cases, for instance, if you are resizing input images but using image coordinate
         labels which reference the original size.
         """
+        if not isinstance(image_height, int):
+            raise TypeError("image_height must be an int")
+        if image_height <= 0:
+            raise ValueError("image_height must be positive")
+        if not isinstance(image_width, int):
+            raise TypeError("image_width must be an int")
+        if image_width <= 0:
+            raise ValueError("image_width must be positive")
+
         self.__image_width_original = image_width
         self.__image_height_original = image_height
 
@@ -250,6 +371,12 @@ class DPPModel(object):
 
     def add_preprocessor(self, selection):
         """Add a data preprocessing step"""
+        if not isinstance(selection, str):
+            raise TypeError("selection must be a str")
+        if not selection in self.__supported_preprocessing_steps:
+            raise ValueError("'"+selection+"' is not one of the currently supported preprocessing steps."+
+                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_preprocessing_steps))
+
         self.__preprocessing_steps.append(selection)
 
     def clear_preprocessors(self):
@@ -258,6 +385,12 @@ class DPPModel(object):
 
     def set_problem_type(self, type):
         """Set the problem type to be solved, either classification or regression"""
+        if not isinstance(type, str):
+            raise TypeError("type must be a str")
+        if not type in self.__supported_problem_types:
+            raise ValueError("'"+type+"' is not one of the currently supported problem types."+
+                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_problem_types))
+
         if type == 'classification':
             self.__problem_type = definitions.ProblemType.CLASSIFICATION
         elif type == 'regression':
@@ -271,6 +404,14 @@ class DPPModel(object):
     def set_patch_size(self, height, width):
         # if self.__problem_type != definitions.ProblemType.SEMANTICSEGMETNATION:
         #     throw RuntimeError
+        if not isinstance(height, int):
+            raise TypeError("height must be an int")
+        if height <= 0:
+            raise ValueError("height must be positive")
+        if not isinstance(width, int):
+            raise TypeError("width must be an int")
+        if width <= 0:
+            raise ValueError("width must be positive")
         self.__patch_height = height
         self.__patch_width = width
         self.__with_patching = True
@@ -282,6 +423,16 @@ class DPPModel(object):
         the session is shut down.
         Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
         """
+        if None in [self.__train_images, self.__test_images,
+                    self.__train_labels, self.__test_labels]:
+            raise RuntimeError("Images and Labels need to be loaded before you can begin training. "+
+                               "Try first using one of the methods starting with 'load_...' such as "+
+                               "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        if (len(self.__layers) < 1):
+            raise RuntimeError("There are no layers currently added to the model when trying to begin training. "+
+                               "Add layers first by using functions such as 'DPPModel.add_input_layer()' or "+
+                               "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of layers.")
+
         with self.__graph.as_default():
             # Define batches
             if self.__has_moderation:
@@ -762,7 +913,7 @@ class DPPModel(object):
                     final_width = (self.__image_width // patch_width) * patch_width
                     total_outputs = np.empty([1, final_height, final_width])
                 else:
-                    total_outputs = np.empty([1, final_height, final_width])
+                    total_outputs = np.empty([1, self.__image_height, self.__image_width])
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
@@ -860,6 +1011,10 @@ class DPPModel(object):
 
     def add_input_layer(self):
         """Add an input layer to the network"""
+        if len(self.__layers) > 0:
+            raise RuntimeError("Trying to add an input layer to a model that already contains other layers. "+
+                               "Input layers need to be the first layer added to the model.")
+
         self.__log('Adding the input layer...')
 
         apply_crop = (self.__augmentation_crop and self.__all_images is None and self.__train_images is None)
@@ -899,6 +1054,34 @@ class DPPModel(object):
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A convolutional layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        try:  # try to iterate through filter_dimension, checking it has 4 ints
+            for idx, dim in enumerate(filter_dimension):
+                if not (isinstance(dim, int) or isinstance(dim, np.int64)): # np.int64 numpy default int
+                    raise TypeError()
+            if idx != 3:
+                raise TypeError()
+        except:
+            raise TypeError("filter_dimension must be a list or array of 4 ints")
+        if not isinstance(stride_length, int):
+            raise TypeError("stride_length must be an int")
+        if stride_length <= 0:
+            raise ValueError("stride_length must be positive")
+        if not isinstance(activation_function, str):
+            raise TypeError("activation_function must be a str")
+        activation_function = activation_function.lower()
+        if not activation_function in self.__supported_activation_functions:
+            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
+                             " Choose one of: "+
+                             " ".join("'"+x+"'" for x in self.__supported_activation_functions))
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+
         self.__num_layers_conv += 1
         layer_name = 'conv%d' % self.__num_layers_conv
         self.__log('Adding convolutional layer %s...' % layer_name)
@@ -929,6 +1112,25 @@ class DPPModel(object):
         :param stride_length: convolution stride length
         :param pooling_type: optional, the type of pooling operation
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A pooling layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if not isinstance(kernel_size, int):
+            raise TypeError("kernel_size must be an int")
+        if kernel_size <= 0:
+            raise ValueError("kernel_size must be positive")
+        if not isinstance(stride_length, int):
+            raise TypeError("stride_length must be an int")
+        if stride_length <= 0:
+            raise ValueError("stride_length must be positive")
+        if not isinstance(pooling_type, str):
+            raise TypeError("pooling_type must be a str")
+        pooling_type = pooling_type.lower()
+        if not pooling_type in self.__supported_pooling_types:
+            raise ValueError("'"+pooling_type+"' is not one of the currently supported pooling types."+
+                             " Choose one of: "+
+                             " ".join("'"+x+"'" for x in self.__supported_pooling_types))
+
         self.__num_layers_pool += 1
         layer_name = 'pool%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -942,6 +1144,10 @@ class DPPModel(object):
 
     def add_normalization_layer(self):
         """Add a local response normalization layer to the model"""
+        if len(self.__layers) < 1:
+            raise RuntimeError("A normalization layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+
         self.__num_layers_norm += 1
         layer_name = 'norm%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -957,6 +1163,14 @@ class DPPModel(object):
 
         :param p: the keep-probability parameter for the DropOut operation
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A dropout layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if not isinstance(p, float):
+            raise TypeError("p must be a float")
+        if p < 0 or p >= 1:
+            raise ValueError("p must be in range [0, 1)")
+
         self.__num_layers_dropout += 1
         layer_name = 'drop%d' % self.__num_layers_dropout
         self.__log('Adding dropout layer %s...' % layer_name)
@@ -968,6 +1182,9 @@ class DPPModel(object):
 
     def add_batch_norm_layer(self):
         """Add a batch normalization layer to the model."""
+        if len(self.__layers) < 1:
+            raise RuntimeError("A batch norm layer cannot be the first layer added to the model.")
+
         self.__num_layers_batchnorm += 1
         layer_name = 'bn%d' % self.__num_layers_batchnorm
         self.__log('Adding batch norm layer %s...' % layer_name)
@@ -986,6 +1203,26 @@ class DPPModel(object):
         :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
          set by set_regularization_coefficient)
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("A fully connected layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if not isinstance(output_size, int):
+            raise TypeError("output_size must be an int")
+        if output_size <= 0:
+            raise ValueError("output_size must be positive")
+        if not isinstance(activation_function, str):
+            raise TypeError("activation_function must be a str")
+        activation_function = activation_function.lower()
+        if not activation_function in self.__supported_activation_functions:
+            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
+                             " Choose one of: "+
+                             " ".join("'"+x+"'" for x in self.__supported_activation_functions))
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+
         self.__num_layers_fc += 1
         layer_name = 'fc%d' % self.__num_layers_fc
         self.__log('Adding fully connected layer %s...' % layer_name)
@@ -1020,6 +1257,22 @@ class DPPModel(object):
         :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
         use cases such as creating the output layer before loading data.
         """
+        if len(self.__layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+        if output_size is not None:
+            if not isinstance(output_size, int):
+                raise TypeError("output_size must be an int or None")
+            if output_size <= 0:
+                raise ValueError("output_size must be positive")
+            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                raise RuntimeError("output_size should be None for problem_type semantic_segmentation")
+
         self.__log('Adding output layer...')
 
         reshape = self.__last_layer_outputs_volume()
@@ -1074,6 +1327,12 @@ class DPPModel(object):
         :param labels_file: the path of the .csv file containing the labels
         :param column_number: the column number (zero-indexed) of the column in the csv file representing the label
         """
+        if not isinstance(dirname, str):
+            raise TypeError("dirname must be a str")
+        if not os.path.isdir(dirname):
+            raise ValueError("'"+dirname+"' does not exist")
+        if not isinstance(labels_file, str):
+            raise TypeError("labels_file must be a str")
 
         image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
                        os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
@@ -1236,6 +1495,12 @@ class DPPModel(object):
 
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
+        if self.__image_height is None or self.__image_width is None or self.__image_depth is None:
+            raise RuntimeError("Image dimensions need to be set before loading data."+
+                               " Try using DPPModel.set_image_dimensions() first.")
+        if self.__maximum_training_batches is None:
+            raise RuntimeError("The number of maximum training epochs needs to be set before loading data."+
+                               " Try using DPPModel.set_maximum_training_epochs() first.")
 
         labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Leaf_counts.csv'), 1, 0)
 

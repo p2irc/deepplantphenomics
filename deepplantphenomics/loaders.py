@@ -11,11 +11,11 @@ def split_raw_data(images, labels, ratio, moderation_features=None, augmentation
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
 
-
         #else:
             #total_samples = labels.get_shape().as_list()[0]
 
     total_samples = len(labels)
+
 
     # calculate and perform random split
     num_training = int(total_samples * ratio)
@@ -60,7 +60,7 @@ def read_csv_labels(file_name, column_number=False, character=','):
         line = line.rstrip()
 
         if column_number is False:
-            labels.append(line.split(character))
+            labels.append(line.split(character)[0]) # without [0], length 1 lists are added to labels
         else:
             temp = line.split(character)
             labels.append(temp[column_number])

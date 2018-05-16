@@ -19,6 +19,6 @@ print('Performing leaf estimation...')
 y = dpp.tools.predict_rosette_leaf_count(images)
 
 for k,v in zip(images, y):
-    print '%s: %d' % (os.path.basename(k), v)
+    print('%s: %d' % (os.path.basename(k), v))
 
 print('Done')

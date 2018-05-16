@@ -130,7 +130,7 @@ class fullyConnectedLayer(object):
         else:
             vec_size = input_size
 
-        if initializer == 'xavier':
+        if initializer == 'Xavier':
             self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
         else:
