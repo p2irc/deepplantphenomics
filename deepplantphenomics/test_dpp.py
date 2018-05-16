@@ -106,9 +106,6 @@ def test_set_learning_rate_decay(model):
         model.set_learning_rate_decay(0.5, -1)
     with pytest.raises(RuntimeError):
         model.set_learning_rate_decay(0.5, 1)
-    model.set_train_test_split(0.5)  # need this so next test catches a different RuntimeException
-    with pytest.raises(RuntimeError):
-        model.set_learning_rate_decay(0.5, 1)
 
 def test_set_optimizer(model):
     with pytest.raises(TypeError):
@@ -134,11 +131,11 @@ def test_set_weight_initializer(model):
     with pytest.raises(ValueError):
         model.set_weight_initializer('Nico')
     model.set_weight_initializer('normal')
-    assert model._DPPModel__weight_initializer == 'Normal'
+    assert model._DPPModel__weight_initializer == 'normal'
     model.set_weight_initializer('Normal')
-    assert model._DPPModel__weight_initializer == 'Normal'
+    assert model._DPPModel__weight_initializer == 'normal'
     model.set_weight_initializer('NORMAL')
-    assert model._DPPModel__weight_initializer == 'Normal'
+    assert model._DPPModel__weight_initializer == 'normal'
 
 def test_set_image_dimensions(model):
     with pytest.raises(TypeError):

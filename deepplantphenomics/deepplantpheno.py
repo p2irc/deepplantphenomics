@@ -39,7 +39,7 @@ class DPPModel(object):
     __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
     __supported_preprocessing_steps = ['auto-segmentation']
     __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
-    __supported_weight_initializers = ['Normal', 'Xavier']
+    __supported_weight_initializers = ['normal', 'xavier']
     __supported_activation_functions = ['relu', 'tanh']
     __supported_pooling_types = ['max', 'avg']
 
@@ -268,6 +268,7 @@ class DPPModel(object):
         """Randomly adjust contrast and/or brightness on training images"""
         if not isinstance(contr, bool):
             raise TypeError("contr must be a bool")
+
         self.__augmentation_contrast = contr
 
     def set_regularization_coefficient(self, lamb):
@@ -289,9 +290,6 @@ class DPPModel(object):
             raise TypeError("epochs_per_day must be an int")
         if epochs_per_decay <= 0:
             raise ValueError("epochs_per_day must be positive")
-        if self.__train_test_split is None:
-            raise RuntimeError("The train test split needs to be set before learning rate decay can be set."+
-                                " Use DPPModel.set_train_test_split(ratio).")
         if self.__total_training_samples == 0:
             raise RuntimeError("Data needs to be loaded before learning rate decay can be set.")
 
@@ -316,7 +314,7 @@ class DPPModel(object):
         """Set the initialization scheme used by convolutional and fully connected layers"""
         if not isinstance(initializer, str):
             raise TypeError("initializer must be a str")
-        initializer = initializer.lower().capitalize()
+        initializer = initializer.lower()
         if not initializer in self.__supported_weight_initializers:
             raise ValueError("'"+initializer+"' is not one of the currently supported weight initializers."+
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_weight_initializers))
@@ -370,7 +368,7 @@ class DPPModel(object):
         """Add a data preprocessing step"""
         if not isinstance(selection, str):
             raise TypeError("selection must be a str")
-        if not selection in self.__supported_weight_initializers:
+        if not selection in self.__supported_preprocessing_steps:
             raise ValueError("'"+selection+"' is not one of the currently supported preprocessing steps."+
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_preprocessing_steps))
 
@@ -387,6 +385,7 @@ class DPPModel(object):
         if not type in self.__supported_problem_types:
             raise ValueError("'"+type+"' is not one of the currently supported problem types."+
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_problem_types))
+
         if type == 'classification':
             self.__problem_type = definitions.ProblemType.CLASSIFICATION
         elif type == 'regression':
@@ -944,7 +943,8 @@ class DPPModel(object):
          set by set_regularization_coefficient)
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A convolutional layer cannot be the first layer added to the model.")
+            raise RuntimeError("A convolutional layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
         try:  # try to iterate through filter_dimension, checking it has 4 ints
             for idx, dim in enumerate(filter_dimension):
                 if not (isinstance(dim, int) or isinstance(dim, np.int64)): # np.int64 numpy default int
@@ -1001,7 +1001,8 @@ class DPPModel(object):
         :param pooling_type: optional, the type of pooling operation
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A pooling layer cannot be the first layer added to the model.")
+            raise RuntimeError("A pooling layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
         if not isinstance(kernel_size, int):
             raise TypeError("kernel_size must be an int")
         if kernel_size <= 0:
@@ -1032,7 +1033,9 @@ class DPPModel(object):
     def add_normalization_layer(self):
         """Add a local response normalization layer to the model"""
         if len(self.__layers) < 1:
-            raise RuntimeError("A normalization layer cannot be the first layer added to the model.")
+            raise RuntimeError("A normalization layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+
         self.__num_layers_norm += 1
         layer_name = 'norm%d' % self.__num_layers_pool
         self.__log('Adding pooling layer %s...' % layer_name)
@@ -1049,7 +1052,8 @@ class DPPModel(object):
         :param p: the keep-probability parameter for the DropOut operation
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A dropout layer cannot be the first layer added to the model.")
+            raise RuntimeError("A dropout layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
         if not isinstance(p, float):
             raise TypeError("p must be a float")
         if p < 0 or p >= 1:
@@ -1068,6 +1072,7 @@ class DPPModel(object):
         """Add a batch normalization layer to the model."""
         if len(self.__layers) < 1:
             raise RuntimeError("A batch norm layer cannot be the first layer added to the model.")
+
         self.__num_layers_batchnorm += 1
         layer_name = 'bn%d' % self.__num_layers_batchnorm
         self.__log('Adding batch norm layer %s...' % layer_name)
@@ -1087,7 +1092,8 @@ class DPPModel(object):
          set by set_regularization_coefficient)
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A fully connected layer cannot be the first layer added to the model.")
+            raise RuntimeError("A fully connected layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
         if not isinstance(output_size, int):
             raise TypeError("output_size must be an int")
         if output_size <= 0:
@@ -1140,7 +1146,8 @@ class DPPModel(object):
         use cases such as creating the output layer before loading data.
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("An output layer cannot be the first layer added to the model.")
+            raise RuntimeError("An output layer cannot be the first layer added to the model. "+
+                               "Add an input layer with DPPModel.add_input_layer() first.")
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
                 raise TypeError("regularization_coefficient must be a float or None")

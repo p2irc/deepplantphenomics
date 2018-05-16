@@ -31,7 +31,7 @@ class convLayer(object):
         self.output_size[2] = int((self.output_size[2] - filter_dimension[1] + padding) / stride_length + 1)
         self.output_size[-1] = filter_dimension[-1]
 
-        if initializer == 'Xavier':
+        if initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.filter_dimension,
                                            initializer=tf.contrib.layers.xavier_initializer_conv2d())
