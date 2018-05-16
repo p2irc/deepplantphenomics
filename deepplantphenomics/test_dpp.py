@@ -1,16 +1,8 @@
 import pytest
-import datetime
 import numpy as np
-import deepplantphenomics as dpp
+from . import deepplantpheno as dpp
 from . import definitions
 from . import layers
-
-# the following test can fail if run just as the minute is changing (this actually happened to me)
-# so need a better way to test this (or scrap this test altogether)
-# def test_init():
-#     model = dpp.DPPModel(tensorboard_dir="test_dir")
-#     # test tensorboard directory is being formatted correctly
-#     assert model._DPPModel__tb_dir == "test_dir/"+datetime.datetime.now().strftime("%d%B%Y%I:%M%p")
 
 # public setters and adders, mostly testing for type and value errors
 @pytest.fixture
