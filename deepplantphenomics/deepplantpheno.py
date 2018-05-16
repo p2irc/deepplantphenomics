@@ -10,7 +10,6 @@ import os
 import datetime
 import time
 import warnings
-from tensorflow.python.client import timeline
 
 class DPPModel(object):
     __image_paths = []
