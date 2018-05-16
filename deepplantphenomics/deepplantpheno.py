@@ -11,10 +11,13 @@ import datetime
 import time
 import warnings
 
-
 class DPPModel(object):
+    __image_paths = []
+    __seg_paths = []
+
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
+    __with_patching = False
     __has_trained = False
     __save_checkpoints = None
 
@@ -28,6 +31,8 @@ class DPPModel(object):
     __image_width_original = None
     __image_height_original = None
     __image_depth = None
+    __patch_height = None
+    __patch_width = None
 
     __crop_or_pad_images = False
     __resize_images = False
@@ -101,7 +106,7 @@ class DPPModel(object):
     __debug = None
     __load_from_saved = None
     __tb_dir = None
-    __queue_capacity = 2000
+    __queue_capacity = 500
     __report_rate = None
 
     # Multithreading
@@ -396,6 +401,13 @@ class DPPModel(object):
             warnings.warn('Problem type specified not supported')
             exit()
 
+    def set_patch_size(self, height, width):
+        # if self.__problem_type != definitions.ProblemType.SEMANTICSEGMETNATION:
+        #     throw RuntimeError
+        self.__patch_height = height
+        self.__patch_width = width
+        self.__with_patching = True
+
     def begin_training(self):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables.
@@ -431,6 +443,24 @@ class DPPModel(object):
 
             # Reshape input to the expected image dimensions
             x = tf.reshape(x, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                y = tf.reshape(y, shape=[-1, self.__image_height, self.__image_width, 1])
+
+            # if using patching we extract a patch of image here
+            if self.__with_patching:
+                # Take a slice
+                patch_width = self.__patch_width
+                patch_height = self.__patch_height
+                offset_h = np.random.randint(patch_height/2, self.__image_height - (patch_height/2),
+                                             self.__batch_size)
+                offset_w = np.random.randint(patch_width/2, self.__image_width - (patch_width/2),
+                                             self.__batch_size)
+                offsets = [x for x in zip(offset_h, offset_w)]
+                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
+                                             normalized=False, centered=False)
+                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    y = tf.image.extract_glimpse(y, [patch_height, patch_width], offsets, normalized=False,
+                                                 centered=False)
 
             # If this is a regression problem, unserialize the label
             if self.__problem_type == definitions.ProblemType.REGRESSION:
@@ -458,7 +488,7 @@ class DPPModel(object):
                 regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
                 cost = tf.add(regression_loss, l2_cost)
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                pixel_loss = tf.reduce_mean(tf.abs(tf.subtract(xx, y)))
+                pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
                 cost = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
             if self.__optimizer == 'Adagrad':
@@ -499,6 +529,18 @@ class DPPModel(object):
                 y_test = loaders.label_string_to_tensor(y_test, self.__batch_size, self.__num_regression_outputs)
 
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                y_test = tf.reshape(y_test, shape=[-1, self.__image_height, self.__image_width, 1])
+
+            if self.__with_patching:
+                # Take a slice of image. Same size and location as the slice from training, if semantic.
+                patch_width = self.__patch_width
+                patch_height = self.__patch_height
+                x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
+                                                  normalized=False, centered=False)
+                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    y_test = tf.image.extract_glimpse(y_test, [patch_height, patch_width], offsets,
+                                                      normalized=False, centered=False)
 
             if self.__has_moderation:
                 x_test_predicted = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
@@ -518,7 +560,8 @@ class DPPModel(object):
 
                 test_cost = tf.reduce_mean(tf.abs(test_losses))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, y_test)), axis=2)
+                test_losses = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=x_test_predicted,
+                                                                                     labels=y_test[:, :, :, 0]), axis=2)
                 test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
                 test_cost = tf.reduce_mean(test_losses)
 
@@ -620,7 +663,7 @@ class DPPModel(object):
                             samples_per_sec = self.__batch_size / elapsed
 
                             self.__log(
-                                'Results for batch {} (epoch {}) - Loss: {:.5f}, samples/sec: {:.2f}'
+                                'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
                                     .format(i,
                                             i / (self.__total_training_samples / self.__batch_size),
                                             loss,
@@ -631,6 +674,7 @@ class DPPModel(object):
                     else:
                         loss = self.__session.run([cost])
 
+                    # Commented out because I added a new loss function, and it was a vector, not a scalar
                     if loss == 0.0:
                         self.__log('Stopping due to zero loss')
                         break
@@ -642,7 +686,8 @@ class DPPModel(object):
 
                 self.compute_full_test_accuracy(test_losses, y_test, x_test_predicted)
 
-                self.shut_down()
+                # Commented out because I wanted to test on the model directly after training on another dataset.
+                # self.shut_down()
 
     def compute_full_test_accuracy(self, test_losses, y_test, x_test_predicted):
         """Returns statistics of the test losses depending on the type of task"""
@@ -770,11 +815,14 @@ class DPPModel(object):
 
         return x8
 
-    def save_state(self):
+    def save_state(self, directory=None):
         """Save all trainable variables as a checkpoint in the current working path"""
         self.__log('Saving parameters...')
 
-        dir = './saved_state'
+        if directory is None:
+            dir = './saved_state'
+        else:
+            dir = directory + 'saved_state'
 
         if not os.path.isdir(dir):
             os.mkdir(dir)
@@ -838,18 +886,31 @@ class DPPModel(object):
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
+        #if not self.__with_patching:
+        #    raise RuntimeError("patching dimensions were not specified."+
+        #                       " Need to use DPPModel.set_patch_size(height, width) before training.")
+
         with self.__graph.as_default():
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 total_outputs = np.empty([1, self.__last_layer().output_size])
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 total_outputs = np.empty([1, self.__num_regression_outputs])
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                total_outputs = np.empty([1, self.__image_height, self.__image_width])
+                # we want the largest multiple of of patch height/width that is smaller than the original
+                # image height/width, for the final image dimensions
+                if self.__with_patching:
+                    patch_height = self.__patch_height
+                    patch_width = self.__patch_width
+                    final_height = (self.__image_height // patch_height) * patch_height
+                    final_width = (self.__image_width // patch_width) * patch_width
+                    total_outputs = np.empty([1, final_height, final_width])
+                else:
+                    total_outputs = np.empty([1, self.__image_height, self.__image_width])
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
 
-            num_batches = len(x) / self.__batch_size
+            num_batches = len(x) // self.__batch_size
             remainder = len(x) % self.__batch_size
 
             if remainder != 0:
@@ -859,18 +920,61 @@ class DPPModel(object):
             self.load_images_from_list(x)
 
             x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
-
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
+            if self.__with_patching:
+                # Split the images up into the multiple slices of size patch_height x patch_width
+                ksizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]
+                rates = [1, 1, 1, 1]
+                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self.__image_depth])
+
+            # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
-            self.load_state()
+            if self.__load_from_saved:
+                self.load_state()
 
             self.__initialize_queue_runners()
 
-            for i in range(int(num_batches)):
-                xx = self.__session.run(x_pred)
-                total_outputs = np.append(total_outputs, xx, axis=0)
+            if self.__with_patching:
+                num_patch_rows = final_height // patch_height
+                num_patch_cols = final_width // patch_width
+                for i in range(num_batches):
+                    xx = self.__session.run(x_pred)
+
+                    # new generalized version of image stitching
+                    for img in np.array_split(xx, self.__batch_size): # for each img in current batch
+                        # we are going to build a list of rows of imgs called img_rows, where each element
+                        # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
+                        # iterate through img_rows concatenating the rows vertically (axis=0) to build
+                        # the full img
+
+                        img_rows = []
+                        # for each row
+                        for j in range(num_patch_rows):
+                            curr_row = img[j*num_patch_rows] # start new row with first img
+                            # iterate through the rest of the row, concatenating img's together
+                            for k in range(1, num_patch_cols):
+                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_rows)]), axis=1) # horizontal cat
+                            img_rows.append(curr_row) # add row of img's to the list
+
+                        # start full img with the first full row of imgs
+                        full_img = img_rows[0]
+                        # iterate through rest of rows, concatenating rows together
+                        for row_num in range(1, num_patch_rows):
+                            full_img = np.concatenate((full_img, img_rows[row_num]), axis=0) # vertical cat
+
+                        # need to match total_outputs dimensions, so we add a dimension to the shape to match
+                        full_img = np.array([full_img]) # shape transformation: (x,y) --> (1,x,y)
+                        total_outputs = np.append(total_outputs, full_img, axis=0) # add the final img to the list of imgs
+
+
+            else:
+                for i in range(int(num_batches)):
+                    xx = self.__session.run(x_pred)
+                    total_outputs = np.append(total_outputs, xx, axis=0)
 
             # delete weird first row
             total_outputs = np.delete(total_outputs, 0, 0)
@@ -1290,6 +1394,8 @@ class DPPModel(object):
                                                                                               split_labels=False)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels)
 
+
+
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
@@ -1337,6 +1443,7 @@ class DPPModel(object):
                                                                                               self.__training_augmentation_images,
                                                                                               self.__training_augmentation_labels)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels)
+
 
     def load_ippn_tray_dataset_from_directory(self, dirname):
         """
@@ -1790,30 +1897,29 @@ class DPPModel(object):
             test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
 
             if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
-                self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=self.__image_depth)
+                self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=1)
                 self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]),
-                                                          channels=self.__image_depth)
+                                                          channels=1)
 
                 # normalize to 1.0
                 self.__train_labels = tf.image.convert_image_dtype(self.__train_labels, dtype=tf.float32)
                 self.__test_labels = tf.image.convert_image_dtype(self.__test_labels, dtype=tf.float32)
 
                 # resize if we are using that
-                if self.__resize_images is True:
+                if self.__resize_images:
                     self.__train_labels = tf.image.resize_images(self.__train_labels,
                                                                  [self.__image_height, self.__image_width])
                     self.__test_labels = tf.image.resize_images(self.__test_labels,
                                                                 [self.__image_height, self.__image_width])
 
-                # make into a binary mask
-                self.__test_labels = tf.reduce_mean(self.__test_labels, axis=2)
-                self.__train_labels = tf.reduce_mean(self.__train_labels, axis=2)
+                    # make into a binary mask
+                    self.__test_labels = tf.reduce_mean(self.__test_labels, axis=2)
+                    self.__train_labels = tf.reduce_mean(self.__train_labels, axis=2)
             else:
                 self.__test_labels = test_input_queue[1]
                 self.__train_labels = train_input_queue[1]
 
             # pre-processing for training and testing images
-
             if image_type is 'jpg':
                 self.__train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
                                                            channels=self.__image_depth)
@@ -1822,7 +1928,7 @@ class DPPModel(object):
             else:
                 self.__train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
                                                           channels=self.__image_depth)
-                self.__test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]), channels=self.__image_depth)
+                self.__test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]), channels=self.__image_depth) ## HERE [0]
 
             # convert images to float and normalize to 1.0
             self.__train_images = tf.image.convert_image_dtype(self.__train_images, dtype=tf.float32)
@@ -1837,6 +1943,7 @@ class DPPModel(object):
             if self.__augmentation_crop is True:
                 self.__image_height = int(self.__image_height * self.__crop_amount)
                 self.__image_width = int(self.__image_width * self.__crop_amount)
+
                 self.__train_images = tf.random_crop(self.__train_images, [self.__image_height, self.__image_width, 3])
                 self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                             self.__image_width)
@@ -1847,6 +1954,12 @@ class DPPModel(object):
                                                                              self.__image_width)
                 self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
                                                                             self.__image_width)
+
+                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    self.__train_labels = tf.image.resize_image_with_crop_or_pad(self.__train_labels,
+                                                         self.__image_height, self.__image_width)
+                    self.__test_labels = tf.image.resize_image_with_crop_or_pad(self.__test_labels,
+                                                        self.__image_height, self.__image_width)
 
             if self.__augmentation_flip_horizontal is True:
                 # apply flip horizontal augmentation
@@ -1868,6 +1981,7 @@ class DPPModel(object):
             # define the shape of the image tensors so it matches the shape of the images
             self.__train_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
             self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+
 
     def __parse_images(self, images, image_type='png'):
         """Takes some images as input, creates producer of processed images internally to this instance"""

@@ -11,9 +11,11 @@ def split_raw_data(images, labels, ratio, moderation_features=None, augmentation
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
 
-            total_samples = len(labels)
-        else:
-            total_samples = labels.get_shape().as_list()[0]
+        #else:
+            #total_samples = labels.get_shape().as_list()[0]
+
+    total_samples = len(labels)
+
 
     # calculate and perform random split
     num_training = int(total_samples * ratio)
