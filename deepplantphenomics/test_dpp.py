@@ -154,6 +154,16 @@ def test_set_original_image_dimensions(model):
     with pytest.raises(ValueError):
         model.set_original_image_dimensions(1, -1)
 
+def test_set_patch_size(model):
+    with pytest.raises(TypeError):
+        model.set_patch_size(1.0, 1)
+    with pytest.raises(ValueError):
+        model.set_patch_size(-1, 1)
+    with pytest.raises(TypeError):
+        model.set_patch_size(1, 1.0)
+    with pytest.raises(ValueError):
+        model.set_patch_size(1, -1)
+
 def test_add_preprocessor(model):
     with pytest.raises(TypeError):
         model.add_preprocessor(5)

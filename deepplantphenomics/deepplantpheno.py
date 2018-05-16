@@ -404,6 +404,14 @@ class DPPModel(object):
     def set_patch_size(self, height, width):
         # if self.__problem_type != definitions.ProblemType.SEMANTICSEGMETNATION:
         #     throw RuntimeError
+        if not isinstance(height, int):
+            raise TypeError("height must be an int")
+        if height <= 0:
+            raise ValueError("height must be positive")
+        if not isinstance(width, int):
+            raise TypeError("width must be an int")
+        if width <= 0:
+            raise ValueError("width must be positive")
         self.__patch_height = height
         self.__patch_width = width
         self.__with_patching = True
