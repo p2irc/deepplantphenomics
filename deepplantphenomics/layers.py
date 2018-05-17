@@ -3,24 +3,12 @@ import math
 
 
 class convLayer(object):
-    filter_dimension = None
-    __stride_length = None
-    __activation_function = None
-
-    weights = None
-    biases = None
-    activations = None
-
-    input_size = None
-    output_size = None
-    name = None
-    regularization_coefficient = None
-
     def __init__(self, name, input_size, filter_dimension, stride_length, activation_function, initializer, regularization_coefficient):
         self.name = name
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
         self.__activation_function = activation_function
+        self.__initializer = initializer
         self.input_size = input_size
         self.output_size = input_size
         self.regularization_coefficient = regularization_coefficient
@@ -31,7 +19,8 @@ class convLayer(object):
         self.output_size[2] = int((self.output_size[2] - filter_dimension[1] + padding) / stride_length + 1)
         self.output_size[-1] = filter_dimension[-1]
 
-        if initializer == 'xavier':
+    def add_to_graph(self):
+        if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.filter_dimension,
                                            initializer=tf.contrib.layers.xavier_initializer_conv2d())
@@ -42,7 +31,7 @@ class convLayer(object):
                                            dtype=tf.float32)
 
         self.biases = tf.get_variable(self.name + '_bias',
-                                      [self.output_size[-1]],
+                                      [self.filter_dimension[-1]],
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
 
@@ -66,13 +55,6 @@ class convLayer(object):
 
 
 class poolingLayer(object):
-    __kernel_size = None
-    __stride_length = None
-
-    input_size = None
-    output_size = None
-    pooling_type= None
-
     def __init__(self, input_size, kernel_size, stride_length, pooling_type='max'):
         self.__kernel_size = kernel_size
         self.__stride_length = stride_length
@@ -104,17 +86,6 @@ class poolingLayer(object):
 
 
 class fullyConnectedLayer(object):
-    weights = None
-    biases = None
-    activations = None
-    __activation_function = None
-    __reshape = None
-    regularization_coefficient = None
-
-    input_size = None
-    output_size = None
-    name = None
-
     def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer, regularization_coefficient):
         self.name = name
         self.input_size = input_size
@@ -122,20 +93,22 @@ class fullyConnectedLayer(object):
         self.__reshape = reshape
         self.__batch_size = batch_size
         self.__activation_function = activation_function
+        self.__initializer = initializer
         self.regularization_coefficient = regularization_coefficient
 
+    def add_to_graph(self):
         # compute the vectorized size for weights if we will need to reshape it
-        if reshape:
-            vec_size = input_size[1]*input_size[2]*input_size[3]
+        if self.__reshape:
+            vec_size = self.input_size[1] * self.input_size[2] * self.input_size[3]
         else:
-            vec_size = input_size
+            vec_size = self.input_size
 
-        if initializer == 'Xavier':
+        if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
-                                           shape=[vec_size, output_size],
+                                           shape=[vec_size, self.output_size],
                                            initializer=tf.truncated_normal_initializer(stddev=math.sqrt(2.0/self.output_size)),
                                            dtype=tf.float32)
 
@@ -165,9 +138,6 @@ class fullyConnectedLayer(object):
 
 class inputLayer(object):
     """An object representing the input layer so it can give information about input size to the next layer"""
-    input_size = None
-    output_size = None
-
     def __init__(self, input_size):
         self.input_size = input_size
         self.output_size = input_size
@@ -178,9 +148,6 @@ class inputLayer(object):
 
 class normLayer(object):
     """Layer which performs local response normalization"""
-    input_size = None
-    output_size = None
-
     def __init__(self, input_size):
         self.input_size = input_size
         self.output_size = input_size
@@ -192,10 +159,6 @@ class normLayer(object):
 
 class dropoutLayer(object):
     """Layer which performs dropout"""
-    input_size = None
-    output_size = None
-    p = None
-
     def __init__(self, input_size, p):
         self.input_size = input_size
         self.output_size = input_size
@@ -210,11 +173,6 @@ class dropoutLayer(object):
 
 class moderationLayer(object):
     """Layer for fusing moderating data into the input vector"""
-    input_size = None
-    output_size = None
-    __reshape = None
-    __batch_size = None
-
     def __init__(self, input_size, feature_size, reshape, batch_size):
         self.input_size = input_size
         self.__reshape = reshape
@@ -241,44 +199,38 @@ class moderationLayer(object):
 
 class batchNormLayer(object):
     """Batch normalization layer"""
-    input_size = None
-    output_size = None
-    name = None
-
-    __scale = None
-    __offset = None
     __epsilon = 1e-3
-
-    __test_mean = None
-    __test_var = None
+    __decay = 0.9
 
     def __init__(self, name, input_size):
         self.input_size = input_size
         self.output_size = input_size
         self.name = name
 
+    def add_to_graph(self):
         if isinstance(self.output_size, (list,)):
             shape = self.output_size
         else:
             shape = [self.output_size]
 
-        with tf.variable_scope(name, reuse=False):
-            self.__offset = tf.Variable(tf.zeros(shape), trainable=True)
-            self.__scale = tf.Variable(tf.ones(shape), trainable=True)
+        zeros = tf.constant_initializer(0.0)
+        ones = tf.constant_initializer(1.0)
 
-            self.__test_mean = tf.Variable(tf.zeros(shape))
-            self.__test_var = tf.Variable(tf.ones(shape))
+        self.__offset = tf.get_variable(self.name+'_offset', shape=shape, initializer=zeros, trainable=True)
+        self.__scale = tf.get_variable(self.name+'_scale', shape=shape, initializer=ones, trainable=True)
+
+        self.__test_mean = tf.get_variable(self.name+'_pop_mean', shape=shape, initializer=zeros)
+        self.__test_var = tf.get_variable(self.name+'_pop_var', shape=shape, initializer=ones)
 
     def forward_pass(self, x, deterministic):
         mean, var = tf.nn.moments(x, axes=[0])
-        decay = tf.constant(0.9)
 
         if deterministic:
-            mean2 = tf.assign(self.__test_mean, self.__test_mean * decay + mean * (1 - decay))
-            var2 = tf.assign(self.__test_var, self.__test_var * decay + var * (1 - decay))
+            mean2 = tf.assign(self.__test_mean, self.__test_mean * self.__decay + mean * (1 - self.__decay))
+            var2 = tf.assign(self.__test_var, self.__test_var * self.__decay + var * (1 - self.__decay))
         else:
             mean2, var2 = mean, var
 
-        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon)
+        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon, name=self.name+'_batchnorm')
 
         return x

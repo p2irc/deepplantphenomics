@@ -10,7 +10,6 @@ def split_raw_data(images, labels, ratio, moderation_features=None, augmentation
     if isinstance(labels, list):
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
-
         #else:
             #total_samples = labels.get_shape().as_list()[0]
 
@@ -18,7 +17,6 @@ def split_raw_data(images, labels, ratio, moderation_features=None, augmentation
 
 
     # calculate and perform random split
-    num_training = int(total_samples * ratio)
     num_testing = int(total_samples * (1-ratio))
 
     mask = [0] * total_samples
@@ -36,12 +34,12 @@ def split_raw_data(images, labels, ratio, moderation_features=None, augmentation
     train_labels, test_labels = tf.dynamic_partition(labels, mask, 2)
 
     # Also partition moderation features if present
+    train_mf, test_mf = None, None
+
     if moderation_features is not None:
         train_mf, test_mf = tf.dynamic_partition(moderation_features, mask, 2)
 
-        return train_images, train_labels, test_images, test_labels, train_mf, test_mf
-    else:
-        return train_images, train_labels, test_images, test_labels
+    return train_images, train_labels, test_images, test_labels, train_mf, test_mf
 
 
 def label_string_to_tensor(x, batch_size, num_outputs):
