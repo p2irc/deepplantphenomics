@@ -13,8 +13,6 @@ import warnings
 import copy
 
 class DPPModel(object):
-    __image_paths = []
-    __seg_paths = []
 
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
@@ -66,6 +64,7 @@ class DPPModel(object):
     __all_labels = None
     __train_labels = None
     __test_labels = None
+    __split_labels = True
 
     __images_only = False
 
@@ -447,8 +446,7 @@ class DPPModel(object):
                 train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
                     loaders.split_raw_data(self.__raw_image_files, self.__raw_labels, self.__train_test_split,
                                            self.__all_moderation_features, self.__training_augmentation_images,
-                                           self.__training_augmentation_labels)
-
+                                           self.__training_augmentation_labels, self.__split_labels)
                 self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf, test_mf)
 
             self.__log('Creating layer parameters...')
@@ -651,15 +649,15 @@ class DPPModel(object):
         the session is shut down.
         Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
         """
-        if None in [self.__train_images, self.__test_images,
-                    self.__train_labels, self.__test_labels]:
-            raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
-                               "Try first using one of the methods starting with 'load_...' such as " +
-                               "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
-        if (len(self.__layers) < 1):
-            raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
-                               "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-                               "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of layers.")
+        # if None in [self.__train_images, self.__test_images,
+        #             self.__train_labels, self.__test_labels]:
+        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
+        #                        "Try first using one of the methods starting with 'load_...' such as " +
+        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        # if (len(self.__layers) < 1):
+        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
+        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
+        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of layers.")
 
         with self.__graph.as_default():
             self.__assemble_graph()
@@ -815,8 +813,9 @@ class DPPModel(object):
                 try:
                     current_loss = self.begin_training(return_test_loss=True)
                     all_loss_results[i][j] = current_loss
-                except:
+                except Exception as e:
                     self.__log('HYPERPARAMETER SEARCH: Run threw an exception, this result will be NaN.')
+                    print("Exception message: "+str(e))
                     all_loss_results[i][j] = np.nan
 
         self.__log('Finished hyperparameter search, failed runs will appear as NaN.')
@@ -1506,6 +1505,7 @@ class DPPModel(object):
 
         self.__raw_image_files = image_files
         self.__raw_labels = seg_files
+        self.__split_labels = False ### Band-aid fix
 
 
 

@@ -104,7 +104,7 @@ class fullyConnectedLayer(object):
             vec_size = self.input_size
 
         if self.__initializer == 'xavier':
-            self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, output_size],
+            self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, self.output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
