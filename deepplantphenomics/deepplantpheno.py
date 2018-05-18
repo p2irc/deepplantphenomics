@@ -12,8 +12,8 @@ import time
 import warnings
 import copy
 
-class DPPModel(object):
 
+class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
     __with_patching = False
@@ -39,7 +39,7 @@ class DPPModel(object):
 
     __processed_images_dir = './DPP-Processed'
 
-    # supported implementations we may add more to in future
+    # supported implementations, we may add more to in future
     __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
     __supported_preprocessing_steps = ['auto-segmentation']
     __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
@@ -117,7 +117,7 @@ class DPPModel(object):
     __debug = None
     __load_from_saved = None
     __tb_dir = None
-    __queue_capacity = 500
+    __queue_capacity = 320
     __report_rate = None
 
     # Multithreading
@@ -592,9 +592,6 @@ class DPPModel(object):
 
                 self.__graph_ops['test_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['test_losses']))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                # self.__graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
-                #     self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'][:,:,:,0])), axis=2) # might need to fix indexing on labels labels=y_test[:, :, :, 0])
-                # self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
                 self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test'][:, :, :, 0]), axis=2)
                 self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
@@ -1031,10 +1028,6 @@ class DPPModel(object):
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        #if not self.__with_patching:
-        #    raise RuntimeError("patching dimensions were not specified."+
-        #                       " Need to use DPPModel.set_patch_size(height, width) before training.")
-
         with self.__graph.as_default():
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 total_outputs = np.empty([1, self.__last_layer().output_size])
@@ -1062,7 +1055,9 @@ class DPPModel(object):
                 num_batches += 1
                 remainder = self.__batch_size - remainder
 
-            self.load_images_from_list(x)
+            #self.load_images_from_list(x)
+            images = self.__apply_preprocessing(x)
+            self.__parse_images(images)
 
             x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
@@ -1150,7 +1145,7 @@ class DPPModel(object):
         """Add an input layer to the network"""
         if len(self.__layers) > 0:
             raise RuntimeError("Trying to add an input layer to a model that already contains other layers. "+
-                               "Input layers need to be the first layer added to the model.")
+                               " The input layer need to be the first layer added to the model.")
 
         self.__log('Adding the input layer...')
 
@@ -1161,6 +1156,9 @@ class DPPModel(object):
                     int(self.__image_width * self.__crop_amount), self.__image_depth]
         else:
             size = [self.__batch_size, self.__image_height, self.__image_width, self.__image_depth]
+
+        if self.__with_patching:
+            size = [self.__batch_size, self.__patch_height, self.__patch_width, self.__image_depth]
 
         with self.__graph.as_default():
             layer = layers.inputLayer(size)
