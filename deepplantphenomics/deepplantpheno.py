@@ -592,8 +592,11 @@ class DPPModel(object):
 
                 self.__graph_ops['test_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['test_losses']))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                self.__graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
-                    self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'][:,:,:,0])), axis=2) # might need to fix indexing on labels labels=y_test[:, :, :, 0])
+                # self.__graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
+                #     self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'][:,:,:,0])), axis=2) # might need to fix indexing on labels labels=y_test[:, :, :, 0])
+                # self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
+                self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                    logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test'][:, :, :, 0]), axis=2)
                 self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
                 self.__graph_ops['test_cost'] = tf.reduce_mean(self.__graph_ops['test_losses'])
 
@@ -732,7 +735,6 @@ class DPPModel(object):
                     else:
                         loss = self.__session.run([self.__graph_ops['cost']])
 
-                    # Commented out because I added a new loss function, and it was a vector, not a scalar
                     if loss == 0.0:
                         self.__log('Stopping due to zero loss')
                         break
