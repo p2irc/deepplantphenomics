@@ -3,8 +3,8 @@ from . import loaders
 from . import preprocessing
 from . import definitions
 from . import networks
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 from joblib import Parallel, delayed
 import os
 import datetime
@@ -434,12 +434,18 @@ class DPPModel(object):
         self.__with_patching = True
 
     def __add_layers_to_graph(self):
+        """
+        Adds the layers in self.layers to the computational graph. Currently __assemble_graph is doing too many
+        things, so this is needed as a separate function so that other functions such as load_state can add
+        layers to the graph without performing everything else in asseble_graph
+        """
         for layer in self.__layers:
             if callable(getattr(layer, 'add_to_graph', None)):
                 layer.add_to_graph()
 
     def __assemble_graph(self):
         with self.__graph.as_default():
+
             self.__log('Parsing dataset...')
 
             if self.__images_only:
@@ -514,7 +520,7 @@ class DPPModel(object):
             else:
                 l2_cost = 0.0
 
-            # Define cost function and set optimizer
+            # Define cost function
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
                 self.__graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
@@ -525,21 +531,27 @@ class DPPModel(object):
                 pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
+            # Identify which optimizer we are using
             if self.__optimizer == 'Adagrad':
-                self.__graph_ops['optimizer'] = tf.train.AdagradOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
+                self.__graph_ops['optimizer'] = tf.train.AdagradOptimizer(self.__learning_rate)
                 self.__log('Using Adagrad optimizer')
             elif self.__optimizer == 'Adadelta':
-                self.__graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
+                self.__graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self.__learning_rate)
                 self.__log('Using Adadelta optimizer')
             elif self.__optimizer == 'SGD':
-                self.__graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
+                self.__graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self.__learning_rate)
                 self.__log('Using SGD optimizer')
             elif self.__optimizer == 'Adam':
-                self.__graph_ops['optimizer'] = tf.train.AdamOptimizer(self.__learning_rate).minimize(self.__graph_ops['cost'])
+                self.__graph_ops['optimizer'] = tf.train.AdamOptimizer(self.__learning_rate)
                 self.__log('Using Adam optimizer')
             else:
                 warnings.warn('Unrecognized optimizer requested')
                 exit()
+
+            # Compute gradients, clip them, the apply the clipped gradients
+            gradients, variables = zip(*self.__graph_ops['optimizer'].compute_gradients(self.__graph_ops['cost']))
+            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)  # need to make this 5.0 an adjustable hyperparameter
+            self.__graph_ops['optimizer'] = self.__graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
@@ -642,6 +654,12 @@ class DPPModel(object):
                         tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
                                              collections=['custom_summaries'])
+
+                # Summaries for gradients
+                for index, grad in enumerate(gradients):
+                    tf.summary.histogram("gradients/" + variables[index].name, gradients[index],
+                                         collections=['custom_summaries'])
+                tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
 
                 self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
@@ -999,12 +1017,6 @@ class DPPModel(object):
             exit()
 
     def __set_learning_rate(self):
-        """
-        Adds the layers in self.layers to the computational graph. Currently __assemble_graph is doing too many
-        things, so this needed to be made a separate function so other functions such as load_state could add
-        layers to the graph without performing everything else in asseble_graph
-        :return:
-        """
         if self.__lr_decay_factor is not None:
             self.__learning_rate = tf.train.exponential_decay(self.__learning_rate,
                                                               self.__global_epoch,
@@ -1899,6 +1911,7 @@ class DPPModel(object):
                         test_mf=None):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self.__graph.as_default():
+
             # house keeping
             if isinstance(train_images, tf.Tensor):
                 self.__total_training_samples = train_images.get_shape().as_list()[0]
