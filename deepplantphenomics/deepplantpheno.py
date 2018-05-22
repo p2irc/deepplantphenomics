@@ -433,6 +433,11 @@ class DPPModel(object):
         self.__patch_width = width
         self.__with_patching = True
 
+    def __add_layers_to_graph(self):
+        for layer in self.__layers:
+            if callable(getattr(layer, 'add_to_graph', None)):
+                layer.add_to_graph()
+
     def __assemble_graph(self):
         with self.__graph.as_default():
             self.__log('Parsing dataset...')
@@ -451,9 +456,7 @@ class DPPModel(object):
 
             self.__log('Creating layer parameters...')
 
-            for layer in self.__layers:
-                if callable(getattr(layer, 'add_to_graph', None)):
-                    layer.add_to_graph()
+            self.__add_layers_to_graph()
 
             self.__log('Assembling graph...')
 
@@ -980,6 +983,9 @@ class DPPModel(object):
         Load all trainable variables from a checkpoint file specified from the load_from_saved parameter in the
         class constructor.
         """
+        if not self.__has_trained:
+            self.__add_layers_to_graph()
+
         if self.__load_from_saved is not False:
             self.__log('Loading from checkpoint file...')
 
@@ -993,6 +999,12 @@ class DPPModel(object):
             exit()
 
     def __set_learning_rate(self):
+        """
+        Adds the layers in self.layers to the computational graph. Currently __assemble_graph is doing too many
+        things, so this needed to be made a separate function so other functions such as load_state could add
+        layers to the graph without performing everything else in asseble_graph
+        :return:
+        """
         if self.__lr_decay_factor is not None:
             self.__learning_rate = tf.train.exponential_decay(self.__learning_rate,
                                                               self.__global_epoch,
@@ -1055,7 +1067,7 @@ class DPPModel(object):
                 num_batches += 1
                 remainder = self.__batch_size - remainder
 
-            #self.load_images_from_list(x)
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = self.__apply_preprocessing(x)
             self.__parse_images(images)
 
@@ -1070,13 +1082,13 @@ class DPPModel(object):
                 x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
                 x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self.__image_depth])
 
-            # Run model on them
-            x_pred = self.forward_pass(x_test, deterministic=True)
-
             if self.__load_from_saved:
                 self.load_state()
 
             self.__initialize_queue_runners()
+
+            # Run model on them
+            x_pred = self.forward_pass(x_test, deterministic=True)
 
             if self.__with_patching:
                 num_patch_rows = final_height // patch_height
