@@ -444,7 +444,6 @@ class DPPModel(object):
                 # self.shut_down()
             else:
                 self.__log('Initializing parameters...')
-                print('create training graph')
                 tf.contrib.quantize.create_training_graph()
                 init_op = tf.global_variables_initializer()
                 self.__session.run(init_op)
@@ -556,7 +555,6 @@ class DPPModel(object):
 
                 dropout_layer.original_parameter_count = parameter_count
 
-            print('create training graph')
             tf.contrib.quantize.create_training_graph()
             self.__session.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.PRUNING_MASKS)))
             for i in range(times):
@@ -567,6 +565,7 @@ class DPPModel(object):
                     if debug:
                         self.__log('Num parameters for prune_mask {} pre-training: {}/{}'.format(
                             layer.name, self.__session.run(layer.mask_count), self.__session.run(layer.parameter_count)))
+                        self.__log('Loss: ', self.__session.run(tf.nn.l2_loss(layer.weights)))
                     self.__session.run(layer.prune_layer)
 
                     # tf.summary.histogram('train/unpruned_weights', layer.unpruned_weights, collections=['custom_summaries'])
@@ -620,9 +619,7 @@ class DPPModel(object):
 
             self.save_state(step=1)
 
-            print('create eval graph')
             tf.contrib.quantize.create_eval_graph()
-            print('success')
             # for layer in self.__layers:
             #     if hasattr(layer, 'weights'):
             #         _max = tf.reduce_max(layer.weights)
