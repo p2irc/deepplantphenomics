@@ -289,18 +289,3 @@ class batchNormLayer(object):
         x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon)
 
         return x
-
-class quantizeLayer(object):
-
-    def forward_pass(self, x, deterministic):
-        _max = tf.reduce_max(x)
-        _min = tf.reduce_min(x)
-        x, self.min, self.max = tf.quantize_v2(x, _min, _max, tf.quint8, mode = "MIN_FIRST")
-        return x
-
-class dequantizeLayer(object):
-    def forward_pass(self, x, deterministic):
-        _max = tf.reduce_max(x)
-        _min = tf.reduce_min(x)
-        x, self.min, self.max = tf.dequantize(x, _min, _max, tf.quint8, mode = "MIN_FIRST")
-

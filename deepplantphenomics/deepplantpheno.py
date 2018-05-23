@@ -512,14 +512,14 @@ class DPPModel(object):
                 if shut_down:
                     self.shut_down()
 
-    def compress(self, times=1, threshold=0.00005, debug=False):
-        self.set_learning_rate(self.__learning_rate * 0.1)
+    def compress(self, times=1, threshold=0.00005, quantize=False, debug=False):
+        self.set_learning_rate(self.__learning_rate * 0.1)  # Use a lower learning rate for re-training
         with self.__graph.as_default():
             tf.GraphKeys.PRUNING_MASKS = "pruning_masks"  # This prevents pruning variables from being stored with the model
             # Iterate through layers and add compression layers
             compression_layers = []
             for layer in self.__layers:
-                self.__log('Looking through layers')
+                self.__log('Looking for layers to compress...')
                 self.__log('Layer: {} '.format(getattr(layer, 'name', None)))
                 if isinstance(layer, (layers.convLayer, layers.fullyConnectedLayer)):
                     # Create pruning mask for low weight connections and prune weight layer
@@ -551,10 +551,11 @@ class DPPModel(object):
 
                 dropout_layer.original_parameter_count = parameter_count
 
-            tf.contrib.quantize.create_training_graph()
+            if quantize:
+                tf.contrib.quantize.create_training_graph()
             self.__session.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.PRUNING_MASKS)))
             for i in range(times):
-                self.__log("Compress run {}".format(i+1))
+                self.__log("Compression run {}".format(i+1))
 
                 for layer in compression_layers:
                     self.__session.run(layer.update_mask)
@@ -596,59 +597,42 @@ class DPPModel(object):
 
                 if i < times-1:  # do not retrain on the last time
 
-
                     self.begin_training(shut_down=False)
                     if debug:
                         for layer in compression_layers:
                             self.__log('Num parameters for layer {} post-training: {}'.format(
                                 layer.name, self.__session.run(layer.parameter_count)))
-                            # self.__log("variance:{} stddev: {}".format(self.__session.run(variance),
-                            #                                            self.__session.run(layer.stddev)))
 
 
             self.save_state(step=1)
 
-            tf.contrib.quantize.create_eval_graph()
-            # for layer in self.__layers:
-            #     if hasattr(layer, 'weights'):
-            #         _max = tf.reduce_max(layer.weights)
-            #         _min = tf.reduce_min(layer.weights)
-            #         layer.weights, layer.min, layer.max = tf.quantize_v2(layer.weights, _min, _max, tf.quint8, mode = "MIN_FIRST")
-            # self.__layers.insert(0, layers.quantizeLayer())
-            # self.__layers.append(layers.dequantizeLayer())
-            # self.save_state(step=3)
-            with open('quantized.pb', 'w') as f:
-                f.write(str(self.__graph.as_graph_def()))
+            if quantize:
+                tf.contrib.quantize.create_eval_graph()
+                with open('quantized.pb', 'w') as f:
+                    f.write(str(self.__graph.as_graph_def()))
 
-            self.__log("Accuracy after pruning")
-            if self.__has_moderation:
-                x_test_predicted = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
-            else:
-                x_test_predicted = self.forward_pass(self.x_test, deterministic=True)
-            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
-                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.y_test, 1))
-                test_losses = test_correct_predictions
-                test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
-            elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                if self.__num_regression_outputs == 1:
-                    test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, self.y_test)))
+                self.__log("Accuracy after quantization")
+                if self.__has_moderation:
+                    x_test_predicted = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
                 else:
-                    test_losses = self.__l2_norm(tf.subtract(x_test_predicted, self.y_test))
+                    x_test_predicted = self.forward_pass(self.x_test, deterministic=True)
+                if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                    test_class_predictions = tf.argmax(tf.nn.softmax(x_test_predicted), 1)
+                    test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.y_test, 1))
+                    test_losses = test_correct_predictions
+                    test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+                elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                    if self.__num_regression_outputs == 1:
+                        test_losses = tf.squeeze(tf.stack(tf.subtract(x_test_predicted, self.y_test)))
+                    else:
+                        test_losses = self.__l2_norm(tf.subtract(x_test_predicted, self.y_test))
 
-                test_cost = tf.reduce_mean(tf.abs(test_losses))
-            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, self.y_test)), axis=2)
-                test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
-                test_cost = tf.reduce_mean(test_losses)
-            self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
-
-            for idx, dropout_layer in dropout_layers:
-                weight_layer = self.__layers[idx-1]
-                parameter_count = self.__session.run(weight_layer.parameter_count)
-                dropout_layer.set_p(1.0 - ((1.0 - dropout_layer.p) * math.sqrt(
-                    parameter_count / dropout_layer.original_parameter_count)))
-
+                    test_cost = tf.reduce_mean(tf.abs(test_losses))
+                elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    test_losses = tf.reduce_mean(tf.abs(tf.subtract(x_test_predicted, self.y_test)), axis=2)
+                    test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
+                    test_cost = tf.reduce_mean(test_losses)
+                self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
 
             self.shut_down()
 
