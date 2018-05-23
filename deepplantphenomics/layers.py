@@ -46,26 +46,6 @@ class convLayer(object):
                                       [self.output_size[-1]],
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
-        if False:
-            print("Compressing %s" % self.name)
-            W_fc = self.weights
-            prune_mask = tf.get_variable(self.name + '_prune', initializer=tf.ones_like(W_fc), trainable=False,
-                                         collections=["pruning_mask"])
-            fc_pruned = tf.multiply(W_fc, prune_mask)
-            self.weights = fc_pruned
-
-            threshold = 0.0001
-            t = tf.sqrt(tf.nn.l2_loss(W_fc)) * threshold
-            indicator_matrix = tf.multiply(
-                tf.to_float(tf.greater_equal(W_fc, tf.ones_like(W_fc) * t)),
-                prune_mask)
-            self.update_mask = tf.assign(prune_mask, indicator_matrix)
-            self.prune_layer = W_fc.assign(fc_pruned)
-
-        if False:
-            nonzero_indicator = tf.to_float(tf.not_equal(fc_pruned, tf.zeros_like(fc_pruned)))
-            self.parameter_count = tf.reduce_sum(nonzero_indicator)
-            self.mask_count = tf.reduce_sum(tf.to_float(tf.not_equal(indicator_matrix, tf.zeros_like(indicator_matrix))))
 
     def forward_pass(self, x, deterministic):
         # For convention, just use a symmetrical stride with same padding
@@ -166,26 +146,6 @@ class fullyConnectedLayer(object):
                                       [self.output_size],
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
-        if False:
-            print("Compressing %s" % self.name)
-            W_fc = self.weights
-            prune_mask = tf.get_variable(self.name + '_prune', initializer=tf.ones_like(W_fc), trainable=False,
-                                         collections=["pruning_mask"])
-            fc_pruned = tf.multiply(W_fc, prune_mask)
-            self.weights = fc_pruned
-
-            threshold = 0.0001
-            t = tf.sqrt(tf.nn.l2_loss(W_fc)) * threshold
-            indicator_matrix = tf.multiply(
-                tf.to_float(tf.greater_equal(W_fc, tf.ones_like(W_fc) * t)),
-                prune_mask)
-            self.update_mask = tf.assign(prune_mask, indicator_matrix)
-            self.prune_layer = W_fc.assign(fc_pruned)
-
-        if False:
-            nonzero_indicator = tf.to_float(tf.not_equal(fc_pruned, tf.zeros_like(fc_pruned)))
-            self.parameter_count = tf.reduce_sum(nonzero_indicator)
-            self.mask_count = tf.reduce_sum(tf.to_float(tf.not_equal(indicator_matrix, tf.zeros_like(indicator_matrix))))
 
     def forward_pass(self, x, deterministic):
         # Reshape into a column vector if necessary

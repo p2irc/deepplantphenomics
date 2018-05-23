@@ -270,7 +270,7 @@ class DPPModel(object):
             warnings.warn('Problem type specified not supported')
             exit()
 
-    def begin_training(self):
+    def begin_training(self, shut_down=True):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables.
         The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
@@ -440,7 +440,8 @@ class DPPModel(object):
 
                 self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
 
-                # self.shut_down()
+                if shut_down:
+                    self.shut_down()
             else:
                 self.__log('Initializing parameters...')
                 tf.contrib.quantize.create_training_graph()
@@ -508,7 +509,8 @@ class DPPModel(object):
 
                 self.compute_full_test_accuracy(test_losses, self.y_test, x_test_predicted)
 
-                #self.shut_down()
+                if shut_down:
+                    self.shut_down()
 
     def compress(self, times=1, threshold=0.00005, debug=False):
         self.set_learning_rate(self.__learning_rate * 0.1)
@@ -526,14 +528,9 @@ class DPPModel(object):
                     pruned_weights = tf.multiply(layer.weights, prune_mask)
                     layer.unpruned_weights = layer.weights
 
-                    # _, variance = tf.nn.moments(layer.weights, [0, 1, 2] if isinstance(layer, layers.convLayer) else
-                    #                             [0,1])
-                    # layer.stddev = tf.sqrt(variance)
                     t = tf.sqrt(tf.nn.l2_loss(layer.weights)) * threshold
                     indicator_matrix = tf.multiply(tf.to_float(
                         tf.greater_equal(tf.abs(layer.weights), tf.ones_like(layer.weights) * t)), prune_mask)
-                    # indicator_matrix = tf.multiply(tf.to_float(
-                    #     tf.greater_equal(tf.abs(layer.weights), tf.ones_like(layer.weights) * threshold * variance)), prune_mask)
 
                     layer.update_mask = prune_mask.assign(indicator_matrix)
                     layer.prune_layer = layer.weights.assign(pruned_weights)
@@ -564,15 +561,8 @@ class DPPModel(object):
                     if debug:
                         self.__log('Num parameters for prune_mask {} pre-training: {}/{}'.format(
                             layer.name, self.__session.run(layer.mask_count), self.__session.run(layer.parameter_count)))
-                        self.__log('Loss: ', self.__session.run(tf.nn.l2_loss(layer.weights)))
+                        self.__log('Loss: {}'.format(self.__session.run(tf.nn.l2_loss(layer.weights))))
                     self.__session.run(layer.prune_layer)
-
-                    # tf.summary.histogram('train/unpruned_weights', layer.unpruned_weights, collections=['custom_summaries'])
-                    # tf.summary.histogram('train/pruned_weights', layer.weights, collections=['custom_summaries'])
-                    # merged = tf.summary.merge_all(key='custom_summaries')
-                    # train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
-                    # summary = self.__session.run(merged)
-                    # train_writer.add_summary(summary, i)
 
 
                 self.__log("Accuracy after pruning")
@@ -607,7 +597,7 @@ class DPPModel(object):
                 if i < times-1:  # do not retrain on the last time
 
 
-                    self.begin_training()
+                    self.begin_training(shut_down=False)
                     if debug:
                         for layer in compression_layers:
                             self.__log('Num parameters for layer {} post-training: {}'.format(
