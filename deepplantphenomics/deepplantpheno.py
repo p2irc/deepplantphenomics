@@ -16,6 +16,7 @@ import copy
 class DPPModel(object):
     # Operation settings
     __problem_type = definitions.ProblemType.CLASSIFICATION
+    __loss_fn = 'softmax cross entropy'
     __with_patching = False
     __has_trained = False
     __save_checkpoints = None
@@ -46,6 +47,9 @@ class DPPModel(object):
     __supported_weight_initializers = ['normal', 'xavier']
     __supported_activation_functions = ['relu', 'tanh']
     __supported_pooling_types = ['max', 'avg']
+    __supported_loss_fns_cls = ['softmax cross entropy']
+    __supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']
+    __supported_loss_fns_ss = ['sigmoid cross entropy']
 
     # Augmentation options
     __augmentation_flip_horizontal = False
@@ -332,6 +336,26 @@ class DPPModel(object):
 
         self.__optimizer = optimizer
 
+    def set_loss_function(self, loss_fn):
+        """Set the loss function to use"""
+        if not isinstance(loss_fn, str):
+            raise TypeError("loss_fn must be a str")
+        loss_fn = loss_fn.lower()
+        if self.__problem_type == definitions.ProblemType.CLASSIFICATION and loss_fn not in self.__supported_loss_fns_cls:
+            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for classification."+
+                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
+                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_reg))
+        elif self.__problem_type == definitions.ProblemType.REGRESSION and loss_fn not in self.__supported_loss_fns_reg:
+            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for regression."+
+                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
+                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_reg))
+        elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION and loss_fn not in self.__supported_loss_fns_ss:
+            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for semantic segmentation."+
+                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
+                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_reg))
+
+        self.__loss_fn = loss_fn
+
     def set_weight_initializer(self, initializer):
         """Set the initialization scheme used by convolutional and fully connected layers"""
         if not isinstance(initializer, str):
@@ -410,10 +434,13 @@ class DPPModel(object):
 
         if type == 'classification':
             self.__problem_type = definitions.ProblemType.CLASSIFICATION
+            self.__loss_fn = self.__supported_loss_fns_cls[0]
         elif type == 'regression':
             self.__problem_type = definitions.ProblemType.REGRESSION
+            self.__loss_fn = self.__supported_loss_fns_reg[0]
         elif type == 'semantic_segmentation':
             self.__problem_type = definitions.ProblemType.SEMANTICSEGMETNATION
+            self.__loss_fn = self.__supported_loss_fns_ss[0]
         else:
             warnings.warn('Problem type specified not supported')
             exit()
@@ -522,13 +549,25 @@ class DPPModel(object):
 
             # Define cost function
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+                if self.__loss_fn == 'softmax cross entropy':
+                    sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+
                 self.__graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
+                if self.__loss_fn == 'l2':
+                    regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
+                elif self.__loss_fn == 'l1':
+                    regression_loss = self.__batch_mean_l1_loss(tf.subtract(xx, y))
+                elif self.__loss_fn == 'smooth l1':
+                    regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
+                elif self.__loss_fn == 'log loss':
+                    regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
+
                 self.__graph_ops['cost'] = tf.add(regression_loss, l2_cost)
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
+                if self.__loss_fn == 'sigmoid cross entropy':
+                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
+
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
             # Identify which optimizer we are using
@@ -1161,9 +1200,53 @@ class DPPModel(object):
     def __l2_norm(self, x):
         """Returns the L2 norm of a tensor"""
         with self.__graph.as_default():
-            y = tf.map_fn(lambda ex: tf.sqrt(tf.reduce_sum(ex ** 2)), x)
+            y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
 
         return y
+
+    def __batch_mean_l1_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector L1 norm"""
+        with self.__graph.as_default():
+            agg = self.__l1_norm(x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
+
+    def __l1_norm(self, x):
+        """Returns the L1 norm of a tensor"""
+        with self.__graph.as_default():
+            y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+
+        return y
+
+    def __batch_mean_smooth_l1_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector smooth L1 norm"""
+        with self.__graph.as_default():
+            agg = self.__smooth_l1_norm(x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
+
+    def __smooth_l1_norm(self, x):
+        """Returns the smooth L1 norm of a tensor"""
+        HUBER_DELTA = 1 # may want to make this a tunable hyper parameter in future
+        with self.__graph.as_default():
+            x = tf.abs(x)
+            y = tf.map_fn(lambda ex: tf.where(ex<HUBER_DELTA,
+                                              0.5*ex**2,
+                                              HUBER_DELTA*(ex-0.5*HUBER_DELTA)), x)
+
+        return y
+
+    def __batch_mean_log_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector log loss"""
+        with self.__graph.as_default():
+            x = tf.abs(x)
+            x = tf.clip_by_value(x, 0, 0.9999999)
+            agg = -tf.log(1-x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
 
     def add_input_layer(self):
         """Add an input layer to the network"""
