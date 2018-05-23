@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 #
 # Demonstrates the use of tools.classify_arabidopsis_strain on images of rosettes.
 # Loads filenames from the IPPN dataset by default.

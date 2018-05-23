@@ -1,10 +1,9 @@
 from __future__ import print_function
 
-from deepplantphenomics import layers
-from deepplantphenomics import loaders
-from deepplantphenomics import definitions
-from deepplantphenomics import networks
-from deepplantphenomics.deepplantpheno.compression.tensorflow_graph_compression.converge_weights import converge_weights
+from . import layers
+from . import loaders
+from . import definitions
+from . import networks
 import tensorflow as tf
 import numpy as np
 from joblib import Parallel, delayed
@@ -15,7 +14,7 @@ import warnings
 import math
 
 try:
-    from .. import preprocessing
+    from . import preprocessing
 except ModuleNotFoundError:
     print("PlantCV not found, preprocessing will be unavailable")
 

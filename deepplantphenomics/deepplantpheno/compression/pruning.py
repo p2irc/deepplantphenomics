@@ -1,4 +1,0 @@
-
-
-# load model
-# start pruning
