@@ -42,6 +42,18 @@ The `kernel_size` parameter specifies the spatial diameter of the downsampling o
 
 The optional `pooling_type` parameter specifies the type of pooling operation, which defaults to `'max'` for max pooling but can also be set to `'avg'` for average pooling.
 
+## Upsampling Layer
+
+This layer is also often referred to as a deconvolutional layer or a convolutional transpose layer because of how the upsampling is performed.
+
+The upsampling layer increases an input volume through the use of upsampling. The primary use of these layers is to increase the spatial resolution back to the original dimensions of the image after the use of pooling layers. For example, when performing semantic segmentation the final layer needs to evaluate the cost function pixel-wise and thus requires the spatial resolution to be the same as the original input image. In such an example, if you want to make use of max pooling you will need upsampling before the final layer in order to ensure the dimensions are matching.
+
+```
+model.add_upsampling_layer(filter_size=3, num_filters=32, upscale_factor=2)
+```
+
+The `filter_size` parameter defines the height and width of the filter performing the upsampling. The `num_filters` parameter represents how many filters this layer will have; this will define the depth of the output dimensions. The `upscale_factor` represents how much the height and width of the image will be scaled.
+
 ## DropOut Layer
 
 The DropOut layer implements the DropOut operation (Srivastava et al. 2014), typically following fully connected layers.

@@ -134,3 +134,9 @@ load_training_augmentation_dataset_from_directory_with_csv_labels(dirname, label
 ```
 
 Load a second set of images with corresponding labels in a csv file to augment the training set with. This is a good option if your chosen augmentation is not listed above - you can create the augmented examples yourself and load them with this function. `column_number` should have the label and `id_column_number` should have the filename.
+
+```
+set_patch_size(height=128, width=128)
+```
+
+Train on randomly extracted patches, of size `height`x`width`, of the original images. Testing is then performed by splitting the image into patches of `height`x`width`, passing the patches individually through the network, and then stitching the results back together to form the full image. 
