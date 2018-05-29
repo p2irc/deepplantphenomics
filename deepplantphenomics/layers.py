@@ -53,6 +53,65 @@ class convLayer(object):
 
         return tf.squeeze(activations)
 
+class upsampleLayer(object):
+    def __init__(self, name, input_size, filter_size, num_filters, upscale_factor,
+                 activation_function, initializer, regularization_coefficient):
+        self.name = name
+        self.activation_function = activation_function
+        self.initializer = initializer
+        self.input_size = input_size
+        self.output_size = input_size
+        self.regularization_coefficient = regularization_coefficient
+
+        # if upscale_factor is an int then height and width are scaled the same
+        if isinstance(upscale_factor, int):
+            self.strides = [1, upscale_factor, upscale_factor, 1]
+            h = self.input_size[1] * upscale_factor
+            w = self.input_size[2] * upscale_factor
+        else: # otherwise scaled individually
+            self.strides = [1, upscale_factor[0], upscale_factor[1], 1]
+            h = self.input_size[1] * upscale_factor[0]
+            w = self.input_size[2] * upscale_factor[1]
+
+        # upsampling will have the same batch size self.input_size[0],
+        # and will preserve the number of filters self.input_size[-1]
+        self.output_size = [self.input_size[0], h, w, self.input_size[-1]]
+
+        # the shape needed to initialize weights is based on
+        # filter_height x filter_width x input_depth x output_depth
+        self.weights_shape = [filter_size, filter_size, input_size[-1], num_filters]
+
+    def add_to_graph(self):
+        if self.initializer == 'xavier':
+            self.weights = tf.get_variable(self.name + '_weights',
+                                           shape=self.weights_shape,
+                                           initializer=tf.contrib.layers.xavier_initializer_conv2d())
+        else:
+            self.weights = tf.get_variable(self.name + '_weights',
+                                           shape=self.weights_shape,
+                                           initializer=tf.truncated_normal_initializer(stddev=5e-2),
+                                           dtype=tf.float32)
+
+        self.biases = tf.get_variable(self.name + '_bias',
+                                      [self.weights_shape[-1]],
+                                      initializer=tf.constant_initializer(0.1),
+                                      dtype=tf.float32)
+
+    def forward_pass(self, x, deterministic):
+        activations = tf.nn.conv2d_transpose(x, self.weights, output_shape=self.output_size,
+                                             strides=self.strides, padding='SAME')
+        activations = tf.nn.bias_add(activations, self.biases)
+
+        # Apply a non-linearity specified by the user
+        if self.activation_function == 'relu':
+            activations = tf.nn.relu(activations)
+        elif self.activation_function == 'tanh':
+            activations = tf.tanh(activations)
+
+        self.activations = activations
+
+        return tf.squeeze(activations)
+
 
 class poolingLayer(object):
     def __init__(self, input_size, kernel_size, stride_length, pooling_type='max'):

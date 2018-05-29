@@ -123,6 +123,7 @@ class rosetteLeafRegressor(object):
 
         self.model.add_output_layer()
 
+
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
 

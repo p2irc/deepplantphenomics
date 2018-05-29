@@ -11,7 +11,7 @@ import datetime
 import time
 import warnings
 import copy
-
+import matplotlib.pyplot as plt
 
 class DPPModel(object):
     # Operation settings
@@ -98,6 +98,7 @@ class DPPModel(object):
 
     __num_layers_norm = 0
     __num_layers_conv = 0
+    __num_layers_upsample = 0
     __num_layers_pool = 0
     __num_layers_fc = 0
     __num_layers_dropout = 0
@@ -610,6 +611,7 @@ class DPPModel(object):
                                                 num_threads=self.__num_threads,
                                                 capacity=self.__queue_capacity)
 
+
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'], self.__batch_size, self.__num_regression_outputs)
 
@@ -618,7 +620,7 @@ class DPPModel(object):
                 self.__graph_ops['y_test'] = tf.reshape(self.__graph_ops['y_test'], shape=[-1, self.__image_height, self.__image_width, 1])
 
             if self.__with_patching:
-                # Take a slice of image. Same size and location as the slice from training, if semantic.
+                # Take a slice of image. Same size and location as the slice from training.
                 patch_width = self.__patch_width
                 patch_height = self.__patch_height
                 x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
@@ -805,6 +807,8 @@ class DPPModel(object):
 
                 # Commented out because I wanted to test on the model directly after training on another dataset.
                 # self.shut_down()
+
+
 
                 if return_test_loss:
                     return final_test_loss
@@ -1082,6 +1086,7 @@ class DPPModel(object):
 
         return x
 
+
     def forward_pass_with_file_inputs(self, x):
         """
         Get network outputs with a list of filenames of images as input.
@@ -1346,6 +1351,42 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
+    def add_upsampling_layer(self, filter_size, num_filters, upscale_factor=2,
+                             activation_function=None, regularization_coefficient=None):
+        """
+        Add a 2d upsampling layer to the model.
+
+        :param filter_size: an int, representing the dimension of the square filter to be used
+        :param num_filters: an int, representing the number of filters that will be outputted (the output tensor depth)
+        :param upscale_factor: an int, or tuple of ints, representing the upsampling factor for rows and columns
+        :param activation_function: the activation function to apply to the activation map
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        """
+        self.__num_layers_upsample += 1
+        layer_name = 'upsample%d' % self.__num_layers_upsample
+        self.__log('Adding upsampling layer %s...' % layer_name)
+
+        if regularization_coefficient is None and self.__reg_coeff is not None:
+            regularization_coefficient = self.__reg_coeff
+        elif regularization_coefficient is None and self.__reg_coeff is None:
+            regularization_coefficient = 0.0
+
+        last_layer_dims = copy.deepcopy(self.__last_layer().output_size)
+        with self.__graph.as_default():
+            layer = layers.upsampleLayer(layer_name,
+                                         last_layer_dims,
+                                         filter_size,
+                                         num_filters,
+                                         upscale_factor,
+                                         activation_function,
+                                         self.__weight_initializer,
+                                         regularization_coefficient)
+
+        self.__log('Filter dimensions: {0} Outputs: {1}'.format(layer.weights_shape, layer.output_size))
+
+        self.__layers.append(layer)
+
     def add_pooling_layer(self, kernel_size, stride_length, pooling_type='max'):
         """
         Add a pooling layer to the model.
@@ -1548,7 +1589,7 @@ class DPPModel(object):
                                          regularization_coefficient)
             else:
                 layer = layers.fullyConnectedLayer('output',
-                                                   copy.deepcopy(self.__last_layer().output_size),
+                                                   # copy.deepcopy(self.__last_layer().output_size),
                                                    num_out,
                                                    reshape,
                                                    self.__batch_size,
