@@ -42,7 +42,7 @@ For example, using a few lines of code you can easily use your data to train a c
 
 ## Example Usage
 
-Train a simple model to classify species:
+Train a simple regression model to rate plants for abiotic stress:
 
 ```python
 import deepplantphenomics as dpp
@@ -53,17 +53,16 @@ model = dpp.DPPModel(debug=True)
 channels = 3
 
 # Setup and hyperparameters
-model.set_batch_size(128)
+model.set_problem_type('regression')
+model.set_batch_size(64)
 model.set_image_dimensions(256, 256, channels)
-model.set_learning_rate(0.001)
-model.set_maximum_training_epochs(700)
-model.set_train_test_split(0.75)
+model.set_learning_rate(0.0001)
+model.set_maximum_training_epochs(100)
+model.set_train_test_split(0.8)
 
-# Load dataset
-model.load_dataset_from_directory_with_auto_labels('./data')
-
-# Specify pre-processing steps
-model.add_preprocessing_step('auto-segmentation')
+# Load dataset of images and ground-truth labels
+model.load_multiple_labels_from_csv('./data/my_labels.csv')
+model.load_images_with_ids_from_directory('./data')
 
 # Simple convolutional neural network model
 model.add_input_layer()
@@ -72,9 +71,6 @@ model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_leng
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu')
-model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_fully_connected_layer(output_size=256, activation_function='relu')

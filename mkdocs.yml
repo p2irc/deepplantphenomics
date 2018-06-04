@@ -12,6 +12,7 @@ pages:
         - Semantic Segmentation: Semantic-Segmentation.md
         - Compression: Compression.md
       - Tools: Tools.md
+      - Hyperparameter  Optimization: Hyperparameter-Optimization.md
       - Tutorials:
         - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
         - Tutorial - Deploying your Trained Model: Tutorial-Deployment.md
