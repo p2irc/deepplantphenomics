@@ -20,6 +20,7 @@ class DPPModel(object):
     __with_patching = False
     __has_trained = False
     __save_checkpoints = None
+    __save_dir = None
 
     # Input options
     __total_classes = 0
@@ -122,7 +123,7 @@ class DPPModel(object):
     __debug = None
     __load_from_saved = None
     __tb_dir = None
-    __queue_capacity = 320
+    __queue_capacity = 50
     __report_rate = None
 
     # Multithreading
@@ -131,7 +132,7 @@ class DPPModel(object):
     __threads = None
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
-                 report_rate=100):
+                 report_rate=100, save_dir=None):
         """
         The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file.
         This class is the singular point of contact for the DPP module.
@@ -151,6 +152,7 @@ class DPPModel(object):
         self.__tb_dir = tensorboard_dir
         self.__report_rate = report_rate
         self.__save_checkpoints = save_checkpoints
+        self.__save_dir = save_dir
 
         # Add the run level to the tensorboard path
         if self.__tb_dir is not None:
@@ -211,6 +213,7 @@ class DPPModel(object):
             raise ValueError("size must be positive")
 
         self.__batch_size = size
+        self.__queue_capacity = size * 5
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
@@ -457,6 +460,7 @@ class DPPModel(object):
             raise TypeError("width must be an int")
         if width <= 0:
             raise ValueError("width must be positive")
+
         self.__patch_height = height
         self.__patch_width = width
         self.__with_patching = True
@@ -679,14 +683,14 @@ class DPPModel(object):
                         tf.summary.histogram('test/batch_losses', self.__graph_ops['test_losses'], collections=['custom_summaries'])
 
                 # Summaries for semantic segmentation
-                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                    tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
-                    train_images_summary = self.__get_weights_as_image(
-                        tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)))
-                    tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
-                    test_images_summary = self.__get_weights_as_image(
-                        tf.transpose(tf.expand_dims(self.__graph_ops['x_test_predicted'], -1), (1, 2, 3, 0)))
-                    tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
+                # if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                #     tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
+                #     train_images_summary = self.__get_weights_as_image(
+                #         tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)))
+                #     tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
+                #     test_images_summary = self.__get_weights_as_image(
+                #         tf.transpose(tf.expand_dims(self.__graph_ops['x_test_predicted'], -1), (1, 2, 3, 0)))
+                #     tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
@@ -790,7 +794,7 @@ class DPPModel(object):
                                             samples_per_sec))
 
                         if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
-                            self.save_state()
+                            self.save_state(self.__save_dir)
                     else:
                         loss = self.__session.run([self.__graph_ops['cost']])
 
@@ -801,14 +805,12 @@ class DPPModel(object):
                     if i == self.__maximum_training_batches - 1:
                         self.__log('Stopping due to maximum epochs')
 
-                self.save_state()
+                self.save_state(self.__save_dir)
 
                 final_test_loss = self.compute_full_test_accuracy()
 
                 # Commented out because I wanted to test on the model directly after training on another dataset.
-                # self.shut_down()
-
-
+                self.shut_down()
 
                 if return_test_loss:
                     return final_test_loss
@@ -1028,7 +1030,7 @@ class DPPModel(object):
         if directory is None:
             dir = './saved_state'
         else:
-            dir = directory + 'saved_state'
+            dir = directory + '/saved_state'
 
         if not os.path.isdir(dir):
             os.mkdir(dir)
@@ -1109,6 +1111,11 @@ class DPPModel(object):
                     patch_width = self.__patch_width
                     final_height = (self.__image_height // patch_height) * patch_height
                     final_width = (self.__image_width // patch_width) * patch_width
+                    # find image differencees to determine recentering crop coords, we divide by 2 so that the leftover
+                    # is equal on all sides of image
+                    offset_height = (self.__image_height - final_height) // 2
+                    offset_width = (self.__image_width - final_width) // 2
+                    # pre-allocate output dimensions
                     total_outputs = np.empty([1, final_height, final_width])
                 else:
                     total_outputs = np.empty([1, self.__image_height, self.__image_width])
@@ -1129,6 +1136,8 @@ class DPPModel(object):
 
             x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+            if self.__with_patching:
+                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
 
             if self.__with_patching:
                 # Split the images up into the multiple slices of size patch_height x patch_width
@@ -1150,9 +1159,11 @@ class DPPModel(object):
                 num_patch_rows = final_height // patch_height
                 num_patch_cols = final_width // patch_width
                 for i in range(num_batches):
-                    xx = self.__session.run(x_pred)
+                    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                    run_metadata = tf.RunMetadata()
+                    xx = self.__session.run(x_pred, options=options, run_metadata=run_metadata)
 
-                    # new generalized version of image stitching
+                    # generalized image stitching
                     for img in np.array_split(xx, self.__batch_size): # for each img in current batch
                         # we are going to build a list of rows of imgs called img_rows, where each element
                         # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
@@ -1162,10 +1173,10 @@ class DPPModel(object):
                         img_rows = []
                         # for each row
                         for j in range(num_patch_rows):
-                            curr_row = img[j*num_patch_rows] # start new row with first img
+                            curr_row = img[j*num_patch_cols] # start new row with first img
                             # iterate through the rest of the row, concatenating img's together
                             for k in range(1, num_patch_cols):
-                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_rows)]), axis=1) # horizontal cat
+                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1) # horizontal cat
                             img_rows.append(curr_row) # add row of img's to the list
 
                         # start full img with the first full row of imgs
@@ -1182,6 +1193,8 @@ class DPPModel(object):
             else:
                 for i in range(int(num_batches)):
                     xx = self.__session.run(x_pred)
+                    # need to match total_outputs dimensions, so we add a dimension to the shape to match
+                    xx = np.array([xx])  # shape transformation: (x,y) --> (1,x,y)
                     total_outputs = np.append(total_outputs, xx, axis=0)
 
             # delete weird first row
@@ -1372,6 +1385,13 @@ class DPPModel(object):
         elif regularization_coefficient is None and self.__reg_coeff is None:
             regularization_coefficient = 0.0
 
+        if self.__with_patching:
+            patches_horiz = self.__image_width // self.__patch_width
+            patches_vert = self.__image_height // self.__patch_height
+            batch_multiplier = patches_horiz * patches_vert
+        else:
+            batch_multiplier = 1
+
         last_layer_dims = copy.deepcopy(self.__last_layer().output_size)
         with self.__graph.as_default():
             layer = layers.upsampleLayer(layer_name,
@@ -1380,6 +1400,7 @@ class DPPModel(object):
                                          num_filters,
                                          upscale_factor,
                                          activation_function,
+                                         batch_multiplier,
                                          self.__weight_initializer,
                                          regularization_coefficient)
 
@@ -1589,7 +1610,7 @@ class DPPModel(object):
                                          regularization_coefficient)
             else:
                 layer = layers.fullyConnectedLayer('output',
-                                                   # copy.deepcopy(self.__last_layer().output_size),
+                                                   copy.deepcopy(self.__last_layer().output_size),
                                                    num_out,
                                                    reshape,
                                                    self.__batch_size,
@@ -1627,6 +1648,10 @@ class DPPModel(object):
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Total classes is %d' % self.__total_classes)
+
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
+        self.__split_labels = False ### Band-aid fix
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """
