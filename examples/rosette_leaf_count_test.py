@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 #
 # Demonstrates the use of tools.predict_rosette_leaf_count on images of rosettes.
 # Loads filenames from the IPPN dataset by default.

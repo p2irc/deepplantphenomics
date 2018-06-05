@@ -1,4 +1,4 @@
-from deepplantphenomics import networks
+from . import networks
 import numpy as np
 import cv2
 
