@@ -1729,11 +1729,13 @@ class DPPModel(object):
         label_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
                        os.path.isfile(os.path.join(dirname, name)) & name.endswith('_bbox.csv')]
 
+        # currently reads columns, need to read rows instead!!!
         labels = [loaders.read_csv_labels(label_file) for label_file in label_files]
 
         self.__all_labels = []
 
         for label in labels:
+            print(label)
             self.__all_labels.append([loaders.box_coordinates_to_pascal_voc_coordinates(l) for l in label])
 
         self.__total_raw_samples = len(images)

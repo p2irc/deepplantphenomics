@@ -51,16 +51,22 @@ class convLayer(object):
 
         self.activations = activations
 
-        return tf.squeeze(activations)
+
+        if activations.shape[-1] == 1:
+            return tf.squeeze(activations)
+        else:
+            return activations
 
 class upsampleLayer(object):
     def __init__(self, name, input_size, filter_size, num_filters, upscale_factor,
-                 activation_function, initializer, regularization_coefficient):
+                 activation_function, batch_multiplier, initializer, regularization_coefficient):
         self.name = name
         self.activation_function = activation_function
         self.initializer = initializer
         self.input_size = input_size
-        self.output_size = input_size
+        self.strides = [1, upscale_factor, upscale_factor, 1]
+        self.upscale_factor = upscale_factor
+        self.batch_multiplier = batch_multiplier
         self.regularization_coefficient = regularization_coefficient
 
         # if upscale_factor is an int then height and width are scaled the same
@@ -74,7 +80,7 @@ class upsampleLayer(object):
             w = self.input_size[2] * upscale_factor[1]
 
         # upsampling will have the same batch size self.input_size[0],
-        # and will preserve the number of filters self.input_size[-1]
+        # and will preserve the number of filters self.input_size[-1], (NHWC)
         self.output_size = [self.input_size[0], h, w, self.input_size[-1]]
 
         # the shape needed to initialize weights is based on
@@ -98,7 +104,15 @@ class upsampleLayer(object):
                                       dtype=tf.float32)
 
     def forward_pass(self, x, deterministic):
-        activations = tf.nn.conv2d_transpose(x, self.weights, output_shape=self.output_size,
+        # upsampling will have the same batch size (first dimension of x),
+        # and will preserve the number of filters (self.input_size[-1]), (this is NHWC)
+        dyn_input_shape = tf.shape(x)
+        batch_size = dyn_input_shape[0]
+        h = dyn_input_shape[1] * self.upscale_factor
+        w = dyn_input_shape[2] * self.upscale_factor
+        output_shape = tf.stack([batch_size, h, w, self.weights_shape[-1]])
+
+        activations = tf.nn.conv2d_transpose(x, self.weights, output_shape=output_shape,
                                              strides=self.strides, padding='SAME')
         activations = tf.nn.bias_add(activations, self.biases)
 
@@ -110,7 +124,10 @@ class upsampleLayer(object):
 
         self.activations = activations
 
-        return tf.squeeze(activations)
+        if activations.shape[-1] == 1:
+            return tf.squeeze(activations)
+        else:
+            return activations
 
 
 class poolingLayer(object):
