@@ -879,26 +879,6 @@ class DPPModel(object):
 
 
                 self.__log("Accuracy after pruning")
-                # if self.__has_moderation:
-                #     self.__graph_ops['x_test_predicted'] = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
-                # else:
-                #     self.__graph_ops['x_test_predicted'] = self.forward_pass(self.x_test, deterministic=True)
-                # if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                #     test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
-                #     test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.__graph_ops['y_test'], 1))
-                #     test_losses = test_correct_predictions
-                #     test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
-                # elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                #     if self.__num_regression_outputs == 1:
-                #         test_losses = tf.squeeze(tf.stack(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
-                #     else:
-                #         test_losses = self.__l2_norm(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
-
-                #     test_cost = tf.reduce_mean(tf.abs(test_losses))
-                # elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                #     test_losses = tf.reduce_mean(tf.abs(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])), axis=2)
-                #     test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
-                #     test_cost = tf.reduce_mean(test_losses)
                 self.compute_full_test_accuracy()
 
                 for idx, dropout_layer in dropout_layers:
@@ -923,26 +903,6 @@ class DPPModel(object):
                     f.write(str(self.__graph.as_graph_def()))
 
                 self.__log("Accuracy after quantization")
-                # if self.__has_moderation:
-                #     self.__graph_ops['x_test_predicted'] = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
-                # else:
-                #     self.__graph_ops['x_test_predicted'] = self.forward_pass(self.x_test, deterministic=True)
-                # if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                #     test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
-                #     test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.__graph_ops['y_test'], 1))
-                #     test_losses = test_correct_predictions
-                #     test_accuracy = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
-                # elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                #     if self.__num_regression_outputs == 1:
-                #         test_losses = tf.squeeze(tf.stack(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
-                #     else:
-                #         test_losses = self.__l2_norm(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
-
-                #     test_cost = tf.reduce_mean(tf.abs(test_losses))
-                # elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                #     test_losses = tf.reduce_mean(tf.abs(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])), axis=2)
-                #     test_losses = tf.transpose(tf.reduce_mean(test_losses, axis=1))
-                #     test_cost = tf.reduce_mean(test_losses)
                 self.compute_full_test_accuracy()
 
             self.shut_down()
