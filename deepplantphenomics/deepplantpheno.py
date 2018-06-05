@@ -1,6 +1,7 @@
+from __future__ import print_function
+
 from . import layers
 from . import loaders
-from . import preprocessing
 from . import definitions
 from . import networks
 import numpy as np
@@ -12,6 +13,13 @@ import time
 import warnings
 import copy
 import matplotlib.pyplot as plt
+import math
+
+try:
+    from . import preprocessing
+except ModuleNotFoundError:
+    print("PlantCV not found, preprocessing will be unavailable")
+
 
 class DPPModel(object):
     # Operation settings
@@ -471,7 +479,7 @@ class DPPModel(object):
             if callable(getattr(layer, 'add_to_graph', None)):
                 layer.add_to_graph()
 
-    def __assemble_graph(self):
+    def __assemble_graph(self, iteration=None):
         with self.__graph.as_default():
 
             self.__log('Parsing dataset...')
@@ -600,13 +608,13 @@ class DPPModel(object):
 
             # Calculate test accuracy
             if self.__has_moderation:
-                x_test, self.__graph_ops['y_test'], mod_w_test = tf.train.batch(
+                self.x_test, self.__graph_ops['y_test'], mod_w_test = tf.train.batch(
                     [self.__test_images, self.__test_labels, self.__test_moderation_features],
                     batch_size=self.__batch_size,
                     num_threads=self.__num_threads,
                     capacity=self.__queue_capacity)
             else:
-                x_test, self.__graph_ops['y_test'] = tf.train.batch([self.__test_images, self.__test_labels],
+                self.x_test, self.__graph_ops['y_test'] = tf.train.batch([self.__test_images, self.__test_labels],
                                                 batch_size=self.__batch_size,
                                                 num_threads=self.__num_threads,
                                                 capacity=self.__queue_capacity)
@@ -615,7 +623,7 @@ class DPPModel(object):
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'], self.__batch_size, self.__num_regression_outputs)
 
-            x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+            self.x_test = tf.reshape(self.x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
             if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                 self.__graph_ops['y_test'] = tf.reshape(self.__graph_ops['y_test'], shape=[-1, self.__image_height, self.__image_width, 1])
 
@@ -623,7 +631,7 @@ class DPPModel(object):
                 # Take a slice of image. Same size and location as the slice from training.
                 patch_width = self.__patch_width
                 patch_height = self.__patch_height
-                x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
+                self.x_test = tf.image.extract_glimpse(self.x_test, [patch_height, patch_width], offsets,
                                                   normalized=False, centered=False)
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                     self.__graph_ops['y_test'] = tf.image.extract_glimpse(self.__graph_ops['y_test'],
@@ -631,9 +639,9 @@ class DPPModel(object):
                                                                           normalized=False, centered=False)
 
             if self.__has_moderation:
-                self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
+                self.__graph_ops['x_test_predicted'] = self.forward_pass(self.x_test, deterministic=True, moderation_features=mod_w_test)
             else:
-                self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                self.__graph_ops['x_test_predicted'] = self.forward_pass(self.x_test, deterministic=True)
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
@@ -657,18 +665,18 @@ class DPPModel(object):
             if self.__tb_dir is not None:
                 self.__log('Creating Tensorboard summaries...')
                 # Summaries for any problem type
-                tf.summary.scalar('train/loss', self.__graph_ops['cost'], collections=['custom_summaries'])
-                tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+                tf.summary.scalar('train/loss%s' % iteration, self.__graph_ops['cost'], collections=['custom_summaries'])
+                tf.summary.scalar('train/learning_rate%s' % iteration, self.__learning_rate, collections=['custom_summaries'])
+                tf.summary.scalar('train/l2_loss%s' % iteration, l2_cost, collections=['custom_summaries'])
                 filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
-                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+                tf.summary.image('filters/first%s' % iteration, filter_summary, collections=['custom_summaries'])
 
                 # Summaries for classification problems
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                    tf.summary.scalar('train/accuracy', self.__graph_ops['accuracy'], collections=['custom_summaries'])
-                    tf.summary.scalar('test/accuracy', self.__graph_ops['test_accuracy'], collections=['custom_summaries'])
-                    tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
-                    tf.summary.histogram('test/class_predictions', test_class_predictions,
+                    tf.summary.scalar('train/accuracy%s' % iteration, self.__graph_ops['accuracy'], collections=['custom_summaries'])
+                    tf.summary.scalar('test/accuracy%s' % iteration, self.__graph_ops['test_accuracy'], collections=['custom_summaries'])
+                    tf.summary.histogram('train/class_predictions%s' % iteration, class_predictions, collections=['custom_summaries'])
+                    tf.summary.histogram('test/class_predictions%s' % iteration, test_class_predictions,
                                          collections=['custom_summaries'])
 
                 # Summaries for regression
@@ -691,20 +699,20 @@ class DPPModel(object):
                 # Summaries for each layer
                 for layer in self.__layers:
                     if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
-                        tf.summary.histogram('activations/' + layer.name, layer.activations,
+                        tf.summary.histogram('weights%s/' %iteration + layer.name, layer.weights, collections=['custom_summaries'])
+                        tf.summary.histogram('biases%s/' %iteration + layer.name, layer.biases, collections=['custom_summaries'])
+                        tf.summary.histogram('activations%s/' %iteration + layer.name, layer.activations,
                                              collections=['custom_summaries'])
 
                 # Summaries for gradients
                 for index, grad in enumerate(gradients):
-                    tf.summary.histogram("gradients/" + variables[index].name, gradients[index],
+                    tf.summary.histogram("gradients%s/" %iteration + variables[index].name, gradients[index],
                                          collections=['custom_summaries'])
-                tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+                tf.summary.histogram("gradient_global_norm%s/" %iteration, global_grad_norm, collections=['custom_summaries'])
 
                 self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
-    def begin_training(self, return_test_loss=False):
+    def begin_training(self, return_test_loss=False, shut_down=True, iteration=None):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables.
         The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
@@ -722,98 +730,184 @@ class DPPModel(object):
         #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of layers.")
 
         with self.__graph.as_default():
-            self.__assemble_graph()
+            with tf.variable_scope('dpp', reuse=tf.AUTO_REUSE):
+                self.__assemble_graph(iteration=iteration)
 
-            # Either load the network parameters from a checkpoint file or start training
-            if self.__load_from_saved is not False:
-                self.load_state()
+                # Either load the network parameters from a checkpoint file or start training
+                if self.__load_from_saved is not False:
+                    self.load_state()
 
-                self.__initialize_queue_runners()
+                    self.__initialize_queue_runners()
 
+                    self.compute_full_test_accuracy()
+
+                    if shut_down:
+                        self.shut_down()
+                else:
+                    if self.__tb_dir is not None:
+                        train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
+
+                    self.__log('Initializing parameters...')
+                    tf.contrib.quantize.create_training_graph()
+                    init_op = tf.global_variables_initializer()
+                    self.__session.run(init_op)
+
+                    self.__initialize_queue_runners()
+
+                    self.__log('Beginning training...')
+
+                    self.__set_learning_rate()
+
+                    for i in range(self.__maximum_training_batches):
+                        start_time = time.time()
+                        self.__global_epoch = i
+
+                        self.__session.run(self.__graph_ops['optimizer'])
+
+                        if self.__global_epoch > 0 and self.__global_epoch % self.__report_rate == 0:
+                            elapsed = time.time() - start_time
+
+                            if self.__tb_dir is not None:
+                                summary = self.__session.run(self.__graph_ops['merged'])
+                                train_writer.add_summary(summary, i)
+
+                            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                                loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
+                                    [self.__graph_ops['cost'],
+                                     self.__graph_ops['accuracy'],
+                                     self.__graph_ops['test_accuracy']])
+
+                                samples_per_sec = self.__batch_size / elapsed
+
+                                self.__log(
+                                    'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
+                                        .format(i,
+                                                i / (self.__total_training_samples / self.__batch_size),
+                                                loss,
+                                                epoch_accuracy,
+                                                samples_per_sec))
+                            elif self.__problem_type == definitions.ProblemType.REGRESSION or \
+                                            self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                                loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
+                                                                            self.__graph_ops['test_cost']])
+
+                                samples_per_sec = self.__batch_size / elapsed
+
+                                self.__log(
+                                    'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
+                                        .format(i,
+                                                i / (self.__total_training_samples / self.__batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                            if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
+                                self.save_state()
+                        else:
+                            loss = self.__session.run([self.__graph_ops['cost']])
+
+                        if loss == 0.0:
+                            self.__log('Stopping due to zero loss')
+                            break
+
+                        if i == self.__maximum_training_batches - 1:
+                            self.__log('Stopping due to maximum epochs')
+
+                    self.save_state()
+
+                    self.compute_full_test_accuracy()
+
+                    if shut_down:
+                        self.shut_down()
+
+                    if return_test_loss:
+                        return final_test_loss
+                    else:
+                        return
+
+    def compress(self, times=1, threshold=0.00005, quantize=False, debug=False):
+        self.set_learning_rate(self.__learning_rate * 0.1)  # Use a lower learning rate for re-training
+        with self.__graph.as_default():
+            tf.GraphKeys.PRUNING_MASKS = "pruning_masks"  # This prevents pruning variables from being stored with the model
+            # Iterate through layers and add compression layers
+            compression_layers = []
+            for layer in self.__layers:
+                self.__log('Looking for layers to compress...')
+                self.__log('Layer: {} '.format(getattr(layer, 'name', None)))
+                if isinstance(layer, (layers.convLayer, layers.fullyConnectedLayer)):
+                    # Create pruning mask for low weight connections and prune weight layer
+                    prune_mask = tf.get_variable(layer.name + '_prune', initializer=tf.ones_like(layer.weights), trainable=False,
+                                                 collections=[tf.GraphKeys.PRUNING_MASKS])
+                    pruned_weights = tf.multiply(layer.weights, prune_mask)
+                    layer.unpruned_weights = layer.weights
+
+                    t = tf.sqrt(tf.nn.l2_loss(layer.weights)) * threshold
+                    indicator_matrix = tf.multiply(tf.to_float(
+                        tf.greater_equal(tf.abs(layer.weights), tf.ones_like(layer.weights) * t)), prune_mask)
+
+                    layer.update_mask = prune_mask.assign(indicator_matrix)
+                    layer.prune_layer = layer.weights.assign(pruned_weights)
+
+                    compression_layers.append(layer)
+
+                    # Keep track of the number of connections
+                    nonzero_indicator = tf.to_float(tf.not_equal(layer.weights, tf.zeros_like(layer.weights)))
+                    layer.parameter_count = tf.reduce_sum(nonzero_indicator)
+                    layer.mask_count = tf.reduce_sum(tf.to_float(tf.not_equal(indicator_matrix, tf.zeros_like(indicator_matrix))))
+
+                    layer.weights = pruned_weights
+
+            dropout_layers = [(idx, layer) for (idx, layer) in enumerate(self.__layers) if isinstance(layer, layers.dropoutLayer)]
+            for idx, dropout_layer in dropout_layers:
+                weight_layer = self.__layers[idx-1]
+                parameter_count = self.__session.run(weight_layer.parameter_count)
+
+                dropout_layer.original_parameter_count = parameter_count
+
+            if quantize:
+                tf.contrib.quantize.create_training_graph()
+            self.__session.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.PRUNING_MASKS)))
+            for i in range(times):
+                self.__log("Compression run {}".format(i+1))
+
+                for layer in compression_layers:
+                    self.__session.run(layer.update_mask)
+                    if debug:
+                        self.__log('Num parameters for prune_mask {} pre-training: {}/{}'.format(
+                            layer.name, self.__session.run(layer.mask_count), self.__session.run(layer.parameter_count)))
+                        self.__log('Loss: {}'.format(self.__session.run(tf.nn.l2_loss(layer.weights))))
+                    self.__session.run(layer.prune_layer)
+
+
+                self.__log("Accuracy after pruning")
                 self.compute_full_test_accuracy()
 
-                self.shut_down()
-            else:
-                if self.__tb_dir is not None:
-                    train_writer = tf.summary.FileWriter(self.__tb_dir, self.__session.graph)
+                for idx, dropout_layer in dropout_layers:
+                    weight_layer = self.__layers[idx-1]
+                    parameter_count = self.__session.run(weight_layer.parameter_count)
+                    dropout_layer.set_p(1.0 - ((1.0 - dropout_layer.p) * math.sqrt(
+                        parameter_count / dropout_layer.original_parameter_count)))
 
-                self.__log('Initializing parameters...')
-                init_op = tf.global_variables_initializer()
-                self.__session.run(init_op)
-
-                self.__initialize_queue_runners()
-
-                self.__log('Beginning training...')
-
-                self.__set_learning_rate()
-
-                for i in range(self.__maximum_training_batches):
-                    start_time = time.time()
-                    self.__global_epoch = i
-
-                    self.__session.run(self.__graph_ops['optimizer'])
-
-                    if self.__global_epoch > 0 and self.__global_epoch % self.__report_rate == 0:
-                        elapsed = time.time() - start_time
-
-                        if self.__tb_dir is not None:
-                            summary = self.__session.run(self.__graph_ops['merged'])
-                            train_writer.add_summary(summary, i)
-
-                        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                            loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
-                                [self.__graph_ops['cost'],
-                                 self.__graph_ops['accuracy'],
-                                 self.__graph_ops['test_accuracy']])
-
-                            samples_per_sec = self.__batch_size / elapsed
-
-                            self.__log(
-                                'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
-                                    .format(i,
-                                            i / (self.__total_training_samples / self.__batch_size),
-                                            loss,
-                                            epoch_accuracy,
-                                            samples_per_sec))
-                        elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                                        self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                            loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
-                                                                        self.__graph_ops['test_cost']])
-
-                            samples_per_sec = self.__batch_size / elapsed
-
-                            self.__log(
-                                'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
-                                    .format(i,
-                                            i / (self.__total_training_samples / self.__batch_size),
-                                            loss,
-                                            samples_per_sec))
-
-                        if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
-                            self.save_state()
-                    else:
-                        loss = self.__session.run([self.__graph_ops['cost']])
-
-                    if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
-                        break
-
-                    if i == self.__maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
-
-                self.save_state()
-
-                final_test_loss = self.compute_full_test_accuracy()
-
-                # Commented out because I wanted to test on the model directly after training on another dataset.
-                # self.shut_down()
+                if i < times-1:  # do not retrain on the last time
+                    self.begin_training(shut_down=False, iteration=i)
+                    if debug:
+                        for layer in compression_layers:
+                            self.__log('Num parameters for layer {} post-training: {}'.format(
+                                layer.name, self.__session.run(layer.parameter_count)))
 
 
+            self.save_state(step=1)
 
-                if return_test_loss:
-                    return final_test_loss
-                else:
-                    return
+            if quantize:
+                tf.contrib.quantize.create_eval_graph()
+                with open('quantized.pb', 'w') as f:
+                    f.write(str(self.__graph.as_graph_def()))
+
+                self.__log("Accuracy after quantization")
+                self.compute_full_test_accuracy()
+
+            self.shut_down()
+
+
 
     def begin_training_with_hyperparameter_search(self, l2_reg_limits=None, lr_limits=None, num_steps=3):
         """
@@ -1021,7 +1115,7 @@ class DPPModel(object):
 
         return x8
 
-    def save_state(self, directory=None):
+    def save_state(self, directory=None, step=0):
         """Save all trainable variables as a checkpoint in the current working path"""
         self.__log('Saving parameters...')
 
@@ -1035,7 +1129,7 @@ class DPPModel(object):
 
         with self.__graph.as_default():
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.save(self.__session, dir + '/tfhSaved')
+            saver.save(self.__session, dir + '/tfhSaved', global_step=step)
 
         self.__has_trained = True
 
@@ -1525,7 +1619,7 @@ class DPPModel(object):
                                                self.__batch_size,
                                                activation_function,
                                                self.__weight_initializer,
-                                               regularization_coefficient)
+                                               regularization_coefficient,)
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 
@@ -1589,7 +1683,7 @@ class DPPModel(object):
                                          regularization_coefficient)
             else:
                 layer = layers.fullyConnectedLayer('output',
-                                                   # copy.deepcopy(self.__last_layer().output_size),
+                                                   copy.deepcopy(self.__last_layer().output_size),
                                                    num_out,
                                                    reshape,
                                                    self.__batch_size,
@@ -1627,6 +1721,9 @@ class DPPModel(object):
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Total classes is %d' % self.__total_classes)
+
+        self.__raw_image_files = image_files
+        self.__raw_labels = labels
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """

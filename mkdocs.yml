@@ -10,6 +10,7 @@ pages:
         - Model Options: Model-Options.md
         - Data Fusion Options: Data-Fusion-Options.md
         - Semantic Segmentation: Semantic-Segmentation.md
+        - Compression: Compression.md
       - Tools: Tools.md
       - Hyperparameter  Optimization: Hyperparameter-Optimization.md
       - Tutorials:

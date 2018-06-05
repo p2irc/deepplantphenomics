@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 #
 # Demonstrates the use of tools.classify_arabidopsis_strain on images of rosettes.
 # Loads filenames from the IPPN dataset by default.
@@ -19,6 +21,6 @@ print('Performing strain classification...')
 y = dpp.tools.classify_arabidopsis_strain(images)
 
 for k,v in zip(images, y):
-    print '%s: %s' % (os.path.basename(k), v)
+    print('%s: %s' % (os.path.basename(k), v))
 
 print('Done')
