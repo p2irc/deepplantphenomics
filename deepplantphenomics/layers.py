@@ -165,7 +165,6 @@ class fullyConnectedLayer(object):
         if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, self.output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
-
         else:
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=[vec_size, self.output_size],
@@ -229,10 +228,6 @@ class dropoutLayer(object):
             return x
         else:
             return tf.nn.dropout(x, self.p)
-
-    def set_p(self, p):
-        print("dropout: %f -> %f" % (self.p, p))
-        self.p = p
 
 
 class moderationLayer(object):
