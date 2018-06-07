@@ -65,6 +65,22 @@ def read_csv_labels(file_name, column_number=False, character=','):
 
     return labels
 
+def read_csv_rows(file_name, column_number=False, character=','):
+    """
+    Reads the rows of a csv file and return sthem as a list.
+
+    read_csv_labels and its variants read column-wise, this function is needed for row-wise parsing
+    """
+    f = open(file_name, 'r')
+    rows = []
+
+    for line in f:
+        line = line.rstrip()
+        curr_row = line.split(character)
+        rows.append(curr_row)
+
+    return rows
+
 
 def read_csv_labels_and_ids(file_name, column_number, id_column_number, character=','):
     f = open(file_name, 'r')

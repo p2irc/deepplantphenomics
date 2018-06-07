@@ -467,9 +467,10 @@ class DPPModel(object):
 
     def __add_layers_to_graph(self):
         """
-        Adds the layers in self.layers to the computational graph. Currently __assemble_graph is doing too many
-        things, so this is needed as a separate function so that other functions such as load_state can add
-        layers to the graph without performing everything else in asseble_graph
+        Adds the layers in self.layers to the computational graph.
+
+        Currently __assemble_graph is doing too many things, so this is needed as a separate function so that other
+        functions such as load_state can add layers to the graph without performing everything else in asseble_graph
         """
         for layer in self.__layers:
             if callable(getattr(layer, 'add_to_graph', None)):
@@ -683,14 +684,18 @@ class DPPModel(object):
                         tf.summary.histogram('test/batch_losses', self.__graph_ops['test_losses'], collections=['custom_summaries'])
 
                 # Summaries for semantic segmentation
-                # if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                #     tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
-                #     train_images_summary = self.__get_weights_as_image(
-                #         tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)))
-                #     tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
-                #     test_images_summary = self.__get_weights_as_image(
-                #         tf.transpose(tf.expand_dims(self.__graph_ops['x_test_predicted'], -1), (1, 2, 3, 0)))
-                #     tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
+                # we send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
+                # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
+                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                    tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
+                    train_images_summary = self.__get_weights_as_image(
+                        tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)),
+                        self.__layers[-1].output_size)
+                    tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
+                    test_images_summary = self.__get_weights_as_image(
+                        tf.transpose(tf.expand_dims(self.__graph_ops['x_test_predicted'], -1), (1, 2, 3, 0)),
+                        self.__layers[-1].output_size)
+                    tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
@@ -993,20 +998,27 @@ class DPPModel(object):
 
         self.__session.close()
 
-    def __get_weights_as_image(self, kernel):
+    def __get_weights_as_image(self, kernel, size=None):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
         with self.__graph.as_default():
             pad = 1
             grid_X = 4
-            grid_Y = (kernel.get_shape().as_list()[-1] / 4)
-            num_channels = kernel.get_shape().as_list()[2]
-
+            grid_Y = (self.__batch_size // 4) + 1
             # pad X and Y
             x1 = tf.pad(kernel, tf.constant([[pad, 0], [pad, 0], [0, 0], [0, 0]]))
 
-            # X and Y dimensions, w.r.t. padding
-            Y = kernel.get_shape()[0] + pad
-            X = kernel.get_shape()[1] + pad
+            # when kernel is dynamically shaped at runtime it has [?,?,?,?] dimensions, thus size needs to be
+            # passed in so we have actual dimensions to work with
+            if size is not None:
+                # X and Y dimensions, w.r.t. padding
+                Y = size[1] + pad
+                X = size[2] + pad
+                num_channels = size[-1]
+            else:
+                # X and Y dimensions, w.r.t. padding
+                Y = kernel.get_shape()[0] + pad
+                X = kernel.get_shape()[1] + pad
+                num_channels = kernel.get_shape().as_list()[2]
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
@@ -1159,9 +1171,7 @@ class DPPModel(object):
                 num_patch_rows = final_height // patch_height
                 num_patch_cols = final_width // patch_width
                 for i in range(num_batches):
-                    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                    run_metadata = tf.RunMetadata()
-                    xx = self.__session.run(x_pred, options=options, run_metadata=run_metadata)
+                    xx = self.__session.run(x_pred)
 
                     # generalized image stitching
                     for img in np.array_split(xx, self.__batch_size): # for each img in current batch
@@ -1193,9 +1203,8 @@ class DPPModel(object):
             else:
                 for i in range(int(num_batches)):
                     xx = self.__session.run(x_pred)
-                    # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                    xx = np.array([xx])  # shape transformation: (x,y) --> (1,x,y)
-                    total_outputs = np.append(total_outputs, xx, axis=0)
+                    for img in np.array_split(xx, self.__batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
 
             # delete weird first row
             total_outputs = np.delete(total_outputs, 0, 0)
@@ -1730,12 +1739,11 @@ class DPPModel(object):
                        os.path.isfile(os.path.join(dirname, name)) & name.endswith('_bbox.csv')]
 
         # currently reads columns, need to read rows instead!!!
-        labels = [loaders.read_csv_labels(label_file) for label_file in label_files]
+        labels = [loaders.read_csv_rows(label_file) for label_file in label_files]
 
         self.__all_labels = []
 
         for label in labels:
-            print(label)
             self.__all_labels.append([loaders.box_coordinates_to_pascal_voc_coordinates(l) for l in label])
 
         self.__total_raw_samples = len(images)
@@ -1840,8 +1848,8 @@ class DPPModel(object):
         """Loads the png images in the given directory, using subdirectories to separate classes."""
 
         # Load all file names and labels into arrays
-        subdirs = filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
-                         [os.path.join(dirname, f) for f in os.listdir(dirname)])
+        subdirs = list(filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
+                         [os.path.join(dirname, f) for f in os.listdir(dirname)]))
 
         num_classes = len(subdirs)
 
@@ -1877,8 +1885,8 @@ class DPPModel(object):
         """
 
         # Load all snapshot subdirectories
-        subdirs = filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
-                         [os.path.join(dirname, f) for f in os.listdir(dirname)])
+        subdirs = list(filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
+                         [os.path.join(dirname, f) for f in os.listdir(dirname)]))
 
         image_files = []
 
@@ -1889,6 +1897,7 @@ class DPPModel(object):
 
             image_files = image_files + image_paths
 
+        print(image_files)
         # Put the image files in the order of the IDs (if there are any labels loaded)
         sorted_paths = []
 
@@ -1958,7 +1967,7 @@ class DPPModel(object):
 
         if self.__all_labels is not None:
             for image_id in self.__all_ids:
-                path = filter(lambda item: item.endswith('/' + image_id), [p for p in image_files])
+                path = list(filter(lambda item: item.endswith('/' + image_id), [p for p in image_files]))
                 assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
                 sorted_paths.append(path[0])
         else:
