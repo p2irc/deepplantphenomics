@@ -5,42 +5,67 @@ import random
 import os
 
 
-def split_raw_data(images, labels, ratio, moderation_features=None, augmentation_images=None, augmentation_labels=None, split_labels=True):
+def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_features=None, augmentation_images=None,
+                   augmentation_labels=None, split_labels=True):
+    """Currently depends on test/validation_ratio being 0 when not using test/validation"""
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
-        #else:
-            #total_samples = labels.get_shape().as_list()[0]
 
     total_samples = len(labels)
-
-
-    # calculate and perform random split
-    num_testing = int(total_samples * (1-ratio))
-
     mask = [0] * total_samples
-    mask[:num_testing] = [1] * num_testing
-    random.shuffle(mask)
+    val_mask_num = 1 # this changes depending on whether we are using testing or not
+
+    if test_ratio != 0:
+        # creating a mask [1,1,1,...,0,0,0]
+        num_test = int(total_samples * (test_ratio))
+        mask[:num_test] = [1] * num_test
+        val_mask_num = 2
+
+    if validation_ratio != 0:
+        # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,0,0,0,...,2,2,2]
+        # otherwise we will only have train and validation thus creating a mask as [0,0,0,...,1,1,1]
+        num_val = int(total_samples * (validation_ratio))
+        mask[-num_val:] = [val_mask_num] * num_val
 
     # If we're using a training augmentation set, add them to the training portion
     if augmentation_images is not None and augmentation_labels is not None:
         images = images + augmentation_images
         labels = labels + augmentation_labels
-
         mask = mask + ([0] * len(augmentation_labels))
 
-    train_images, test_images = tf.dynamic_partition(images, mask, 2)
-    train_labels, test_labels = tf.dynamic_partition(labels, mask, 2)
+    # make the split random <-- ESSENTIAL
+    random.shuffle(mask)
 
-    # Also partition moderation features if present
-    train_mf, test_mf = None, None
+    # create partitions, we set train/validation to None if they're not being used
+    if test_ratio != 0 and validation_ratio != 0:
+        train_images, test_images, val_images = tf.dynamic_partition(images, mask, 3)
+        train_labels, test_labels, val_labels = tf.dynamic_partition(labels, mask, 3)
+    elif test_ratio != 0 and validation_ratio == 0:
+        train_images, test_images = tf.dynamic_partition(images, mask, 2)
+        train_labels, test_labels = tf.dynamic_partition(labels, mask, 2)
+        val_images, val_labels = None, None
+    elif test_ratio == 0 and validation_ratio != 0:
+        train_images, val_images = tf.dynamic_partition(images, mask, 2)
+        train_labels, val_labels = tf.dynamic_partition(labels, mask, 2)
+        test_images, test_labels = None, None
+    else: # must be just training, still need queues for rest of dpp code to load/interact with
+        # dynamic_partition returns a list, which is fine in the above cases but in the following case it returns
+        # a list of length 1, hence we index into it with [0] to get what we want
+        train_images = tf.dynamic_partition(images, mask, 1)[0]
+        train_labels = tf.dynamic_partition(images, mask, 1)[0]
+        test_images, test_labels = None, None
+        val_images, val_labels = None, None
 
+    # Also partition moderation features if present <-- NEEDS TO BE FIXED/IMPROVED
+    train_mf, test_mf, val_mf = None, None, None
     if moderation_features is not None:
-        train_mf, test_mf = tf.dynamic_partition(moderation_features, mask, 2)
+        train_mf, test_mf, val_mf = tf.dynamic_partition(moderation_features, mask, 2)
 
-    return train_images, train_labels, test_images, test_labels, train_mf, test_mf
-
+    return train_images, train_labels, train_mf,\
+           test_images, test_labels, test_mf,\
+           val_images, val_labels, val_mf
 
 def label_string_to_tensor(x, batch_size, num_outputs):
     sparse = tf.string_split(x, delimiter=' ')
@@ -67,7 +92,7 @@ def read_csv_labels(file_name, column_number=False, character=','):
 
 def read_csv_rows(file_name, column_number=False, character=','):
     """
-    Reads the rows of a csv file and return sthem as a list.
+    Reads the rows of a csv file and returns them as a list.
 
     read_csv_labels and its variants read column-wise, this function is needed for row-wise parsing
     """

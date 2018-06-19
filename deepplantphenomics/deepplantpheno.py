@@ -21,11 +21,16 @@ class DPPModel(object):
     __has_trained = False
     __save_checkpoints = None
     __save_dir = None
+    __validation = True
+    __testing = True
+    __hyper_param_search = False
 
     # Input options
     __total_classes = 0
     __total_raw_samples = 0
     __total_training_samples = 0
+    __total_validation_samples = 0
+    __total_testing_samples = 0
 
     __image_width = None
     __image_height = None
@@ -65,10 +70,12 @@ class DPPModel(object):
     __all_images = None
     __train_images = None
     __test_images = None
+    __val_images = None
 
     __all_labels = None
     __train_labels = None
     __test_labels = None
+    __val_labels = None
     __split_labels = True
 
     __images_only = False
@@ -78,14 +85,17 @@ class DPPModel(object):
 
     __raw_test_image_files = None
     __raw_train_image_files = None
+    __raw_val_image_files = None
     __raw_test_labels = None
     __raw_train_labels = None
+    __raw_val_labels = None
 
     __all_moderation_features = None
     __has_moderation = False
     __moderation_features_size = None
     __train_moderation_features = None
     __test_moderation_features = None
+    __val_moderation_features = None
 
     __training_augmentation_images = None
     __training_augmentation_labels = None
@@ -107,7 +117,9 @@ class DPPModel(object):
 
     # Network options
     __batch_size = 1
-    __train_test_split = 0.7
+    # __train_test_split = 0.8
+    __test_split = 0.10
+    __validation_split = 0.10
     __maximum_training_batches = None
     __reg_coeff = None
     __optimizer = 'Adam'
@@ -228,13 +240,57 @@ class DPPModel(object):
         self.__num_regression_outputs = num
 
     def set_train_test_split(self, ratio):
-        """Set a ratio for the number of samples to use as training set"""
-        if not isinstance(ratio, float):
-            raise TypeError("ratio must be a float")
+        """DEPRECATED
+        Set a ratio for the number of samples to use as training set"""
+        if not isinstance(ratio, float) and ratio != 1:
+            raise TypeError("ratio must be a float or 1")
         if ratio <= 0 or ratio > 1:
             raise ValueError("ratio must be between 0 and 1")
+        warnings.warn("set_train_test_split() is deprecated and will be removed soon. "+
+                      "Use set_test_split() and set_validation_split() instead. See docs for more information.")
 
-        self.__train_test_split = ratio
+        self.__test_split = 1 - ratio
+        if ratio == 1 or ratio is None:
+            self.__testing = False
+        else:
+            self.__testing = True
+        self.__validation = False
+
+    def set_test_split(self, ratio):
+        """Set a ratio for the number of samples to use as training set"""
+        if not isinstance(ratio, float) and ratio != 0:
+            raise TypeError("ratio must be a float or 0")
+        if ratio < 0 or ratio > 1:
+            raise ValueError("ratio must be between 0 and 1")
+
+        if ratio == 0 or ratio is None:
+            self.__testing = False
+            ratio = 0
+        else:
+            self.__testing = True
+        self.__test_split = ratio
+        if self.__test_split + self.__validation_split > 0.5:
+            warnings.warn('WARNING: Less than 50% of data is being used for training. '+
+                          '({test}% testing and {val}% validation)'.format(test=int(self.__test_split * 100),
+                                                                           val=int(self.__validation_split * 100)))
+
+    def set_validation_split(self, ratio):
+        """Set a ratio for the number of samples to use as training set"""
+        if not isinstance(ratio, float) and ratio != 0:
+            raise TypeError("ratio must be a float or 0")
+        if ratio < 0 or ratio > 1:
+            raise ValueError("ratio must be between 0 and 1")
+
+        if ratio == 0 or ratio is None:
+            self.__validation = False
+            ratio = 0
+        else:
+            self.__validation = True
+        self.__validation_split = ratio
+        if self.__test_split + self.__validation_split > 0.5:
+            warnings.warn('WARNING: Less than 50% of data is being used for training. '+
+                          '({test}% testing and {val}% validation)'.format(test=int(self.__test_split * 100),
+                                                                           val=int(self.__validation_split * 100)))
 
     def set_maximum_training_epochs(self, epochs):
         """Set the max number of training epochs"""
@@ -324,6 +380,7 @@ class DPPModel(object):
             raise RuntimeError("Data needs to be loaded before learning rate decay can be set.")
 
         self.__lr_decay_factor = decay_factor
+        # needs to be reexamined
         self.__lr_decay_epochs = epochs_per_decay * (self.__total_training_samples * self.__train_test_split)
 
     def set_optimizer(self, optimizer):
@@ -484,14 +541,27 @@ class DPPModel(object):
             if self.__images_only:
                 self.__parse_images(self.__raw_image_files)
             elif self.__raw_test_labels is not None:
-                self.__parse_dataset(self.__raw_train_image_files, self.__raw_train_labels,
-                                     self.__raw_test_image_files, self.__raw_test_labels)
+                # currently think of moderation features as None so they are passed in hard-coded
+                self.__parse_dataset(self.__raw_train_image_files, self.__raw_train_labels, None,
+                                     self.__raw_test_image_files, self.__raw_test_labels, None,
+                                     self.__raw_val_image_files, self.__raw_val_labels, None)
+
             else:
-                train_images, train_labels, test_images, test_labels, train_mf, test_mf = \
-                    loaders.split_raw_data(self.__raw_image_files, self.__raw_labels, self.__train_test_split,
-                                           self.__all_moderation_features, self.__training_augmentation_images,
-                                           self.__training_augmentation_labels, self.__split_labels)
-                self.__parse_dataset(train_images, train_labels, test_images, test_labels, train_mf, test_mf)
+                # split the data into train/val/test sets, if there is no validation set or no moderation features
+                # being used they will be returned as 0 (val) or None (moderation features) for the rest of the code
+                # to recognize
+                train_images, train_labels, train_mf,\
+                test_images, test_labels, test_mf,\
+                val_images, val_labels, val_mf,= \
+                    loaders.split_raw_data(self.__raw_image_files, self.__raw_labels, self.__test_split,
+                                           self.__validation_split, self.__all_moderation_features,
+                                           self.__training_augmentation_images, self.__training_augmentation_labels,
+                                           self.__split_labels)
+
+                # parse the images and set the appropriate environment variables
+                self.__parse_dataset(train_images, train_labels, train_mf,
+                                     test_images, test_labels, test_mf,
+                                     val_images, val_labels, val_mf)
 
             self.__log('Creating layer parameters...')
 
@@ -524,9 +594,9 @@ class DPPModel(object):
                 # Take a slice
                 patch_width = self.__patch_width
                 patch_height = self.__patch_height
-                offset_h = np.random.randint(patch_height/2, self.__image_height - (patch_height/2),
+                offset_h = np.random.randint(patch_height//2, self.__image_height - (patch_height//2),
                                              self.__batch_size)
-                offset_w = np.random.randint(patch_width/2, self.__image_width - (patch_width/2),
+                offset_w = np.random.randint(patch_width//2, self.__image_width - (patch_width//2),
                                              self.__batch_size)
                 offsets = [x for x in zip(offset_h, offset_w)]
                 x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
@@ -555,11 +625,13 @@ class DPPModel(object):
 
             # Define cost function
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'softmax cross entropy':
                     sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-
+                # define the cost
                 self.__graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
+                # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'l2':
                     regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
                 elif self.__loss_fn == 'l1':
@@ -568,12 +640,13 @@ class DPPModel(object):
                     regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
                 elif self.__loss_fn == 'log loss':
                     regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
-
+                # define the cost
                 self.__graph_ops['cost'] = tf.add(regression_loss, l2_cost)
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'sigmoid cross entropy':
                     pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
-
+                # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
             # Identify which optimizer we are using
@@ -594,10 +667,12 @@ class DPPModel(object):
                 exit()
 
             # Compute gradients, clip them, the apply the clipped gradients
+            # This is broken up so that we can add gradients to tensorboard
             gradients, variables = zip(*self.__graph_ops['optimizer'].compute_gradients(self.__graph_ops['cost']))
             gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)  # need to make this 5.0 an adjustable hyperparameter
             self.__graph_ops['optimizer'] = self.__graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
 
+            # for classification problems we will compute the training accuracy, this is also used for tensorboard
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
                 correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
@@ -605,62 +680,132 @@ class DPPModel(object):
 
             # Calculate test accuracy
             if self.__has_moderation:
-                x_test, self.__graph_ops['y_test'], mod_w_test = tf.train.batch(
-                    [self.__test_images, self.__test_labels, self.__test_moderation_features],
-                    batch_size=self.__batch_size,
-                    num_threads=self.__num_threads,
-                    capacity=self.__queue_capacity)
+                if self.__testing:
+                    x_test, self.__graph_ops['y_test'], mod_w_test = tf.train.batch(
+                        [self.__test_images, self.__test_labels, self.__test_moderation_features],
+                        batch_size=self.__batch_size,
+                        num_threads=self.__num_threads,
+                        capacity=self.__queue_capacity)
+                if self.__validation:
+                    x_val, self.__graph_ops['y_val'], mod_w_val = tf.train.batch(
+                        [self.__val_images, self.__val_labels, self.__val_moderation_features],
+                        batch_size=self.__batch_size,
+                        num_threads=self.__num_threads,
+                        capacity=self.__queue_capacity)
             else:
-                x_test, self.__graph_ops['y_test'] = tf.train.batch([self.__test_images, self.__test_labels],
-                                                batch_size=self.__batch_size,
-                                                num_threads=self.__num_threads,
-                                                capacity=self.__queue_capacity)
-
+                if self.__testing:
+                    x_test, self.__graph_ops['y_test'] = tf.train.batch([self.__test_images, self.__test_labels],
+                                                                        batch_size=self.__batch_size,
+                                                                        num_threads=self.__num_threads,
+                                                                        capacity=self.__queue_capacity)
+                if self.__validation:
+                    x_val, self.__graph_ops['y_val'] = tf.train.batch([self.__val_images, self.__val_labels],
+                                                                      batch_size=self.__batch_size,
+                                                                      num_threads=self.__num_threads,
+                                                                      capacity=self.__queue_capacity)
+            if self.__testing:
+                x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
+            if self.__validation:
+                x_val = tf.reshape(x_val, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
 
             if self.__problem_type == definitions.ProblemType.REGRESSION:
-                self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'], self.__batch_size, self.__num_regression_outputs)
+                if self.__testing:
+                    self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'],
+                                                                                self.__batch_size,
+                                                                                self.__num_regression_outputs)
+                if self.__validation:
+                    self.__graph_ops['y_val'] = loaders.label_string_to_tensor(self.__graph_ops['y_val'],
+                                                                               self.__batch_size,
+                                                                               self.__num_regression_outputs)
 
-            x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
             if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                self.__graph_ops['y_test'] = tf.reshape(self.__graph_ops['y_test'], shape=[-1, self.__image_height, self.__image_width, 1])
+                if self.__testing:
+                    self.__graph_ops['y_test'] = tf.reshape(self.__graph_ops['y_test'],
+                                                            shape=[-1, self.__image_height, self.__image_width, 1])
+                if self.__validation:
+                    self.__graph_ops['y_val'] = tf.reshape(self.__graph_ops['y_val'],
+                                                           shape=[-1, self.__image_height, self.__image_width, 1])
 
+            # if using patching we need to properly pull patches from the images
             if self.__with_patching:
-                # Take a slice of image. Same size and location as the slice from training.
+                # Take a slice of image. Same size and location (offsets) as the slice from training.
                 patch_width = self.__patch_width
                 patch_height = self.__patch_height
-                x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
-                                                  normalized=False, centered=False)
+                if self.__testing:
+                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
+                                                      normalized=False, centered=False)
+                if self.__validation:
+                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
+                                                      normalized=False, centered=False)
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                    self.__graph_ops['y_test'] = tf.image.extract_glimpse(self.__graph_ops['y_test'],
-                                                                          [patch_height, patch_width], offsets,
-                                                                          normalized=False, centered=False)
+                    if self.__testing:
+                        self.__graph_ops['y_test'] = tf.image.extract_glimpse(self.__graph_ops['y_test'],
+                                                                              [patch_height, patch_width], offsets,
+                                                                              normalized=False, centered=False)
+                    if self.__validation:
+                        self.__graph_ops['y_val'] = tf.image.extract_glimpse(self.__graph_ops['y_val'],
+                                                                              [patch_height, patch_width], offsets,
+                                                                              normalized=False, centered=False)
 
             if self.__has_moderation:
-                self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True, moderation_features=mod_w_test)
+                if self.__testing:
+                    self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
+                                                                             moderation_features=mod_w_test)
+                if self.__validation:
+                    self.__graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                            moderation_features=mod_w_val)
             else:
-                self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                if self.__testing:
+                    self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                if self.__validation:
+                    self.__graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
+            # compute the loss and accuracy based on problem type
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
-                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.__graph_ops['y_test'], 1))
-                self.__graph_ops['test_losses'] = test_correct_predictions
-                self.__graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+                if self.__testing:
+                    test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
+                    test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.__graph_ops['y_test'], 1))
+                    self.__graph_ops['test_losses'] = test_correct_predictions
+                    self.__graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+                if self.__validation:
+                    val_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_val_predicted']), 1)
+                    val_correct_predictions = tf.equal(val_class_predictions, tf.argmax(self.__graph_ops['y_val'], 1))
+                    self.__graph_ops['val_losses'] = val_correct_predictions
+                    self.__graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
-                if self.__num_regression_outputs == 1:
-                    self.__graph_ops['test_losses'] = tf.squeeze(tf.stack(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
-                else:
-                    self.__graph_ops['test_losses'] = self.__l2_norm(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
-
-                self.__graph_ops['test_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['test_losses']))
+                if self.__testing:
+                    if self.__num_regression_outputs == 1:
+                        self.__graph_ops['test_losses'] = tf.squeeze(tf.stack(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
+                    else:
+                        self.__graph_ops['test_losses'] = self.__l2_norm(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
+                if self.__validation:
+                    if self.__num_regression_outputs == 1:
+                        self.__graph_ops['val_losses'] = tf.squeeze(
+                            tf.stack(tf.subtract(self.__graph_ops['x_val_predicted'], self.__graph_ops['y_val'])))
+                    else:
+                        self.__graph_ops['val_losses'] = self.__l2_norm(
+                            tf.subtract(self.__graph_ops['x_val_predicted'], self.__graph_ops['y_val']))
+                #self.__graph_ops['test_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['test_losses']))
+                    self.__graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['val_losses']))
             elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                if self.__testing:
+                    self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test'][:, :, :, 0]), axis=2)
-                self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
-                self.__graph_ops['test_cost'] = tf.reduce_mean(self.__graph_ops['test_losses'])
+                    self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
+                #self.__graph_ops['test_cost'] = tf.reduce_mean(self.__graph_ops['test_losses'])
+                if self.__validation:
+                    self.__graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                        logits=self.__graph_ops['x_val_predicted'], labels=self.__graph_ops['y_val'][:, :, :, 0]),
+                        axis=2)
+                    self.__graph_ops['val_losses'] = tf.transpose(
+                        tf.reduce_mean(self.__graph_ops['val_losses'], axis=1))
+                    self.__graph_ops['val_cost'] = tf.reduce_mean(self.__graph_ops['val_losses'])
+
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
                 self.__log('Creating Tensorboard summaries...')
+
                 # Summaries for any problem type
                 tf.summary.scalar('train/loss', self.__graph_ops['cost'], collections=['custom_summaries'])
                 tf.summary.scalar('train/learning_rate', self.__learning_rate, collections=['custom_summaries'])
@@ -671,45 +816,64 @@ class DPPModel(object):
                 # Summaries for classification problems
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                     tf.summary.scalar('train/accuracy', self.__graph_ops['accuracy'], collections=['custom_summaries'])
-                    tf.summary.scalar('test/accuracy', self.__graph_ops['test_accuracy'], collections=['custom_summaries'])
                     tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
-                    tf.summary.histogram('test/class_predictions', test_class_predictions,
-                                         collections=['custom_summaries'])
+                    if self.__validation:
+                        tf.summary.scalar('validation/accuracy', self.__graph_ops['val_accuracy'],
+                                          collections=['custom_summaries'])
+                        tf.summary.histogram('validation/class_predictions', val_class_predictions,
+                                             collections=['custom_summaries'])
 
                 # Summaries for regression
                 if self.__problem_type == definitions.ProblemType.REGRESSION:
                     if self.__num_regression_outputs == 1:
                         tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
-                        tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
-                        tf.summary.histogram('test/batch_losses', self.__graph_ops['test_losses'], collections=['custom_summaries'])
+                        if self.__validation:
+                            tf.summary.scalar('validation/loss', self.__graph_ops['val_cost'],
+                                              collections=['custom_summaries'])
+                            tf.summary.histogram('validation/batch_losses', self.__graph_ops['val_losses'],
+                                                 collections=['custom_summaries'])
 
                 # Summaries for semantic segmentation
                 # we send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
                 # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                    tf.summary.scalar('test/loss', self.__graph_ops['test_cost'], collections=['custom_summaries'])
                     train_images_summary = self.__get_weights_as_image(
                         tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)),
                         self.__layers[-1].output_size)
                     tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
-                    test_images_summary = self.__get_weights_as_image(
-                        tf.transpose(tf.expand_dims(self.__graph_ops['x_test_predicted'], -1), (1, 2, 3, 0)),
-                        self.__layers[-1].output_size)
-                    tf.summary.image('masks/test', test_images_summary, collections=['custom_summaries'])
+                    if self.__validation:
+                        tf.summary.scalar('validation/loss', self.__graph_ops['val_cost'],
+                                          collections=['custom_summaries'])
+                        val_images_summary = self.__get_weights_as_image(
+                            tf.transpose(tf.expand_dims(self.__graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
+                            self.__layers[-1].output_size)
+                        tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
                     if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
                         tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
                         tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+
+                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                        # and it was found that if you commented the below line then the code wouldn't hang. Never
+                        # fully understood why, as it only happened if you tried running with train/test and no
+                        # validation. But after adding more features and just randomly trying to uncomment the below
+                        # line to see if it would work, it appears to now be working, but still don't know why...
                         tf.summary.histogram('activations/' + layer.name, layer.activations,
                                              collections=['custom_summaries'])
 
                 # Summaries for gradients
-                for index, grad in enumerate(gradients):
-                    tf.summary.histogram("gradients/" + variables[index].name, gradients[index],
-                                         collections=['custom_summaries'])
-                tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+                # the name and tensorboard does not like this so we remove it with the [:-2]
+                # We also currently seem to get None's for gradients when performing a hyperparameter search
+                # and as such it is simply left out for hyper-param searches, needs to be fixed
+                if not self.__hyper_param_search:
+                    for index, grad in enumerate(gradients):
+                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                             collections=['custom_summaries'])
+
+                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
 
                 self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
@@ -759,44 +923,69 @@ class DPPModel(object):
                 for i in range(self.__maximum_training_batches):
                     start_time = time.time()
                     self.__global_epoch = i
-
                     self.__session.run(self.__graph_ops['optimizer'])
-
                     if self.__global_epoch > 0 and self.__global_epoch % self.__report_rate == 0:
                         elapsed = time.time() - start_time
 
                         if self.__tb_dir is not None:
                             summary = self.__session.run(self.__graph_ops['merged'])
                             train_writer.add_summary(summary, i)
+                        if self.__validation:
+                            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                                loss, epoch_accuracy, epoch_val_accuracy = self.__session.run(
+                                    [self.__graph_ops['cost'],
+                                     self.__graph_ops['accuracy'],
+                                     self.__graph_ops['val_accuracy']])
 
-                        if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                            loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
-                                [self.__graph_ops['cost'],
-                                 self.__graph_ops['accuracy'],
-                                 self.__graph_ops['test_accuracy']])
+                                samples_per_sec = self.__batch_size / elapsed
 
-                            samples_per_sec = self.__batch_size / elapsed
+                                self.__log(
+                                    'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
+                                        .format(i,
+                                                i / (self.__total_training_samples / self.__batch_size),
+                                                loss,
+                                                epoch_accuracy,
+                                                samples_per_sec))
+                            elif self.__problem_type == definitions.ProblemType.REGRESSION or \
+                                    self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                                loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
+                                                                            self.__graph_ops['val_cost']])
 
-                            self.__log(
-                                'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
-                                    .format(i,
-                                            i / (self.__total_training_samples / self.__batch_size),
-                                            loss,
-                                            epoch_accuracy,
-                                            samples_per_sec))
-                        elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                                        self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
-                            loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
-                                                                        self.__graph_ops['test_cost']])
+                                samples_per_sec = self.__batch_size / elapsed
 
-                            samples_per_sec = self.__batch_size / elapsed
+                                self.__log(
+                                    'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
+                                        .format(i,
+                                                i / (self.__total_training_samples / self.__batch_size),
+                                                loss,
+                                                samples_per_sec))
+                        else:
+                            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                                loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
+                                    [self.__graph_ops['cost'],
+                                     self.__graph_ops['accuracy']])
 
-                            self.__log(
-                                'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
-                                    .format(i,
-                                            i / (self.__total_training_samples / self.__batch_size),
-                                            loss,
-                                            samples_per_sec))
+                                samples_per_sec = self.__batch_size / elapsed
+
+                                self.__log(
+                                    'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
+                                        .format(i,
+                                                i / (self.__total_training_samples / self.__batch_size),
+                                                loss,
+                                                epoch_accuracy,
+                                                samples_per_sec))
+                            elif self.__problem_type == definitions.ProblemType.REGRESSION or \
+                                            self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                                loss = self.__session.run([self.__graph_ops['cost']])
+
+                                samples_per_sec = self.__batch_size / elapsed
+
+                                self.__log(
+                                    'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
+                                        .format(i,
+                                                i / (self.__total_training_samples / self.__batch_size),
+                                                loss,
+                                                samples_per_sec))
 
                         if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
                             self.save_state(self.__save_dir)
@@ -812,9 +1001,10 @@ class DPPModel(object):
 
                 self.save_state(self.__save_dir)
 
-                final_test_loss = self.compute_full_test_accuracy()
+                final_test_loss = None
+                if self.__testing:
+                    final_test_loss = self.compute_full_test_accuracy()
 
-                # Commented out because I wanted to test on the model directly after training on another dataset.
                 self.shut_down()
 
                 if return_test_loss:
@@ -830,6 +1020,7 @@ class DPPModel(object):
         :param lr_limits: array representing a range of learning rates in the form [low, high]
         :param num_steps: the size of the grid. Larger numbers are exponentially slower.
         """
+        self.__hyper_param_search = True
 
         all_l2_reg = []
         all_lr = []
@@ -982,7 +1173,7 @@ class DPPModel(object):
                     self.__log('All predictions:')
                     self.__log(all_predictions)
 
-                self.__log('Histogram of L2 losses:')
+                self.__log('Histogram of {} losses:'.format(self.__loss_fn))
                 self.__log(hist)
 
                 return abs_mean.astype(np.float32)
@@ -1003,18 +1194,26 @@ class DPPModel(object):
         with self.__graph.as_default():
             pad = 1
             grid_X = 4
-            grid_Y = (self.__batch_size // 4) + 1
+
             # pad X and Y
             x1 = tf.pad(kernel, tf.constant([[pad, 0], [pad, 0], [0, 0], [0, 0]]))
 
-            # when kernel is dynamically shaped at runtime it has [?,?,?,?] dimensions, thus size needs to be
-            # passed in so we have actual dimensions to work with
+            # when kernel is dynamically shaped at runtime it has [?,?,?,?] dimensions which result in None's
+            # thus size needs to be passed in so we have actual dimensions to work with (this is mostly from the
+            # upsampling layer) and grid_Y will be determined by batch size as we want to see each img in the batch
+            # However, for visualizing the weights we wont pass in a size parameter and as a result we need to
+            # compute grid_Y based off what is passed in and not the batch size because we want to see the
+            # convolution grid for each layer, not each batch.
             if size is not None:
+                # this is when visualizing the actual images
+                grid_Y = int(np.ceil(self.__batch_size / 4))
                 # X and Y dimensions, w.r.t. padding
                 Y = size[1] + pad
                 X = size[2] + pad
                 num_channels = size[-1]
             else:
+                # this is when visualizing the weights
+                grid_Y = (kernel.get_shape().as_list()[-1] / 4)
                 # X and Y dimensions, w.r.t. padding
                 Y = kernel.get_shape()[0] + pad
                 X = kernel.get_shape()[1] + pad
@@ -1819,7 +2018,7 @@ class DPPModel(object):
 
         train_labels, train_images = loaders.read_csv_labels_and_ids(os.path.join(train_dir, 'train.txt'), 1, 0,
                                                                          character=' ')
-
+        print('wtf')
         def one_hot(labels, num_classes):
             return [[1 if i==label else 0 for i in range(num_classes)] for label in labels]
 
@@ -1835,6 +2034,7 @@ class DPPModel(object):
         test_labels = one_hot(test_labels, self.__total_classes)
 
         self.__total_raw_samples = len(train_images) + len(test_images)
+        self.__test_split = len(test_images) / self.__total_raw_samples
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Total classes is %d' % self.__total_classes)
@@ -1843,6 +2043,25 @@ class DPPModel(object):
         self.__raw_train_image_files = train_images
         self.__raw_test_labels = test_labels
         self.__raw_train_labels = train_labels
+        print(len(self.__raw_train_image_files), len(self.__raw_train_labels),
+              len(self.__raw_test_image_files), len(self.__raw_test_labels))
+        if not self.__testing:
+            self.__raw_train_image_files.extend(self.__raw_test_image_files)
+            self.__raw_test_image_files = []
+            self.__raw_train_labels.extend(self.__raw_test_labels)
+            self.__raw_test_labels = []
+            self.__test_split = 0
+            print(len(self.__raw_train_image_files), len(self.__raw_train_labels),
+                  len(self.__raw_test_image_files), len(self.__raw_test_labels))
+        if self.__validation:
+            num_val_samples = int(self.__total_raw_samples * self.__validation_split)
+            self.__raw_val_image_files = self.__raw_train_image_files[:num_val_samples]
+            self.__raw_train_image_files = self.__raw_train_image_files[num_val_samples:]
+            self.__raw_val_labels = self.__raw_train_labels[:num_val_samples]
+            self.__raw_train_labels = self.__raw_train_labels[num_val_samples:]
+            print(len(self.__raw_train_image_files), len(self.__raw_train_labels),
+                  len(self.__raw_test_image_files), len(self.__raw_test_labels),
+                  len(self.__raw_val_image_files), len(self.__raw_val_labels))
 
     def load_dataset_from_directory_with_auto_labels(self, dirname):
         """Loads the png images in the given directory, using subdirectories to separate classes."""
@@ -1897,7 +2116,6 @@ class DPPModel(object):
 
             image_files = image_files + image_paths
 
-        print(image_files)
         # Put the image files in the order of the IDs (if there are any labels loaded)
         sorted_paths = []
 
@@ -2067,19 +2285,44 @@ class DPPModel(object):
 
         return images
 
-    def __parse_dataset(self, train_images, train_labels, test_images, test_labels, image_type='png', train_mf=None,
-                        test_mf=None):
+    def __parse_dataset(self, train_images, train_labels, train_mf,
+                        test_images, test_labels, test_mf,
+                        val_images, val_labels, val_mf,
+                        image_type='png'):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self.__graph.as_default():
 
             # house keeping
             if isinstance(train_images, tf.Tensor):
                 self.__total_training_samples = train_images.get_shape().as_list()[0]
+                if self.__testing:
+                    self.__total_testing_samples = test_images.get_shape().as_list()[0]
+                if self.__validation:
+                    self.__total_validation_samples = val_images.get_shape().as_list()[0]
+            elif isinstance(train_images[0], tf.Tensor):
+                self.__total_training_samples = train_images[0].get_shape().as_list()[0]
             else:
                 self.__total_training_samples = len(train_images)
+                if self.__testing:
+                    self.__total_testing_samples = len(test_images)
+                if self.__validation:
+                    self.__total_validation_samples = len(val_images)
 
+            # most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
+            # will have None for size, so we manually calculate it here when that is the case
             if self.__total_training_samples is None:
-                self.__total_training_samples = int(self.__total_raw_samples * self.__train_test_split)
+                self.__total_training_samples = int(self.__total_raw_samples)
+                if self.__testing:
+                    self.__total_testing_samples = int(self.__total_raw_samples * self.__test_split)
+                    self.__total_training_samples = self.__total_training_samples - self.__total_testing_samples
+                if self.__validation:
+                    self.__total_validation_samples = int(self.__total_raw_samples * self.__validation_split)
+                    self.__total_training_samples = self.__total_training_samples - self.__total_validation_samples
+
+            # verbosity
+            self.__log('Total training samples is {0}'.format(self.__total_training_samples))
+            self.__log('Total validation samples is {0}'.format(self.__total_validation_samples))
+            self.__log('Total testing samples is {0}'.format(self.__total_testing_samples))
 
             # moderation features queues
             if train_mf is not None:
@@ -2090,86 +2333,138 @@ class DPPModel(object):
                 test_moderation_queue = tf.train.slice_input_producer([test_mf], shuffle=False)
                 self.__test_moderation_features = tf.cast(test_moderation_queue[0], tf.float32)
 
+            if val_mf is not None:
+                val_moderation_queue = tf.train.slice_input_producer([val_mf], shuffle=False)
+                self.__val_moderation_features = tf.cast(val_moderation_queue[0], tf.float32)
+
             # calculate number of batches to run
             batches_per_epoch = self.__total_training_samples / float(self.__batch_size)
             self.__maximum_training_batches = int(self.__maximum_training_batches * batches_per_epoch)
 
-            self.__log('Batches per epoch: {:f}'.format(batches_per_epoch))
-            self.__log('Running to {0} batches'.format(self.__maximum_training_batches))
-
             if self.__batch_size > self.__total_training_samples:
                 self.__log('Less than one batch in training set, exiting now')
                 exit()
+            self.__log('Batches per epoch: {:f}'.format(batches_per_epoch))
+            self.__log('Running to {0} batches'.format(self.__maximum_training_batches))
 
             # create input queues
             train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
-            test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
+            if self.__testing:
+                test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
+            if self.__validation:
+                val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
             if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
-                self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=1)
-                self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]),
-                                                          channels=1)
-
+                self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]), channels=1)
                 # normalize to 1.0
                 self.__train_labels = tf.image.convert_image_dtype(self.__train_labels, dtype=tf.float32)
-                self.__test_labels = tf.image.convert_image_dtype(self.__test_labels, dtype=tf.float32)
-
                 # resize if we are using that
                 if self.__resize_images:
                     self.__train_labels = tf.image.resize_images(self.__train_labels,
                                                                  [self.__image_height, self.__image_width])
-                    self.__test_labels = tf.image.resize_images(self.__test_labels,
-                                                                [self.__image_height, self.__image_width])
-
                     # make into a binary mask
-                    self.__test_labels = tf.reduce_mean(self.__test_labels, axis=2)
                     self.__train_labels = tf.reduce_mean(self.__train_labels, axis=2)
+
+                # if using testing, do all the above for testing as well
+                if self.__testing:
+                    self.__test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=1)
+                    self.__test_labels = tf.image.convert_image_dtype(self.__test_labels, dtype=tf.float32)
+                    if self.__resize_images:
+                        self.__test_labels = tf.image.resize_images(self.__test_labels,
+                                                                    [self.__image_height, self.__image_width])
+                        self.__test_labels = tf.reduce_mean(self.__test_labels, axis=2)
+                # if using validation, do all the above for validation as well
+                if self.__validation:
+                    self.__val_labels = tf.image.decode_png(tf.read_file(val_input_queue[1]),
+                                                            channels=1)
+                    self.__val_labels = tf.image.convert_image_dtype(self.__val_labels, dtype=tf.float32)
+                    if self.__resize_images:
+                        self.__val_labels = tf.image.resize_images(self.__val_labels,
+                                                                    [self.__image_height, self.__image_width])
+                        self.__val_labels = tf.reduce_mean(self.__val_labels, axis=2)
             else:
-                self.__test_labels = test_input_queue[1]
                 self.__train_labels = train_input_queue[1]
+                if self.__testing:
+                    self.__test_labels = test_input_queue[1]
+                if self.__validation:
+                    self.__val_labels = val_input_queue[1]
 
             # pre-processing for training and testing images
             if image_type is 'jpg':
                 self.__train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
                                                            channels=self.__image_depth)
-                self.__test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
+                if self.__testing:
+                    self.__test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
                                                           channels=self.__image_depth)
+                if self.__validation:
+                    self.__val_images = tf.image.decode_jpeg(tf.read_file(val_input_queue[0]),
+                                                              channels=self.__image_depth)
             else:
                 self.__train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
                                                           channels=self.__image_depth)
-                self.__test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]), channels=self.__image_depth) ## HERE [0]
+                if self.__testing:
+                    self.__test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]),
+                                                             channels=self.__image_depth)
+                if self.__validation:
+                    self.__val_images = tf.image.decode_png(tf.read_file(val_input_queue[0]),
+                                                              channels=self.__image_depth)
 
             # convert images to float and normalize to 1.0
             self.__train_images = tf.image.convert_image_dtype(self.__train_images, dtype=tf.float32)
-            self.__test_images = tf.image.convert_image_dtype(self.__test_images, dtype=tf.float32)
+            if self.__testing:
+                self.__test_images = tf.image.convert_image_dtype(self.__test_images, dtype=tf.float32)
+            if self.__validation:
+                self.__val_images = tf.image.convert_image_dtype(self.__val_images, dtype=tf.float32)
 
             if self.__resize_images is True:
                 self.__train_images = tf.image.resize_images(self.__train_images,
                                                              [self.__image_height, self.__image_width])
-                self.__test_images = tf.image.resize_images(self.__test_images,
-                                                            [self.__image_height, self.__image_width])
+                if self.__testing:
+                    self.__test_images = tf.image.resize_images(self.__test_images,
+                                                                [self.__image_height, self.__image_width])
+                if self.__validation:
+                    self.__val_images = tf.image.resize_images(self.__val_images,
+                                                               [self.__image_height, self.__image_width])
 
             if self.__augmentation_crop is True:
-
                 self.__image_height = int(self.__image_height * self.__crop_amount)
                 self.__image_width = int(self.__image_width * self.__crop_amount)
 
                 self.__train_images = tf.random_crop(self.__train_images, [self.__image_height, self.__image_width, 3])
-                self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
-                                                                            self.__image_width)
+                if self.__testing:
+                    self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
+                                                                                self.__image_width)
+                if self.__validation:
+                    self.__val_images = tf.image.resize_image_with_crop_or_pad(self.__val_images, self.__image_height,
+                                                                                self.__image_width)
 
             if self.__crop_or_pad_images is True:
                 # pad or crop to deal with images of different sizes
-                self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images, self.__image_height,
+                self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images,
+                                                                             self.__image_height,
                                                                              self.__image_width)
-                self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images, self.__image_height,
-                                                                            self.__image_width)
+                if self.__testing:
+                    self.__test_images = tf.image.resize_image_with_crop_or_pad(self.__test_images,
+                                                                                self.__image_height,
+                                                                                self.__image_width)
+                if self.__validation:
+                    self.__val_images = tf.image.resize_image_with_crop_or_pad(self.__val_images,
+                                                                               self.__image_height,
+                                                                               self.__image_width)
 
+                # if doing semantic segmentation, then the corresponding mask would also need to be cropped/padded
                 if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                     self.__train_labels = tf.image.resize_image_with_crop_or_pad(self.__train_labels,
-                                                         self.__image_height, self.__image_width)
-                    self.__test_labels = tf.image.resize_image_with_crop_or_pad(self.__test_labels,
-                                                        self.__image_height, self.__image_width)
+                                                                                 self.__image_height,
+                                                                                 self.__image_width)
+                    if self.__testing:
+                        self.__test_labels = tf.image.resize_image_with_crop_or_pad(self.__test_labels,
+                                                                                    self.__image_height,
+                                                                                    self.__image_width)
+                    if self.__validation:
+                        self.__val_labels = tf.image.resize_image_with_crop_or_pad(self.__val_labels,
+                                                                                   self.__image_height,
+                                                                                   self.__image_width)
 
             if self.__augmentation_flip_horizontal is True:
                 # apply flip horizontal augmentation
@@ -2186,11 +2481,18 @@ class DPPModel(object):
 
             # mean-center all inputs
             self.__train_images = tf.image.per_image_standardization(self.__train_images)
-            self.__test_images = tf.image.per_image_standardization(self.__test_images)
+            if self.__testing:
+                self.__test_images = tf.image.per_image_standardization(self.__test_images)
+            if self.__validation:
+                self.__val_images = tf.image.per_image_standardization(self.__val_images)
 
             # define the shape of the image tensors so it matches the shape of the images
             self.__train_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
-            self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+            if self.__testing:
+                self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+            if self.__validation:
+                self.__val_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
+
 
 
     def __parse_images(self, images, image_type='png'):
