@@ -1,16 +1,17 @@
 import tensorflow as tf
 import math
-
+import copy
 
 class convLayer(object):
-    def __init__(self, name, input_size, filter_dimension, stride_length, activation_function, initializer, regularization_coefficient):
+    def __init__(self, name, input_size, filter_dimension, stride_length,
+                 activation_function, initializer, regularization_coefficient):
         self.name = name
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
         self.__activation_function = activation_function
         self.__initializer = initializer
         self.input_size = input_size
-        self.output_size = input_size
+        self.output_size = copy.deepcopy(input_size)
         self.regularization_coefficient = regularization_coefficient
 
         padding = 2*(math.floor(filter_dimension[0] / 2))
@@ -48,6 +49,10 @@ class convLayer(object):
             activations = tf.nn.relu(activations)
         elif self.__activation_function == 'tanh':
             activations = tf.tanh(activations)
+        elif self.__activation_function == 'lrelu':
+            activations = tf.nn.leaky_relu(activations)
+        elif self.__activation_function == 'selu':
+            activations = tf.nn.selu(activations)
 
         self.activations = activations
 
@@ -117,10 +122,14 @@ class upsampleLayer(object):
         activations = tf.nn.bias_add(activations, self.biases)
 
         # Apply a non-linearity specified by the user
-        if self.activation_function == 'relu':
+        if self.__activation_function == 'relu':
             activations = tf.nn.relu(activations)
-        elif self.activation_function == 'tanh':
+        elif self.__activation_function == 'tanh':
             activations = tf.tanh(activations)
+        elif self.__activation_function == 'lrelu':
+            activations = tf.nn.leaky_relu(activations)
+        elif self.__activation_function == 'selu':
+            activations = tf.nn.selu(activations)
 
         self.activations = activations
 
@@ -206,6 +215,10 @@ class fullyConnectedLayer(object):
             activations = tf.nn.relu(activations)
         elif self.__activation_function == 'tanh':
             activations = tf.tanh(activations)
+        elif self.__activation_function == 'lrelu':
+            activations = tf.nn.leaky_relu(activations)
+        elif self.__activation_function == 'selu':
+            activations = tf.nn.selu(activations)
 
         self.activations = activations
 
@@ -307,6 +320,7 @@ class batchNormLayer(object):
         else:
             mean2, var2 = mean, var
 
-        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon, name=self.name+'_batchnorm')
+        x = tf.nn.batch_normalization(x, mean2, var2, self.__offset, self.__scale, self.__epsilon,
+                                      name=self.name+'_batchnorm')
 
         return x

@@ -54,7 +54,7 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         # dynamic_partition returns a list, which is fine in the above cases but in the following case it returns
         # a list of length 1, hence we index into it with [0] to get what we want
         train_images = tf.dynamic_partition(images, mask, 1)[0]
-        train_labels = tf.dynamic_partition(images, mask, 1)[0]
+        train_labels = tf.dynamic_partition(labels, mask, 1)[0]
         test_images, test_labels = None, None
         val_images, val_labels = None, None
 
@@ -67,10 +67,13 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
            test_images, test_labels, test_mf,\
            val_images, val_labels, val_mf
 
-def label_string_to_tensor(x, batch_size, num_outputs):
+def label_string_to_tensor(x, batch_size, num_outputs=None):
     sparse = tf.string_split(x, delimiter=' ')
     values = tf.string_to_number(sparse.values)
-    dense = tf.reshape(values, (batch_size, num_outputs))
+    if num_outputs is None:
+        dense = tf.reshape(values, [batch_size, -1])
+    else:
+        dense = tf.reshape(values, (batch_size, num_outputs))
 
     return dense
 
@@ -183,7 +186,7 @@ def pascal_voc_coordinates_to_pcv_coordinates(img_height, img_width, coords):
     w_adj = int(x_max - img_width)
     h_adj = int(y_max - img_height)
 
-    return (x_adj, y_adj, w_adj, h_adj)
+    return [x_adj, y_adj, w_adj, h_adj]
 
 
 def box_coordinates_to_pascal_voc_coordinates(coords):
@@ -194,3 +197,18 @@ def box_coordinates_to_pascal_voc_coordinates(coords):
     max_y = coords[5]
 
     return (min_x, max_x, min_y, max_y)
+
+def box_coordinates_to_xywh_coordinates(coords):
+    """Converts x1,y1,x2,y2 to x,y,w,h where x,y is center point and w,h is width and height of the box"""
+    x1 = int(coords[0])
+    y1 = int(coords[1])
+    x2 = int(coords[4])
+    y2 = int(coords[5])
+
+    w = x2 - x1
+    h = y2 - y1
+    x = int(w/2 + x1)
+    y = int(h/2 + y1)
+
+
+    return (x, y, w, h)
