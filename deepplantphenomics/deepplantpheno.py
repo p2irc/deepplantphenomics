@@ -133,22 +133,13 @@ class DPPModel(object):
 
     __num_regression_outputs = 1
 
-    # Yolo parameters
+    # Yolo parameters, defined in set_yolo_parameters
     __grid_w = None
     __grid_h = None
-    __coord_scale = None
-    __true_boxes = None
-    # Yolo constants
-    __LABELS = None # defined in set_yolo_paramters
+    __LABELS = None
     __NUM_CLASSES = None
-    __TRUE_BOX_BUFFER = 50
-    __NO_OBJECT_SCALE = 1.0
-    __OBJECT_SCALE = 5.0
-    __CLASS_SCALE = 1.0
-    __COORD_SCALE = 1.0
-    __WARM_UP_BATCHES = 0
-    __ANCHORS = [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828]
-    __BOX = 1
+    __ANCHORS = None
+    __NUM_BOXES = None
 
     # Wrapper options
     __debug = None
@@ -552,14 +543,21 @@ class DPPModel(object):
         self.__patch_width = width
         self.__with_patching = True
 
-    def set_yolo_parameters(self, grid_size, labels, anchors):
+    def set_yolo_parameters(self, grid_size, labels, anchors, num_boxes=5):
         self.__grid_w = grid_size
         self.__grid_h = grid_size
-
         self.__LABELS = labels
         self.__NUM_CLASSES = len(labels)
+        self.__NUM_BOXES = num_boxes
 
-        self.__ANCHORS = anchors
+        # scale anchors to grid size
+        self.__ANCHORS = []
+        scale_w = self.__grid_w / self.__image_width_original
+        scale_h = self.__grid_h / self.__image_height_original
+        for anchor in anchors:
+            w = anchor[0] * scale_w
+            h = anchor[1] * scale_h
+            self.__ANCHORS.append((w, h))
 
     def _yolo_loss_datlife(self, y_true, y_pred):
         pred_boxes = y_pred[..., 1:5]
@@ -567,7 +565,7 @@ class DPPModel(object):
         pred_classes = y_pred[..., 0]
 
 
-    def _yolov2_loss_function(self, y_true, y_pred, lambda_coord=10, lambda_noobj=0.5):
+    def _yolov2_loss_function(self, y_true, y_pred, lambda_coord=5, lambda_noobj=0.5):
         """Loss function based on YOLO version 1. (2 now.... FIXXXXX)
         See the paper for details: https://pjreddie.com/media/files/papers/yolo.pdf
 
@@ -578,30 +576,32 @@ class DPPModel(object):
 
         y_pred:
         [x,y,w,h,conf,classes...]"""
-
-        scale_w = self.__grid_w / self.__image_width_original
-        scale_h = self.__grid_h / self.__image_height_original
-        prior_boxes = self.__ANCHORS
-
         def _compute_iou(self, pred_box, true_box):
             """Helper function to compute the intersection over union of pred_box and true_box
             pred_box and true_box represent multiple boxes with coords being x,y,w,h (0-indexed 0-3)"""
+            ## currently using newaxis since tensorflow is auto squeezing for some reason, these will need to be
+            ## removed when using training images that have more than one object per image
             # numerator
             # get coords of intersection rectangle, then compute intersection area
-            x1 = tf.maximum(pred_box[..., 0] - 0.5 * pred_box[..., 2], true_box[..., 0] - 0.5 * true_box[..., 2])
-            y1 = tf.maximum(pred_box[..., 1] - 0.5 * pred_box[..., 3], true_box[..., 1] - 0.5 * true_box[..., 3])
-            x2 = tf.minimum(pred_box[..., 0] + 0.5 * pred_box[..., 2], true_box[..., 0] + 0.5 * true_box[..., 2])
-            y2 = tf.minimum(pred_box[..., 1] + 0.5 * pred_box[..., 3], true_box[..., 1] + 0.5 * true_box[..., 3])
+            x1 = tf.maximum(pred_box[..., 0, :] - 0.5 * pred_box[..., 2, :],
+                            true_box[..., tf.newaxis, 0] - 0.5 * true_box[..., tf.newaxis, 2])
+            y1 = tf.maximum(pred_box[..., 1, :] - 0.5 * pred_box[..., 3, :],
+                            true_box[..., tf.newaxis, 1] - 0.5 * true_box[..., tf.newaxis, 3])
+            x2 = tf.minimum(pred_box[..., 0, :] + 0.5 * pred_box[..., 2, :],
+                            true_box[..., tf.newaxis, 0] + 0.5 * true_box[..., tf.newaxis, 2])
+            y2 = tf.minimum(pred_box[..., 1, :] + 0.5 * pred_box[..., 3, :],
+                            true_box[..., tf.newaxis, 1] + 0.5 * true_box[..., tf.newaxis, 3])
             intersection_area = tf.multiply(tf.maximum(0., x2 - x1), tf.maximum(0., y2 - y1))
             # denominator
             # compute area of pred and truth, compute union area
-            pred_area = tf.multiply(pred_box[..., 2], pred_box[..., 3])
+            pred_area = tf.multiply(pred_box[..., 2, :], pred_box[..., 3, :])
             true_area = tf.multiply(true_box[..., 2], true_box[..., 3])
-            union_area = tf.subtract(tf.add(pred_area, true_area), intersection_area)
+            union_area = tf.subtract(tf.add(pred_area, true_area[..., tf.newaxis, :]), intersection_area)
             # compute iou
             iou = tf.divide(intersection_area, union_area)
             return iou
 
+        prior_boxes = tf.convert_to_tensor(self.__ANCHORS)
         y_pred = tf.reshape(y_pred, [self.__batch_size, self.__grid_w * self.__grid_h, -1])
 
         ### object/no-object masks ###
@@ -612,66 +612,77 @@ class DPPModel(object):
         obj_mask = tf.cast(tf.reduce_sum(y_true[..., self.__NUM_CLASSES+4:], 1), dtype=bool)
         no_obj_mask = tf.logical_not(obj_mask)
         obj_pred = tf.boolean_mask(y_pred, obj_mask)
+        obj_pred = tf.reshape(obj_pred, [self.__batch_size, -1, 5*self.__NUM_BOXES+self.__NUM_CLASSES])
         no_obj_pred = tf.boolean_mask(y_pred, no_obj_mask)
+        no_obj_pred = tf.reshape(no_obj_pred, [self.__batch_size, -1, 5*self.__NUM_BOXES+self.__NUM_CLASSES])
 
         ### bbox coordinate loss ###
         # build a tensor of the predicted bounding boxes
-        # [class,x,y,w1,h1,x,y,w2,h2,x,y,w3,h3,...,conf1,conf2,conf3,...]
-        pred_classes = obj_pred[..., 5]
+        # [x1,y1,w1,h1,conf1,x2,y2,w2,h2,conf2,x3,y3,w3,h3,conf3,...,classes...]
+        pred_classes = obj_pred[..., self.__NUM_BOXES*5:]
+        obj_pred = tf.reshape(obj_pred[..., 0:self.__NUM_BOXES*5], [self.__batch_size, -1, self.__NUM_BOXES, 5])
+        no_obj_pred = tf.reshape(no_obj_pred[..., 0:self.__NUM_BOXES*5], [self.__batch_size, -1, self.__NUM_BOXES, 5])
         t_x, t_y, t_w, t_h = obj_pred[..., 0], obj_pred[..., 1], obj_pred[..., 2], obj_pred[..., 3]
         t_o = obj_pred[..., 4]
         pred_x = tf.sigmoid(t_x) + 0.0001
         pred_y = tf.sigmoid(t_y) + 0.0001
-        pred_w = tf.exp(t_w) + 0.0001
-        pred_h = tf.exp(t_h) + 0.0001
-        conf = tf.sigmoid(t_o) + 0.0001
-        predicted_boxes = tf.stack([pred_x, pred_y, pred_w, pred_h, conf, pred_classes], axis=1)
+        pred_w = (tf.exp(t_w) + 0.0001) * prior_boxes[:,0]
+        pred_h = (tf.exp(t_h) + 0.0001) * prior_boxes[:,1]
+        pred_conf = tf.sigmoid(t_o) + 0.0001
+        predicted_boxes = tf.stack([pred_x, pred_y, pred_w, pred_h, pred_conf], axis=3)
         # find responsible boxes by computing iou's and select the best one
-        # first_boxes = grids_i[:,1:5]
-        # second_boxes = grids_i[:,5:9]
-        # first_boxes_iou = _compute_iou(self, first_boxes, single_true[:,1:5])
-        # second_boxes_iou = _compute_iou(self, second_boxes, single_true[:,1:5])
-        # greater_boxes = tf.greater(first_boxes_iou, second_boxes_iou)
-        # responsible_boxes = tf.where(greater_boxes, first_boxes, second_boxes)
-        responsible_boxes = predicted_boxes[..., 0:4]
+        ious = _compute_iou(self, predicted_boxes, y_true[..., self.__NUM_CLASSES:self.__NUM_CLASSES+4])
+        greatest_iou_indices = tf.argmax(ious, 2)
+        argmax_one_hot = tf.one_hot(indices=greatest_iou_indices, depth=5)
+        resp_box_mask = tf.cast(argmax_one_hot, dtype=bool)
+        responsible_boxes = tf.boolean_mask(predicted_boxes, resp_box_mask)
         # compute loss on responsible boxes
-        loss_xy = tf.square(tf.subtract(tf.squeeze(responsible_boxes[..., 0:2]),
+        loss_xy = tf.square(tf.subtract(responsible_boxes[..., 0:2],
                                         tf.squeeze(y_true[...,self.__NUM_CLASSES:self.__NUM_CLASSES+2])))
-        loss_wh = tf.square(tf.subtract(tf.sqrt(tf.squeeze(responsible_boxes[..., 2:4])),
+        loss_wh = tf.square(tf.subtract(tf.sqrt(responsible_boxes[..., 2:4]),
                                         tf.sqrt(tf.squeeze(y_true[..., self.__NUM_CLASSES+2:self.__NUM_CLASSES+4]))))
-        coord_loss = lambda_coord * tf.reduce_sum(tf.add(loss_xy, loss_wh))
+        # coord_loss = lambda_coord * tf.reduce_sum(tf.add(loss_xy, loss_wh))
+        coord_loss = tf.reduce_sum(tf.add(loss_xy, loss_wh))
 
         ### confidence loss ###
         # grids that do contain an object, 1 * iou means we simply take the difference between the
-        # responsible box iou's and the predicted confidence
-        # responsible_ious = tf.where(greater_boxes, first_boxes_iou, second_boxes_iou)
-        # responsible_pred_confs = tf.where(greater_boxes, grids_i[:,-2], grids_i[:,-1])
-        responsible_ious = _compute_iou(self, tf.squeeze(responsible_boxes),
-                                              tf.squeeze(y_true[..., self.__NUM_CLASSES:self.__NUM_CLASSES+4]))
-        responsible_pred_confs = predicted_boxes[..., 4]
-        loss_obj = lambda_coord * tf.reduce_sum(tf.square(tf.subtract(responsible_ious, responsible_pred_confs)))
+        # iou's and the predicted confidence
+        non_resp_box_mask = tf.logical_not(resp_box_mask)
+        non_responsible_boxes = tf.boolean_mask(predicted_boxes, non_resp_box_mask)
+        non_responsible_ious = tf.boolean_mask(ious, non_resp_box_mask)
+        loss1 = tf.reduce_sum(tf.square(1 - responsible_boxes[..., 4]))
+        loss2 = tf.reduce_sum(tf.square(tf.subtract(non_responsible_ious, non_responsible_boxes[..., 4])))
+        loss_obj = loss1 + loss2
+
+        # loss_obj = tf.reduce_sum(tf.square(tf.subtract(ious, predicted_boxes[...,4])))
+
         # grids that do not contain an object, 0 * iou means we simply take the predicted confidences of the
         # grids that do not have an object and square and sum (because they should be 0)
         no_obj_confs = tf.sigmoid(no_obj_pred[..., 4])
-        loss_no_obj = lambda_noobj * tf.reduce_sum(tf.square(no_obj_confs))
+        no_obj_num_grids = tf.shape(no_obj_confs)[1] # [batch_size, number_of_grids_without_an_object, 5]
+        loss_no_obj =  lambda_noobj * tf.cast(1/(no_obj_num_grids*5), dtype='float32') *\
+                       tf.reduce_sum(tf.square(no_obj_confs))
         conf_loss = tf.add(loss_obj, loss_no_obj)
 
         ### classification loss ###
         # currently only one class, plant, will need to be made more general for multi-class in the future
-        class_probs_pred = tf.nn.softmax(predicted_boxes[..., 5:])
-        class_diffs = tf.subtract(tf.squeeze(y_true[..., 0:self.__NUM_CLASSES]), tf.squeeze(class_probs_pred))
+        class_probs_pred = tf.nn.softmax(pred_classes)
+        class_diffs = tf.subtract(y_true[..., 0:self.__NUM_CLASSES], class_probs_pred)
         class_loss = tf.reduce_sum(tf.square(class_diffs))
 
         total_loss = coord_loss + conf_loss + class_loss
 
-        ### for some checking ###
+        ### for some debug/checking ###
         # init_op = tf.global_variables_initializer()
         # self.__session.run(init_op)
         # self.__initialize_queue_runners()
         # print('printing losses')
-        # print(self.__session.run(coord_loss))
-        # print(self.__session.run(conf_loss))
-        # print(self.__session.run(class_loss))
+        # print(self.__session.run([loss_obj, loss_no_obj]))
+        # print(self.__session.run([coord_loss, conf_loss, class_loss]))
+        # print(self.__session.run([loss_obj, loss_no_obj]))
+        # print(self.__session.run([coord_loss, conf_loss, class_loss]))
+        # print(self.__session.run([loss_obj, loss_no_obj]))
+        # print(self.__session.run([coord_loss, conf_loss, class_loss]))
 
         return total_loss
 
@@ -1199,13 +1210,12 @@ class DPPModel(object):
                 # the name and tensorboard does not like this so we remove it with the [:-2]
                 # We also currently seem to get None's for gradients when performing a hyperparameter search
                 # and as such it is simply left out for hyper-param searches, needs to be fixed
-                # if not self.__hyper_param_search:
-                #     print(gradients)
-                #     for index, grad in enumerate(gradients):
-                #         tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                #                              collections=['custom_summaries'])
-                #
-                #     tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+                if not self.__hyper_param_search:
+                    for index, grad in enumerate(gradients):
+                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                             collections=['custom_summaries'])
+
+                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
 
                 self.__graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
@@ -1441,7 +1451,7 @@ class DPPModel(object):
             all_predictions = np.empty(shape=(self.__num_regression_outputs))
             if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                 all_predictions = np.empty(shape=(self.__batch_size,
-                                                  self.__grid_w*self.__grid_h*(5*self.__BOX + self.__NUM_CLASSES)))
+                                                  self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES + self.__NUM_CLASSES)))
 
             # Main test loop
             for i in range(num_batches):
@@ -1674,7 +1684,7 @@ class DPPModel(object):
                 else:
                     total_outputs = np.empty([1, self.__image_height, self.__image_width])
             elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
-                total_outputs = np.empty([1, self.__grid_w*self.__grid_h*(5*self.__BOX+self.__NUM_CLASSES)])
+                total_outputs = np.empty([1, self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES+self.__NUM_CLASSES)])
                 # total_outputs = np.empty([1, self.__last_layer().output_size])
             else:
                 warnings.warn('Problem type is not recognized')
@@ -2150,9 +2160,9 @@ class DPPModel(object):
                 filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
             elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                 # yolo S x S x (5B + K)
-                num_out = self.__grid_w * self.__grid_h * (5*self.__BOX + self.__NUM_CLASSES)
+                num_out = self.__grid_w * self.__grid_h * (5*self.__NUM_BOXES + self.__NUM_CLASSES)
                 filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]),
-                                    (5*self.__BOX + self.__NUM_CLASSES)]
+                                    (5*self.__NUM_BOXES + self.__NUM_CLASSES)]
             else:
                 warnings.warn('Problem type is not recognized')
                 exit()
@@ -2589,8 +2599,8 @@ class DPPModel(object):
         #     grid_pos = np.dot(grid_arr, np.arange(49))
         #     x = int((boxes[i * 54 + 1] + grid_pos % 7) * 2454 / 7)
         #     y = int((boxes[i * 54 + 2] + grid_pos // 7) * 2056 / 7)
-        #     w = boxes[i * 54 + 3] * self.__ANCHORS[0] * 2454/448
-        #     h = boxes[i * 54 + 4] * self.__ANCHORS[1] * 2056/448
+        #     w = boxes[i * 54 + 3] * 2454/7
+        #     h = boxes[i * 54 + 4] * 2056/7
         #
         #     p1 = (int(x - w/2),
         #           int(y - h/2))
@@ -2742,13 +2752,22 @@ class DPPModel(object):
                     y_grid = y_center * scale_ratio_h
                     x_grid_offset, x_grid_loc = np.modf(x_grid)
                     y_grid_offset, y_grid_loc = np.modf(y_grid)
-                    # w and h ratios from anchor box
-                    w_ratio = w / self.__ANCHORS[0]
-                    h_ratio = h / self.__ANCHORS[1]
+                    # # w and h ratios from anchor box
+                    # w_ratio = w / self.__ANCHORS[1][0]
+                    # h_ratio = h / self.__ANCHORS[1][1]
+                    # curr_box.append(x_grid_offset)
+                    # curr_box.append(y_grid_offset)
+                    # curr_box.append(w_ratio)
+                    # curr_box.append(h_ratio)
+
+                    # w and h values on grid scale
+                    w_grid = w * scale_ratio_w
+                    h_grid = h * scale_ratio_h
                     curr_box.append(x_grid_offset)
                     curr_box.append(y_grid_offset)
-                    curr_box.append(w_ratio)
-                    curr_box.append(h_ratio)
+                    curr_box.append(w_grid)
+                    curr_box.append(h_grid)
+
                     # add one-hot grid-cell location
                     # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
                     # would be 4 (or 3 when 0-indexing)
