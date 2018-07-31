@@ -14,134 +14,6 @@ import copy
 import matplotlib.pyplot as plt
 
 class DPPModel(object):
-    # Operation settings
-    __problem_type = definitions.ProblemType.CLASSIFICATION
-    __loss_fn = 'softmax cross entropy'
-    __with_patching = False
-    __has_trained = False
-    __save_checkpoints = None
-    __save_dir = None
-    __validation = True
-    __testing = True
-    __hyper_param_search = False
-
-    # Input options
-    __total_classes = 0
-    __total_raw_samples = 0
-    __total_training_samples = 0
-    __total_validation_samples = 0
-    __total_testing_samples = 0
-
-    __image_width = None
-    __image_height = None
-    __image_width_original = None
-    __image_height_original = None
-    __image_depth = None
-    __patch_height = None
-    __patch_width = None
-
-    __crop_or_pad_images = False
-    __resize_images = False
-    __preprocessing_steps = []
-
-    __processed_images_dir = './DPP-Processed'
-
-    # supported implementations, we may add more to in future
-    __supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
-    __supported_preprocessing_steps = ['auto-segmentation']
-    __supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
-    __supported_weight_initializers = ['normal', 'xavier']
-    __supported_activation_functions = ['relu', 'tanh']
-    __supported_pooling_types = ['max', 'avg']
-    __supported_loss_fns_cls = ['softmax cross entropy']
-    __supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']
-    __supported_loss_fns_ss = ['sigmoid cross entropy']
-
-    # Augmentation options
-    __augmentation_flip_horizontal = False
-    __augmentation_flip_vertical = False
-    __augmentation_crop = False
-    __augmentation_contrast = False
-    __crop_amount = 0.75
-
-    # Dataset storage
-    __all_ids = None
-
-    __all_images = None
-    __train_images = None
-    __test_images = None
-    __val_images = None
-
-    __all_labels = None
-    __train_labels = None
-    __test_labels = None
-    __val_labels = None
-    __split_labels = True
-
-    __images_only = False
-
-    __raw_image_files = None
-    __raw_labels = None
-
-    __raw_test_image_files = None
-    __raw_train_image_files = None
-    __raw_val_image_files = None
-    __raw_test_labels = None
-    __raw_train_labels = None
-    __raw_val_labels = None
-
-    __all_moderation_features = None
-    __has_moderation = False
-    __moderation_features_size = None
-    __train_moderation_features = None
-    __test_moderation_features = None
-    __val_moderation_features = None
-
-    __training_augmentation_images = None
-    __training_augmentation_labels = None
-
-    # Network internal representation
-    __session = None
-    __graph = None
-    __graph_ops = {}
-    __layers = []
-    __global_epoch = 0
-
-    __num_layers_norm = 0
-    __num_layers_conv = 0
-    __num_layers_upsample = 0
-    __num_layers_pool = 0
-    __num_layers_fc = 0
-    __num_layers_dropout = 0
-    __num_layers_batchnorm = 0
-
-    # Network options
-    __batch_size = 1
-    # __train_test_split = 0.8
-    __test_split = 0.10
-    __validation_split = 0.10
-    __maximum_training_batches = None
-    __reg_coeff = None
-    __optimizer = 'Adam'
-    __weight_initializer = 'normal'
-
-    __learning_rate = 0.01
-    __lr_decay_factor = None
-    __lr_decay_epochs = None
-
-    __num_regression_outputs = 1
-
-    # Wrapper options
-    __debug = None
-    __load_from_saved = None
-    __tb_dir = None
-    __queue_capacity = 50
-    __report_rate = None
-
-    # Multithreading
-    __num_threads = 1
-    __coord = None
-    __threads = None
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -158,6 +30,134 @@ class DPPModel(object):
         :param report_rate: Set the frequency at which progress is reported during training (also the rate at which new
         timepoints are recorded to Tensorboard).
         """
+        # Operation settings
+        self.__problem_type = definitions.ProblemType.CLASSIFICATION
+        self.__loss_fn = 'softmax cross entropy'
+        self.__with_patching = False
+        self.__has_trained = False
+        self.__save_checkpoints = None
+        self.__save_dir = None
+        self.__validation = True
+        self.__testing = True
+        self.__hyper_param_search = False
+
+        # Input options
+        self.__total_classes = 0
+        self.__total_raw_samples = 0
+        self.__total_training_samples = 0
+        self.__total_validation_samples = 0
+        self.__total_testing_samples = 0
+
+        self.__image_width = None
+        self.__image_height = None
+        self.__image_width_original = None
+        self.__image_height_original = None
+        self.__image_depth = None
+        self.__patch_height = None
+        self.__patch_width = None
+
+        self.__crop_or_pad_images = False
+        self.__resize_images = False
+        self.__preprocessing_steps = []
+
+        self.__processed_images_dir = './DPP-Processed'
+
+        # supported implementations, we may add more to in future
+        self.__supported_problem_types = ['classification', 'regression', 'semantic_segmentation']
+        self.__supported_preprocessing_steps = ['auto-segmentation']
+        self.__supported_optimizers = ['Adam', 'Adagrad', 'Adadelta', 'SGD']
+        self.__supported_weight_initializers = ['normal', 'xavier']
+        self.__supported_activation_functions = ['relu', 'tanh']
+        self.__supported_pooling_types = ['max', 'avg']
+        self.__supported_loss_fns_cls = ['softmax cross entropy']
+        self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']
+        self.__supported_loss_fns_ss = ['sigmoid cross entropy']
+
+        # Augmentation options
+        self.__augmentation_flip_horizontal = False
+        self.__augmentation_flip_vertical = False
+        self.__augmentation_crop = False
+        self.__augmentation_contrast = False
+        self.__crop_amount = 0.75
+
+        # Dataset storage
+        self.__all_ids = None
+
+        self.__all_images = None
+        self.__train_images = None
+        self.__test_images = None
+        self.__val_images = None
+
+        self.__all_labels = None
+        self.__train_labels = None
+        self.__test_labels = None
+        self.__val_labels = None
+        self.__split_labels = True
+
+        self.__images_only = False
+
+        self.__raw_image_files = None
+        self.__raw_labels = None
+
+        self.__raw_test_image_files = None
+        self.__raw_train_image_files = None
+        self.__raw_val_image_files = None
+        self.__raw_test_labels = None
+        self.__raw_train_labels = None
+        self.__raw_val_labels = None
+
+        self.__all_moderation_features = None
+        self.__has_moderation = False
+        self.__moderation_features_size = None
+        self.__train_moderation_features = None
+        self.__test_moderation_features = None
+        self.__val_moderation_features = None
+
+        self.__training_augmentation_images = None
+        self.__training_augmentation_labels = None
+
+        # Network internal representation
+        self.__session = None
+        self.__graph = None
+        self.__graph_ops = {}
+        self.__layers = []
+        self.__global_epoch = 0
+
+        self.__num_layers_norm = 0
+        self.__num_layers_conv = 0
+        self.__num_layers_upsample = 0
+        self.__num_layers_pool = 0
+        self.__num_layers_fc = 0
+        self.__num_layers_dropout = 0
+        self.__num_layers_batchnorm = 0
+
+        # Network options
+        self.__batch_size = 1
+        # __train_test_split = 0.8
+        self.__test_split = 0.10
+        self.__validation_split = 0.10
+        self.__maximum_training_batches = None
+        self.__reg_coeff = None
+        self.__optimizer = 'Adam'
+        self.__weight_initializer = 'normal'
+
+        self.__learning_rate = 0.01
+        self.__lr_decay_factor = None
+        self.__lr_decay_epochs = None
+
+        self.__num_regression_outputs = 1
+
+        # Wrapper options
+        self.__debug = None
+        self.__load_from_saved = None
+        self.__tb_dir = None
+        self.__queue_capacity = 50
+        self.__report_rate = None
+
+        # Multithreading
+        self.__num_threads = 1
+        self.__coord = None
+        self.__threads = None
 
         self.__debug = debug
         self.__load_from_saved = load_from_saved
