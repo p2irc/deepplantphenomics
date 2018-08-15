@@ -11,8 +11,6 @@ import datetime
 import time
 import warnings
 import copy
-import cv2
-import matplotlib.pyplot as plt
 
 class DPPModel(object):
     # Operation settings
@@ -526,8 +524,6 @@ class DPPModel(object):
             exit()
 
     def set_patch_size(self, height, width):
-        # if self.__problem_type != definitions.ProblemType.SEMANTICSEGMETNATION:
-        #     throw RuntimeError
         if not isinstance(height, int):
             raise TypeError("height must be an int")
         if height <= 0:
@@ -558,17 +554,19 @@ class DPPModel(object):
             self.__ANCHORS.append((w, h))
 
 
-    def _yolo_loss_function(self, y_true, y_pred, lambda_coord=5, lambda_noobj=0.5):
+    def _yolo_loss_function(self, y_true, y_pred):
         """Loss function based on YOLO
         See the paper for details: https://pjreddie.com/media/files/papers/yolo.pdf
 
         y_true:
         0 is class (only one class atm)
-        1-4 is bbox coords
+        1-4 is bbox coords (x,y,w,h)
         5-54 is grid-cell has object/no-object
 
         y_pred:
-        [x,y,w,h,conf,classes...]"""
+        0-3 is bbox coords(x,y,w,h)
+        4 is conf
+        5 is class (only one class atm)"""
 
         def _compute_iou(self, pred_box, true_box):
             """Helper function to compute the intersection over union of pred_box and true_box
@@ -600,29 +598,22 @@ class DPPModel(object):
 
         ### object/no-object masks ###
         # create masks for grid cells with objects and with no objects
-        # take all the one-hot class labels and collapse them into a single vector that will have 1's in the
-        # grid cells that have objects and zeroes elsewhere, and turn this into a boolean for our mask
-        # since they are one-hot vectors we simply add them (reduce sum)
-
         obj_mask = tf.cast(y_true[..., 0], dtype=bool)
         no_obj_mask = tf.logical_not(obj_mask)
         obj_pred = tf.boolean_mask(y_pred, obj_mask)
-        # obj_pred = tf.reshape(obj_pred, [self.__batch_size, -1, 5*self.__NUM_BOXES+self.__NUM_CLASSES])
         obj_true = tf.boolean_mask(y_true, obj_mask)
-        # obj_true = tf.reshape(obj_true, [self.__batch_size, -1, 1 + self.__NUM_CLASSES + 4])
         no_obj_pred = tf.boolean_mask(y_pred, no_obj_mask)
-        # no_obj_pred = tf.reshape(no_obj_pred, [self.__batch_size, -1, 5*self.__NUM_BOXES+self.__NUM_CLASSES])
 
         ### bbox coordinate loss ###
-        # build a tensor of the predicted bounding boxes
-        # [x1,y1,w1,h1,conf1,x2,y2,w2,h2,conf2,x3,y3,w3,h3,conf3,...,classes...]
-
+        # build a tensor of the predicted bounding boxes and confidences, classes will be stored separately
+        # [x1,y1,w1,h1,conf1,x2,y2,w2,h2,conf2,x3,y3,w3,h3,conf3,...]
         pred_classes = obj_pred[..., self.__NUM_BOXES*5:]
+        # we take the x,y,w,h,conf's that are altogether (dim is 1xB*5) and turn into Bx5, where B is num_boxes
         obj_pred = tf.reshape(obj_pred[..., 0:self.__NUM_BOXES*5], [-1, self.__NUM_BOXES, 5])
         no_obj_pred = tf.reshape(no_obj_pred[..., 0:self.__NUM_BOXES*5], [-1, self.__NUM_BOXES, 5])
         t_x, t_y, t_w, t_h = obj_pred[..., 0], obj_pred[..., 1], obj_pred[..., 2], obj_pred[..., 3]
         t_o = obj_pred[..., 4]
-        pred_x = tf.sigmoid(t_x) + 0.00001
+        pred_x = tf.sigmoid(t_x) + 0.00001 # concerned about underflow (might not actually be necessary)
         pred_y = tf.sigmoid(t_y) + 0.00001
         pred_w = (tf.exp(t_w) + 0.00001) * prior_boxes[:,0]
         pred_h = (tf.exp(t_h) + 0.00001) * prior_boxes[:,1]
@@ -641,13 +632,14 @@ class DPPModel(object):
                                         obj_true[...,1+self.__NUM_CLASSES:1+self.__NUM_CLASSES+2]))
         loss_wh = tf.square(tf.subtract(tf.sqrt(responsible_boxes[..., 2:4]),
                                         tf.sqrt(obj_true[..., 1+self.__NUM_CLASSES+2:1+self.__NUM_CLASSES+4])))
-        # coord_loss = lambda_coord * tf.reduce_sum(tf.add(loss_xy, loss_wh))
         coord_loss = tf.reduce_sum(tf.add(loss_xy, loss_wh))
 
         ### confidence loss ###
         # grids that do contain an object, 1 * iou means we simply take the difference between the
         # iou's and the predicted confidence
 
+        ### this was to make responsible boxes confidences aim to go to 1 instead of their current iou score, this is
+        ### still being tested
         # non_resp_box_mask = tf.logical_not(resp_box_mask)
         # non_responsible_boxes = tf.boolean_mask(predicted_boxes, non_resp_box_mask)
         # non_responsible_ious = tf.boolean_mask(ious, non_resp_box_mask)
@@ -655,6 +647,7 @@ class DPPModel(object):
         # loss2 = tf.reduce_sum(tf.square(tf.subtract(non_responsible_ious, non_responsible_boxes[..., 4])))
         # loss_obj = loss1 + loss2
 
+        ### this is how the paper does it, the above 6 lines is experimental
         obj_num_grids = tf.shape(predicted_boxes)[0] # [num_boxes, 5, 5]
         loss_obj = tf.cast((1/obj_num_grids), dtype='float32') *\
                    tf.reduce_sum(tf.square(tf.subtract(ious, predicted_boxes[...,4])))
@@ -672,7 +665,6 @@ class DPPModel(object):
                               lambda: loss_no_obj, lambda: 0.)
         conf_loss = tf.add(loss_obj, loss_no_obj)
 
-
         ### classification loss ###
         # currently only one class, plant, will need to be made more general for multi-class in the future
         class_probs_pred = tf.nn.softmax(pred_classes)
@@ -681,7 +673,7 @@ class DPPModel(object):
 
         total_loss = coord_loss + conf_loss + class_loss
 
-        ### for some debug/checking ###
+        ### for some debug/checking, otherwise leave commented ###
         # init_op = tf.global_variables_initializer()
         # self.__session.run(init_op)
         # self.__initialize_queue_runners()
@@ -2253,7 +2245,7 @@ class DPPModel(object):
         self.__raw_image_files = images
         self.__raw_labels = labels_with_one_hot
 
-        # visual image check, printing image and bounding boxes
+        ### visual image check/debug, printing image and bounding boxes ###
         # img = cv2.imread(self.__raw_image_files[0], 1)
         # boxes = self.__raw_labels[0]
         # height, width, depth = img.shape
@@ -2460,31 +2452,6 @@ class DPPModel(object):
             self.__raw_image_files = sorted_paths
             self.__raw_labels = labels
 
-        # visual image check, printing image and bounding boxes
-        # img = cv2.imread(self.__raw_image_files[2], 1)
-        # boxes = self.__raw_labels[2]
-        # height, width, depth = img.shape
-        # print(boxes[:6])
-        # for i in range(1):
-        #     # p1 = (int((float(boxes[i*54 + 1]) - (float(boxes[i*54+3]/2)))*3108/7), int((float(boxes[i*54 + 2]) - (float(boxes[i*54+4]/2)))*2324/7))
-        #     # p2 = (int((float(boxes[i*54 + 1]) + (float(boxes[i*54+3]/2)))*3108/7), int((float(boxes[i*54 + 2]) + (float(boxes[i*54+4]/2)))*2324/7))
-        #     grid_arr = np.array(boxes[i*54+5:i*54+54])
-        #     grid_pos = np.dot(grid_arr, np.arange(49))
-        #     x = int((boxes[i * 54 + 1] + grid_pos % 7) * 2454 / 7)
-        #     y = int((boxes[i * 54 + 2] + grid_pos // 7) * 2056 / 7)
-        #     w = boxes[i * 54 + 3] * 2454/7
-        #     h = boxes[i * 54 + 4] * 2056/7
-        #
-        #     p1 = (int(x - w/2),
-        #           int(y - h/2))
-        #     p2 = (int(x + w/2),
-        #           int(y + h/2))
-        #     print(p1, p2)
-        #     cv2.rectangle(img, p1, p2, (255, 0, 0), 5)
-        # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        # cv2.imshow('image', img)
-        # cv2.waitKey(0)
-
     def load_images_from_list(self, image_files):
         """
         Loads images from a list of file names (strings). Unless you only want to do preprocessing,
@@ -2508,7 +2475,7 @@ class DPPModel(object):
             self.__images_only = True
 
 
-        # visual image check, printing image and bounding boxes
+        ### visual image check, printing image and bounding boxes ###
         # img = cv2.imread(self.__raw_image_files[4], 1)
         # boxes = self.__raw_labels[4]
         # height, width, depth = img.shape
@@ -2539,7 +2506,6 @@ class DPPModel(object):
         # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
         # cv2.imshow('image', crazy_size)
         # cv2.waitKey(0)
-
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
         """
@@ -2671,7 +2637,7 @@ class DPPModel(object):
                 # would be 4 (or 3 when 0-indexing)
                 grid_loc = (y_grid_loc * self.__grid_w) + x_grid_loc
 
-                # 1 for obj then 1 since only once class <- needs to be made more general for multiple classes
+            ### 1 for obj then 1 since only once class <- needs to be made more general for multiple classes ###
                 # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
                 # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
                 # x,y,w,h then use the in this next line below
@@ -2688,6 +2654,7 @@ class DPPModel(object):
     def load_json_labels_from_file(self, filename):
         """Loads bounding boxes for multiple images from a single json file."""
         import json
+        ### these are for jsons in the structure that I got from Blanche's data ###
 
         self.__all_ids = []
         self.__all_labels = []
@@ -2772,27 +2739,22 @@ class DPPModel(object):
                     # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
                     # would be 4 (or 3 when 0-indexing)
                     grid_loc = ((y_grid_loc * self.__grid_w) + x_grid_loc) % (self.__grid_h*self.__grid_w)
-                    # the % (self.__grid_h*self.__grid_w) is to handle the rare case we are right onthe edge and
+                    # the % (self.__grid_h*self.__grid_w) is to handle the rare case we are right on the edge and
                     # we want the last 0-indexed grid position (off by 1 error, get 49 for 7x7 grid when should have 48)
 
-                    # 1 for obj then 1 since only once class <- needs to be made more general for multiple classes
+                ### 1 for obj then 1 since only once class <- needs to be made more general for multiple classes ###
                     # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
                     # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
                     # x,y,w,h then use the in this next line below
                     # cur_box = []... vec_size = len(currbox)....
                     curr_box = []
                     curr_box.append(1) # obj
-                    curr_box.append(1) # classes
+                    curr_box.append(1) # classes <- needs to be made more general for multiple classes
                     curr_box.append(x_grid_offset)
                     curr_box.append(y_grid_offset)
                     curr_box.append(w_grid)
                     curr_box.append(h_grid)
                     vec_size = (1 + self.__NUM_CLASSES + 4)
-                    # print(curr_box)
-                    # print(curr_img_labels.shape)
-                    # print(grid_loc, y_grid_loc, x_grid_loc)
-                    # print(y_grid, y_center)
-                    # print(int(grid_loc) * vec_size, (int(grid_loc) + 1) * vec_size)
                     curr_img_labels[int(grid_loc) * vec_size:(int(grid_loc) + 1) * vec_size] = curr_box
                     # using extend because I had trouble with converting a list of lists to a tensor using our string
                     # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
