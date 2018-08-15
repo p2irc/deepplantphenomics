@@ -5,3 +5,4 @@ class ProblemType(Enum):
     CLASSIFICATION = 1
     REGRESSION = 2
     SEMANTICSEGMETNATION = 3
+    OBJECTDETECTION = 4
