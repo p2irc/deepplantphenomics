@@ -58,7 +58,7 @@ class DPPModel(object):
     __supported_loss_fns_cls = ['softmax cross entropy'] # supported loss functions for classification
     __supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']                # ... regression
     __supported_loss_fns_ss = ['sigmoid cross entropy']                             # ... semantic segmentation
-    __supported_loss_fns_od = ['yolov2']                                            # ... object detection
+    __supported_loss_fns_od = ['yolo']                                              # ... object detection
 
     # Augmentation options
     __augmentation_flip_horizontal = False
@@ -558,8 +558,8 @@ class DPPModel(object):
             self.__ANCHORS.append((w, h))
 
 
-    def _yolov2_loss_function(self, y_true, y_pred, lambda_coord=5, lambda_noobj=0.5):
-        """Loss function based on YOLO version 1. (2 now.... FIXXXXX)
+    def _yolo_loss_function(self, y_true, y_pred, lambda_coord=5, lambda_noobj=0.5):
+        """Loss function based on YOLO
         See the paper for details: https://pjreddie.com/media/files/papers/yolo.pdf
 
         y_true:
@@ -573,8 +573,6 @@ class DPPModel(object):
         def _compute_iou(self, pred_box, true_box):
             """Helper function to compute the intersection over union of pred_box and true_box
             pred_box and true_box represent multiple boxes with coords being x,y,w,h (0-indexed 0-3)"""
-            ## currently using newaxis since tensorflow is auto squeezing for some reason, these will need to be
-            ## removed when using training images that have more than one object per image
             # numerator
             # get coords of intersection rectangle, then compute intersection area
             x1 = tf.maximum(pred_box[..., 0] - 0.5 * pred_box[..., 2],
@@ -829,8 +827,8 @@ class DPPModel(object):
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
             elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                 # define cost function based on which one was selected via set_loss_function
-                if self.__loss_fn == 'yolov2':
-                    yolo_loss = self._yolov2_loss_function(y, xx)
+                if self.__loss_fn == 'yolo':
+                    yolo_loss = self._yolo_loss_function(y, xx)
                 # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(yolo_loss, l2_cost))
 
@@ -2191,7 +2189,7 @@ class DPPModel(object):
             curr_label = []
             for nums in label:
                 if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
-                    # yolov2 wants x,y,w,h for coords
+                    # yolo wants x,y,w,h for coords
                     curr_label.extend(loaders.box_coordinates_to_xywh_coordinates(nums))
                 else:
                     curr_label.extend(loaders.box_coordinates_to_pascal_voc_coordinates(nums))
@@ -2790,11 +2788,11 @@ class DPPModel(object):
                     curr_box.append(w_grid)
                     curr_box.append(h_grid)
                     vec_size = (1 + self.__NUM_CLASSES + 4)
-                    print(curr_box)
-                    print(curr_img_labels.shape)
-                    print(grid_loc, y_grid_loc, x_grid_loc)
-                    print(y_grid, y_center)
-                    print(int(grid_loc) * vec_size, (int(grid_loc) + 1) * vec_size)
+                    # print(curr_box)
+                    # print(curr_img_labels.shape)
+                    # print(grid_loc, y_grid_loc, x_grid_loc)
+                    # print(y_grid, y_center)
+                    # print(int(grid_loc) * vec_size, (int(grid_loc) + 1) * vec_size)
                     curr_img_labels[int(grid_loc) * vec_size:(int(grid_loc) + 1) * vec_size] = curr_box
                     # using extend because I had trouble with converting a list of lists to a tensor using our string
                     # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
