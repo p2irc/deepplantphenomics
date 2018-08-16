@@ -8,6 +8,7 @@ from . import layers
 @pytest.fixture
 def model(scope="module"):
     model = dpp.DPPModel()
+    model.set_image_dimensions(1, 1, 1)
     return model
 
 def test_set_number_of_threads(model):
@@ -34,12 +35,6 @@ def test_set_num_regression_outputs(model):
         model.set_num_regression_outputs(5.0)
     with pytest.raises(ValueError):
         model.set_num_regression_outputs(-1)
-
-def test_set_train_test_split(model):
-    with pytest.raises(TypeError):
-        model.set_train_test_split(5)
-    with pytest.raises(ValueError):
-        model.set_train_test_split(1.5)
 
 def test_set_maximum_training_epochs(model):
     with pytest.raises(TypeError):
@@ -105,17 +100,17 @@ def test_set_optimizer(model):
     with pytest.raises(ValueError):
         model.set_optimizer('Nico')
     model.set_optimizer('adam')
-    assert model._DPPModel__optimizer == 'Adam'
+    assert model._DPPModel__optimizer == 'adam'
     model.set_optimizer('Adam')
-    assert model._DPPModel__optimizer == 'Adam'
+    assert model._DPPModel__optimizer == 'adam'
     model.set_optimizer('ADAM')
-    assert model._DPPModel__optimizer == 'Adam'
+    assert model._DPPModel__optimizer == 'adam'
     model.set_optimizer('SGD')
-    assert model._DPPModel__optimizer == 'SGD'
+    assert model._DPPModel__optimizer == 'sgd'
     model.set_optimizer('sgd')
-    assert model._DPPModel__optimizer == 'SGD'
+    assert model._DPPModel__optimizer == 'sgd'
     model.set_optimizer('sGd')
-    assert model._DPPModel__optimizer == 'SGD'
+    assert model._DPPModel__optimizer == 'sgd'
 
 def test_set_weight_initializer(model):
     with pytest.raises(TypeError):
@@ -202,6 +197,9 @@ def test_add_input_layer(model):
 #     assert isinstance(model._DPPModel__last_layer(), layers.moderationLayer)
 
 def test_add_convolutional_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_convolutional_layer([1, 2.0, 3, 4], 1, 'relu')
+    model.add_input_layer()
     with pytest.raises(TypeError):
         model.add_convolutional_layer([1, 2.0, 3, 4], 1, 'relu')
     with pytest.raises(TypeError):
@@ -222,6 +220,9 @@ def test_add_convolutional_layer(model):
     assert isinstance(model._DPPModel__last_layer(), layers.convLayer)
 
 def test_add_pooling_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_pooling_layer(1, 1, 'avg')
+    model.add_input_layer()
     with pytest.raises(TypeError):
         model.add_pooling_layer(1.5, 1)
     with pytest.raises(ValueError):
@@ -238,10 +239,16 @@ def test_add_pooling_layer(model):
     assert isinstance(model._DPPModel__last_layer(), layers.poolingLayer)
 
 def test_add_normalization_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_normalization_layer()
+    model.add_input_layer()
     model.add_normalization_layer()
     assert isinstance(model._DPPModel__last_layer(), layers.normLayer)
 
 def test_add_dropout_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_dropout_layer(0.4)
+    model.add_input_layer()
     with pytest.raises(TypeError):
         model.add_dropout_layer("0.5")
     with pytest.raises(ValueError):
@@ -250,10 +257,16 @@ def test_add_dropout_layer(model):
     assert isinstance(model._DPPModel__last_layer(), layers.dropoutLayer)
 
 def test_add_batch_norm_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_batch_norm_layer()
+    model.add_input_layer()
     model.add_batch_norm_layer()
     assert isinstance(model._DPPModel__last_layer(), layers.batchNormLayer)
 
 def test_add_fully_connected_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_fully_connected_layer(1, 'tanh', 0.3)
+    model.add_input_layer()
     with pytest.raises(TypeError):
         model.add_fully_connected_layer(2.3, 'relu', 1.8)
     with pytest.raises(ValueError):
@@ -270,6 +283,9 @@ def test_add_fully_connected_layer(model):
     assert isinstance(model._DPPModel__last_layer(), layers.fullyConnectedLayer)
 
 def test_add_output_layer(model):
+    with pytest.raises(RuntimeError):
+        model.add_output_layer(2.5, 3)
+    model.add_input_layer()
     with pytest.raises(TypeError):
         model.add_output_layer("2")
     with pytest.raises(ValueError):
@@ -317,7 +333,7 @@ def test_load_ippn_leaf_count_dataset_from_directory():
     model.set_resize_images(True)
     model.set_problem_type('regression')
     model.set_num_regression_outputs(1)
-    model.set_train_test_split(0.8)
+    model.set_test_split(0.1)
     model.set_weight_initializer('xavier')
     model.set_maximum_training_epochs(1)
     model.set_learning_rate(0.0001)
@@ -332,7 +348,7 @@ def test_load_ippn_leaf_count_dataset_from_directory():
     model.set_resize_images(True)
     model.set_problem_type('regression')
     model.set_num_regression_outputs(1)
-    model.set_train_test_split(0.8)
+    model.set_test_split(0.1)
     model.set_weight_initializer('xavier')
     # model.set_maximum_training_epochs(1)
     model.set_learning_rate(0.0001)
