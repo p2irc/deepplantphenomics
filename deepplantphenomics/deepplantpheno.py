@@ -137,7 +137,7 @@ class DPPModel(object):
         self.__validation_split = 0.10
         self.__maximum_training_batches = None
         self.__reg_coeff = None
-        self.__optimizer = 'Adam'
+        self.__optimizer = 'adam'
         self.__weight_initializer = 'normal'
 
         self.__learning_rate = 0.01

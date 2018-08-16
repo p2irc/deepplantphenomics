@@ -16,18 +16,20 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
     total_samples = len(labels)
     mask = [0] * total_samples
     val_mask_num = 1 # this changes depending on whether we are using testing or not
+    val_start_idx = 0 # if no testing then we idx from beginning, else we change this if there is testing
 
     if test_ratio != 0:
         # creating a mask [1,1,1,...,0,0,0]
         num_test = int(total_samples * (test_ratio))
         mask[:num_test] = [1] * num_test
         val_mask_num = 2
+        val_start_idx = num_test
 
     if validation_ratio != 0:
-        # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,0,0,0,...,2,2,2]
-        # otherwise we will only have train and validation thus creating a mask as [0,0,0,...,1,1,1]
+        # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
+        # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
         num_val = int(total_samples * (validation_ratio))
-        mask[-num_val:] = [val_mask_num] * num_val
+        mask[val_start_idx : val_start_idx+num_val] = [val_mask_num] * num_val
 
     # If we're using a training augmentation set, add them to the training portion
     if augmentation_images is not None and augmentation_labels is not None:
