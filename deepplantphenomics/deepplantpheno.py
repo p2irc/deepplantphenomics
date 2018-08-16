@@ -262,6 +262,7 @@ class DPPModel(object):
         else:
             self.__testing = True
         self.__validation = False
+        self.__validation_split = 0
 
     def set_test_split(self, ratio):
         """Set a ratio for the number of samples to use as training set"""
@@ -1275,7 +1276,7 @@ class DPPModel(object):
 
         with self.__graph.as_default():
             num_test = self.__total_raw_samples - self.__total_training_samples
-            num_batches = int(num_test / self.__batch_size) + 1
+            num_batches = int(np.ceil(num_test / self.__batch_size))
 
             if num_batches == 0:
                 warnings.warn('Less than a batch of testing data')
@@ -1317,6 +1318,16 @@ class DPPModel(object):
             all_y = np.delete(all_y, 0)
             all_predictions = np.delete(all_predictions, 0)
 
+            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+            # we want to get rid of)
+            extra = self.__batch_size - (self.__total_testing_samples % self.__batch_size)
+            if extra != self.__batch_size: # this checks if it has any extra
+                mask_extra = np.ones(self.__batch_size * num_batches, dtype=bool)
+                mask_extra[range(self.__batch_size * num_batches - extra, self.__batch_size * num_batches)] = False
+                all_losses = all_losses[mask_extra, ...]
+                all_y = all_y[mask_extra, ...]
+                all_predictions = all_predictions[mask_extra, ...]
+
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
                 mean = (sum / num_batches)
@@ -1352,7 +1363,11 @@ class DPPModel(object):
                     all_y_mean = np.mean(all_y)
                     total_error = np.sum(np.square(all_y - all_y_mean))
                     unexplained_error = np.sum(np.square(all_losses))
-                    R2 = 1. - (unexplained_error / total_error)
+                    # division by zero can happen when using small test sets
+                    if total_error == 0:
+                        R2 = -np.inf
+                    else:
+                        R2 = 1. - (unexplained_error / total_error)
 
                     self.__log('R^2: {}'.format(R2))
                     self.__log('All test labels:')
@@ -1622,7 +1637,8 @@ class DPPModel(object):
             else:
                 for i in range(int(num_batches)):
                     xx = self.__session.run(x_pred)
-                    xx = np.reshape(xx, [self.__batch_size, -1])
+                    if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                        xx = np.reshape(xx, [self.__batch_size, -1])
                     for img in np.array_split(xx, self.__batch_size):
                         total_outputs = np.append(total_outputs, img, axis=0)
 
