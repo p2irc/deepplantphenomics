@@ -3,6 +3,7 @@ import xml.etree.ElementTree as tree
 import numpy as np
 import random
 import os
+import datetime
 
 
 def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_features=None, augmentation_images=None,
@@ -13,32 +14,57 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
 
-    total_samples = len(labels)
-    mask = [0] * total_samples
-    val_mask_num = 1 # this changes depending on whether we are using testing or not
-    val_start_idx = 0 # if no testing then we idx from beginning, else we change this if there is testing
+    # check if there is a previously saved mask to load from current directory
+    found_prev_mask_file = False
+    try:
+        prev_mask_file = open("mask_ckpt.txt", "r")
+        found_prev_mask_file = True
+    except:
+        found_prev_mask_file = False
 
-    if test_ratio != 0:
-        # creating a mask [1,1,1,...,0,0,0]
-        num_test = int(total_samples * (test_ratio))
-        mask[:num_test] = [1] * num_test
-        val_mask_num = 2
-        val_start_idx = num_test
+    if found_prev_mask_file:
+        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                "Previous mask found. Loading 'mask_ckpt.txt'"))
+        mask = []
+        for line in prev_mask_file:
+            mask.append(int(line.rstrip()))
+        prev_mask_file.close()
+    else: # we build the mask
+        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                'No previous mask found. Building new mask.'))
+        total_samples = len(labels)
+        mask = [0] * total_samples
+        val_mask_num = 1 # this changes depending on whether we are using testing or not
+        val_start_idx = 0 # if no testing then we idx from beginning, else we change this if there is testing
 
-    if validation_ratio != 0:
-        # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
-        # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
-        num_val = int(total_samples * (validation_ratio))
-        mask[val_start_idx : val_start_idx+num_val] = [val_mask_num] * num_val
+        if test_ratio != 0:
+            # creating a mask [1,1,1,...,0,0,0]
+            num_test = int(total_samples * (test_ratio))
+            mask[:num_test] = [1] * num_test
+            val_mask_num = 2
+            val_start_idx = num_test
 
-    # If we're using a training augmentation set, add them to the training portion
-    if augmentation_images is not None and augmentation_labels is not None:
-        images = images + augmentation_images
-        labels = labels + augmentation_labels
-        mask = mask + ([0] * len(augmentation_labels))
+        if validation_ratio != 0:
+            # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
+            # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
+            num_val = int(total_samples * (validation_ratio))
+            mask[val_start_idx : val_start_idx+num_val] = [val_mask_num] * num_val
 
-    # make the split random <-- ESSENTIAL
-    random.shuffle(mask)
+        # If we're using a training augmentation set, add them to the training portion
+        if augmentation_images is not None and augmentation_labels is not None:
+            images = images + augmentation_images
+            labels = labels + augmentation_labels
+            mask = mask + ([0] * len(augmentation_labels))
+
+        # make the split random <-- ESSENTIAL
+        random.shuffle(mask)
+
+        # save the mask file in current directory for future use
+        prev_mask_file = open('mask_ckpt.txt', 'w+')
+        for entry in mask:
+            prev_mask_file.write(str(entry) + '\n')
+        prev_mask_file.close()
+
 
     # create partitions, we set train/validation to None if they're not being used
     if test_ratio != 0 and validation_ratio != 0:
