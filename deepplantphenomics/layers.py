@@ -66,8 +66,8 @@ class upsampleLayer(object):
     def __init__(self, name, input_size, filter_size, num_filters, upscale_factor,
                  activation_function, batch_multiplier, initializer, regularization_coefficient):
         self.name = name
-        self.activation_function = activation_function
-        self.initializer = initializer
+        self.__activation_function = activation_function
+        self.__initializer = initializer
         self.input_size = input_size
         self.strides = [1, upscale_factor, upscale_factor, 1]
         self.upscale_factor = upscale_factor
@@ -93,7 +93,7 @@ class upsampleLayer(object):
         self.weights_shape = [filter_size, filter_size, input_size[-1], num_filters]
 
     def add_to_graph(self):
-        if self.initializer == 'xavier':
+        if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.weights_shape,
                                            initializer=tf.contrib.layers.xavier_initializer_conv2d())
