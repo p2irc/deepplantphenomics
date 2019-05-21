@@ -14,6 +14,7 @@ import warnings
 import copy
 from scipy.special import expit
 from PIL import Image
+from tqdm import tqdm
 
 class DPPModel(object):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
@@ -1103,7 +1104,7 @@ class DPPModel(object):
 
                 self.__set_learning_rate()
 
-                for i in range(self.__maximum_training_batches):
+                for i in tqdm(range(self.__maximum_training_batches)):
                     start_time = time.time()
                     self.__global_epoch = i
                     self.__session.run(self.__graph_ops['optimizer'])
