@@ -64,6 +64,20 @@ set_train_test_split()
 
 Set the ratio of training samples to testing samples.
 
+This method has been deprecated. `set_test_split()` and `set_validation_split()` should be used instead.
+
+```
+set_test_split()
+```
+
+Set the ratio for the number of samples to use as training set.
+
+```
+set_validation_split()
+```
+
+Set the ratio for the number of samples to use as training set.
+
 ## Input Options
 
 ```
