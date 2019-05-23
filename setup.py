@@ -11,6 +11,7 @@ setup(
     description='Deep learning tools for plant phenotyping',
     install_requires=[
         'numpy',
-        'joblib'
+        'joblib',
+        'tqdm'
     ]
 )

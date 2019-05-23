@@ -14,6 +14,7 @@ import warnings
 import copy
 from scipy.special import expit
 from PIL import Image
+from tqdm import tqdm
 
 class DPPModel(object):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
@@ -1103,8 +1104,11 @@ class DPPModel(object):
 
                 self.__set_learning_rate()
 
-                for i in range(self.__maximum_training_batches):
+                # for i in range(self.__maximum_training_batches):
+                tqdm_range = tqdm(range(self.__maximum_training_batches))
+                for i in tqdm_range:
                     start_time = time.time()
+
                     self.__global_epoch = i
                     self.__session.run(self.__graph_ops['optimizer'])
                     if self.__global_epoch > 0 and self.__global_epoch % self.__report_rate == 0:
@@ -1122,13 +1126,15 @@ class DPPModel(object):
 
                                 samples_per_sec = self.__batch_size / elapsed
 
-                                self.__log(
-                                    'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
-                                        .format(i,
-                                                i / (self.__total_training_samples / self.__batch_size),
-                                                loss,
-                                                epoch_accuracy,
-                                                samples_per_sec))
+                                tqdm_range.set_description(
+                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
+                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
+                                            i,
+                                            i / (self.__total_training_samples / self.__batch_size),
+                                            loss,
+                                            epoch_accuracy,
+                                            samples_per_sec))
+
                             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
                                  self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION or \
                                  self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
@@ -1137,27 +1143,31 @@ class DPPModel(object):
 
                                 samples_per_sec = self.__batch_size / elapsed
 
-                                self.__log(
-                                    'Results for batch {} (epoch {}) - Loss: {}, samples/sec: {:.2f}'
-                                        .format(i,
-                                                i / (self.__total_training_samples / self.__batch_size),
-                                                loss,
-                                                samples_per_sec))
+                                tqdm_range.set_description(
+                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
+                                            i,
+                                            i / (self.__total_training_samples / self.__batch_size),
+                                            loss,
+                                            samples_per_sec))
+
                         else:
                             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                                loss, epoch_accuracy, epoch_test_accuracy = self.__session.run(
+                                loss, epoch_accuracy = self.__session.run(
                                     [self.__graph_ops['cost'],
                                      self.__graph_ops['accuracy']])
 
                                 samples_per_sec = self.__batch_size / elapsed
 
-                                self.__log(
-                                    'Results for batch {} (epoch {}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}'
-                                        .format(i,
-                                                i / (self.__total_training_samples / self.__batch_size),
-                                                loss,
-                                                epoch_accuracy,
-                                                samples_per_sec))
+                                tqdm_range.set_description(
+                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
+                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
+                                            i,
+                                            i / (self.__total_training_samples / self.__batch_size),
+                                            loss,
+                                            epoch_accuracy,
+                                            samples_per_sec))
+
                             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
                                  self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION or \
                                  self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
@@ -1166,12 +1176,13 @@ class DPPModel(object):
 
                                 samples_per_sec = self.__batch_size / elapsed
 
-                                self.__log(
-                                    'Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}'
-                                        .format(i,
-                                                i / (self.__total_training_samples / self.__batch_size),
-                                                loss,
-                                                samples_per_sec))
+                                tqdm_range.set_description(
+                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
+                                            i,
+                                            i / (self.__total_training_samples / self.__batch_size),
+                                            loss,
+                                            samples_per_sec))
 
                         if self.__save_checkpoints and self.__global_epoch % (self.__report_rate * 100) == 0:
                             self.save_state(self.__save_dir)
