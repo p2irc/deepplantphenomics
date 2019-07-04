@@ -1,9 +1,10 @@
-from distutils.core import setup
+from setuptools import setup
 
 setup(
     name='deepplantphenomics',
     version='',
     packages=['deepplantphenomics'],
+    package_data={'deepplantphenomics': ['network_states/*', 'network_states/**/*']},
     url='',
     license='MIT',
     author='Jordan Ubbens',
