@@ -3336,11 +3336,11 @@ class DPPModel(object):
         self.__log('Parsing dataset...')
 
         # do preprocessing
-        images = self.__apply_preprocessing(sorted_paths)
+        processed_images = self.__apply_preprocessing(sorted_paths)
 
         # prepare images for training (if there are any labels loaded)
         if self.__all_labels is not None:
-            self.__raw_image_files = image_files
+            self.__raw_image_files = processed_images
             self.__raw_labels = self.__all_labels
 
     def load_training_augmentation_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=1,
