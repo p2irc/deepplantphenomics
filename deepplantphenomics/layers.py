@@ -146,16 +146,11 @@ class poolingLayer(object):
         self.input_size = input_size
         self.pooling_type = pooling_type
 
-        # The pooling operation will reduce the width and height dimensions
+        # The pooling operation will reduce the width and height dimensions, but since the padding type is always
+        # 'SAME', the output size only depends on input size and stride length
         self.output_size = self.input_size
-        filter_size_even = (kernel_size % 2 == 0)
-
-        if filter_size_even:
-            self.output_size[1] = int(math.floor((self.output_size[1] - kernel_size) / stride_length + 1))
-            self.output_size[2] = int(math.floor((self.output_size[2] - kernel_size) / stride_length + 1))
-        else:
-            self.output_size[1] = int(math.floor((self.output_size[1]-kernel_size)/stride_length + 1) + 1)
-            self.output_size[2] = int(math.floor((self.output_size[2]-kernel_size)/stride_length + 1) + 1)
+        self.output_size[1] = int(math.ceil(self.output_size[1] / float(stride_length)))
+        self.output_size[2] = int(math.ceil(self.output_size[2] / float(stride_length)))
 
     def forward_pass(self, x, deterministic):
         if self.pooling_type == 'max':
