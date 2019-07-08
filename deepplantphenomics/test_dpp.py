@@ -238,6 +238,13 @@ def test_add_pooling_layer(model):
     model.add_pooling_layer(1, 1, 'avg')
     assert isinstance(model._DPPModel__last_layer(), layers.poolingLayer)
 
+@pytest.mark.parametrize("kernel_size,stride,output_size", [(2, 2, 3), (3, 3, 2), (2, 1, 5)])
+def test_pooling_layer_output_size(model, kernel_size, stride, output_size):
+    model.set_image_dimensions(5, 5, 1)
+    model.add_input_layer()
+    model.add_pooling_layer(kernel_size, stride)
+    assert model._DPPModel__last_layer().output_size == [1, output_size, output_size, 1]
+
 def test_add_normalization_layer(model):
     with pytest.raises(RuntimeError):
         model.add_normalization_layer()
