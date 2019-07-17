@@ -16,6 +16,7 @@ from scipy.special import expit
 from PIL import Image
 from tqdm import tqdm
 
+
 class DPPModel(object):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -557,48 +558,44 @@ class DPPModel(object):
             h = anchor[1] * scale_h
             self.__ANCHORS.append((w, h))
 
+    def _yolo_compute_iou(self, pred_box, true_box):
+        """Helper function to compute the intersection over union of pred_box and true_box
+        pred_box and true_box represent multiple boxes with coords being x,y,w,h (0-indexed 0-3)"""
+        # numerator
+        # get coords of intersection rectangle, then compute intersection area
+        x1 = tf.maximum(pred_box[..., 0] - 0.5 * pred_box[..., 2],
+                        true_box[..., 0:1] - 0.5 * true_box[..., 2:3])
+        y1 = tf.maximum(pred_box[..., 1] - 0.5 * pred_box[..., 3],
+                        true_box[..., 1:2] - 0.5 * true_box[..., 3:4])
+        x2 = tf.minimum(pred_box[..., 0] + 0.5 * pred_box[..., 2],
+                        true_box[..., 0:1] + 0.5 * true_box[..., 2:3])
+        y2 = tf.minimum(pred_box[..., 1] + 0.5 * pred_box[..., 3],
+                        true_box[..., 1:2] + 0.5 * true_box[..., 3:4])
+        intersection_area = tf.multiply(tf.maximum(0., x2 - x1), tf.maximum(0., y2 - y1))
+
+        # denominator
+        # compute area of pred and truth, compute union area
+        pred_area = tf.multiply(pred_box[..., 2], pred_box[..., 3])
+        true_area = tf.multiply(true_box[..., 2:3], true_box[..., 3:4])
+        union_area = tf.subtract(tf.add(pred_area, true_area), intersection_area)
+
+        # compute iou
+        iou = tf.divide(intersection_area, union_area)
+        return iou
 
     def _yolo_loss_function(self, y_true, y_pred):
-        """Loss function based on YOLO
+        """
+        Loss function based on YOLO
         See the paper for details: https://pjreddie.com/media/files/papers/yolo.pdf
 
-        y_true:
-        0 is class (only one class atm)
-        1-4 is bbox coords (x,y,w,h)
-        5-54 is grid-cell has object/no-object
-
-        y_pred:
-        0-3 is bbox coords(x,y,w,h)
-        4 is conf
-        5 is class (only one class atm)"""
-
-        def _compute_iou(self, pred_box, true_box):
-            """Helper function to compute the intersection over union of pred_box and true_box
-            pred_box and true_box represent multiple boxes with coords being x,y,w,h (0-indexed 0-3)"""
-            # numerator
-            # get coords of intersection rectangle, then compute intersection area
-            x1 = tf.maximum(pred_box[..., 0] - 0.5 * pred_box[..., 2],
-                            true_box[..., 0:1] - 0.5 * true_box[..., 2:3])
-            y1 = tf.maximum(pred_box[..., 1] - 0.5 * pred_box[..., 3],
-                            true_box[..., 1:2] - 0.5 * true_box[..., 3:4])
-            x2 = tf.minimum(pred_box[..., 0] + 0.5 * pred_box[..., 2],
-                            true_box[..., 0:1] + 0.5 * true_box[..., 2:3])
-            y2 = tf.minimum(pred_box[..., 1] + 0.5 * pred_box[..., 3],
-                            true_box[..., 1:2] + 0.5 * true_box[..., 3:4])
-            intersection_area = tf.multiply(tf.maximum(0., x2 - x1), tf.maximum(0., y2 - y1))
-
-            # denominator
-            # compute area of pred and truth, compute union area
-            pred_area = tf.multiply(pred_box[..., 2], pred_box[..., 3])
-            true_area = tf.multiply(true_box[..., 2:3], true_box[..., 3:4])
-            union_area = tf.subtract(tf.add(pred_area, true_area), intersection_area)
-
-            # compute iou
-            iou = tf.divide(intersection_area, union_area)
-            return iou
+        :param y_true: Tensor with ground truth bounding boxes for each grid square in each image. Labels have 6
+        elements: [object/no-object, class, x, y, w, h]
+        :param y_pred: Tensor with predicted bounding boxes for each grid square in each image. Predictions consist of
+        one box and confidence [x, y, w, h, conf] for each anchor plus 1 element for specifying the class (only one atm)
+        :return Scalar Tensor with the Yolo loss for the bounding box predictions
+        """
 
         prior_boxes = tf.convert_to_tensor(self.__ANCHORS)
-        y_pred = tf.reshape(y_pred, [self.__batch_size, self.__grid_w * self.__grid_h, -1])
 
         ### object/no-object masks ###
         # create masks for grid cells with objects and with no objects
@@ -625,7 +622,8 @@ class DPPModel(object):
         predicted_boxes = tf.stack([pred_x, pred_y, pred_w, pred_h, pred_conf], axis=2)
 
         # find responsible boxes by computing iou's and select the best one
-        ious = _compute_iou(self, predicted_boxes, obj_true[..., 1+self.__NUM_CLASSES:1+self.__NUM_CLASSES+4])
+        ious = self._yolo_compute_iou(
+            predicted_boxes, obj_true[..., 1 + self.__NUM_CLASSES:1 + self.__NUM_CLASSES + 4])
         greatest_iou_indices = tf.argmax(ious, 1)
         argmax_one_hot = tf.one_hot(indices=greatest_iou_indices, depth=5)
         resp_box_mask = tf.cast(argmax_one_hot, dtype=bool)
@@ -824,7 +822,10 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                 # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'yolo':
-                    yolo_loss = self._yolo_loss_function(y, xx)
+                    yolo_loss = self._yolo_loss_function(
+                        y, tf.reshape(xx, [self.__batch_size,
+                                           self.__grid_w*self.__grid_h,
+                                           self.__NUM_BOXES*5+self.__NUM_CLASSES]))
                 # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(yolo_loss, l2_cost))
 
@@ -908,6 +909,23 @@ class DPPModel(object):
                     self.__graph_ops['y_val'] = tf.reshape(self.__graph_ops['y_val'],
                                                            shape=[-1, self.__image_height, self.__image_width, 1])
 
+            if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                vec_size = 1 + self.__NUM_CLASSES + 4
+                if self.__testing:
+                    self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'],
+                                                                                self.__batch_size)
+                    self.__graph_ops['y_test'] = tf.reshape(self.__graph_ops['y_test'],
+                                                            shape=[self.__batch_size,
+                                                                   self.__grid_w*self.__grid_h,
+                                                                   vec_size])
+                if self.__validation:
+                    self.__graph_ops['y_val'] = loaders.label_string_to_tensor(self.__graph_ops['y_val'],
+                                                                               self.__batch_size)
+                    self.__graph_ops['y_val'] = tf.reshape(self.__graph_ops['y_val'],
+                                                            shape=[self.__batch_size,
+                                                                   self.__grid_w * self.__grid_h,
+                                                                   vec_size])
+
             # if using patching we need to properly pull patches from the images (object detection patching is different
             # and is done when data is loaded)
             if self.__with_patching and self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
@@ -942,6 +960,19 @@ class DPPModel(object):
                     self.__graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
                 if self.__validation:
                     self.__graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
+            # For object detection, the network outputs need to be reshaped to match y_test and y_val
+            if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                if self.__testing:
+                    self.__graph_ops['x_test_predicted'] = tf.reshape(self.__graph_ops['x_test_predicted'],
+                                                                      [self.__batch_size,
+                                                                      self.__grid_w * self.__grid_h,
+                                                                      self.__NUM_BOXES*5+self.__NUM_CLASSES])
+                if self.__validation:
+                    self.__graph_ops['x_val_predicted'] = tf.reshape(self.__graph_ops['x_val_predicted'],
+                                                                     [self.__batch_size,
+                                                                      self.__grid_w * self.__grid_h,
+                                                                      self.__NUM_BOXES*5+self.__NUM_CLASSES])
 
             # compute the loss and accuracy based on problem type
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
@@ -982,7 +1013,14 @@ class DPPModel(object):
                         tf.reduce_mean(self.__graph_ops['val_losses'], axis=1))
                     self.__graph_ops['val_cost'] = tf.reduce_mean(self.__graph_ops['val_losses'])
             elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
-                pass
+                if self.__testing:
+                    if self.__loss_fn == 'yolo':
+                        self.__graph_ops['test_losses'] = self._yolo_loss_function(self.__graph_ops['y_test'],
+                                                          self.__graph_ops['x_test_predicted'])
+                if self.__validation:
+                    if self.__loss_fn == 'yolo':
+                        self.__graph_ops['val_losses'] = self._yolo_loss_function(self.__graph_ops['y_val'],
+                                                          self.__graph_ops['x_val_predicted'])
 
 
             # Epoch summaries for Tensorboard
@@ -1031,6 +1069,12 @@ class DPPModel(object):
                             tf.transpose(tf.expand_dims(self.__graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
                             self.__layers[-1].output_size)
                         tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
+
+                if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                    tf.summary.scalar('train/yolo_loss', yolo_loss, collections=['custom_summaries'])
+                    if self.__validation:
+                        tf.summary.scalar('validation/loss', self.__graph_ops['val_losses'],
+                                          collections=['custom_sumamries'])
 
                 # Summaries for each layer
                 for layer in self.__layers:
@@ -3484,10 +3528,9 @@ class DPPModel(object):
                 boxes.append([x_min, x_max, y_min, y_max])
             self.__all_labels.append(boxes)
 
-        # need to add one-hot encodings for class and object-cell location
-        # it will be one-hot for the class, then 4 bbox coords (x,y,w,h), then one-hot for which grid-cell contains
-        # the object which will be only one 1 (rest zeroes), or all zeroes
-        # e.g. [0,0,...,1,...,0,223,364,58,62,0,0,...,1,...,0,0]
+        # need to add one-hot encodings for class and object existence label
+        # it will 1 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
+        # e.g. [1,0,0,...,1,...,0,x,y,w,h]
         if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
             if not self.__with_patching:
                 self.convert_labels_to_yolo_format()
