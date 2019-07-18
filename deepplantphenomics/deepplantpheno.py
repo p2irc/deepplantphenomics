@@ -1343,11 +1343,16 @@ class DPPModel(object):
 
             sum = 0.0
             all_losses = np.empty(shape=(self.__num_regression_outputs))
-            all_y = np.empty(shape=(self.__num_regression_outputs))
-            all_predictions = np.empty(shape=(self.__num_regression_outputs))
-            if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            if self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
+                all_y = np.empty(shape=(self.__num_regression_outputs))
+                all_predictions = np.empty(shape=self.__num_regression_outputs)
+            else:
+                all_y = np.empty(shape=(self.__batch_size,
+                                        self.__grid_w*self.__grid_h,
+                                        1 + self.__NUM_CLASSES + 4))
                 all_predictions = np.empty(shape=(self.__batch_size,
-                                                  self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES + self.__NUM_CLASSES)))
+                                                  self.__grid_w*self.__grid_h,
+                                                  5*self.__NUM_BOXES + self.__NUM_CLASSES))
 
             # Main test loop
             for i in range(num_batches):
@@ -1358,24 +1363,26 @@ class DPPModel(object):
                     r_losses, r_y, r_predicted = self.__session.run([self.__graph_ops['test_losses'],
                                                                      self.__graph_ops['y_test'],
                                                                      self.__graph_ops['x_test_predicted']])
-
                     all_losses = np.concatenate((all_losses, r_losses), axis=0)
                     all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
                     all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
                 elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
                     r_losses = self.__session.run([self.__graph_ops['test_losses']])
-
                     all_losses = np.concatenate((all_losses, r_losses[0]), axis=0)
                 elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                     r_y, r_predicted = self.__session.run([self.__graph_ops['y_test'],
-                                                     self.__graph_ops['x_test_predicted']])
-                    all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
-                    all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
+                                                           self.__graph_ops['x_test_predicted']])
+                    all_y = np.concatenate((all_y, r_y), axis=0)
+                    all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
 
             # Delete the weird first entries
             all_losses = np.delete(all_losses, 0)
-            all_y = np.delete(all_y, 0)
-            all_predictions = np.delete(all_predictions, 0)
+            if self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
+                all_y = np.delete(all_y, 0)
+                all_predictions = np.delete(all_predictions, 0)
+            else:
+                all_y = np.delete(all_y, 0, axis=0)
+                all_predictions = np.delete(all_predictions, 0, axis=0)
 
             # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
             # we want to get rid of)
@@ -1440,8 +1447,125 @@ class DPPModel(object):
                 self.__log(hist)
 
                 return abs_mean.astype(np.float32)
+            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                # Compress the batch size and grid square coordinates
+                grid_count = self.__batch_size * self.__grid_h * self.__grid_w
+                all_y = np.reshape(all_y, (grid_count, 6))
+                all_predictions = np.reshape(all_predictions, (grid_count, 26))
 
+                all_y, all_predictions = self.__yolo_coord_convert(all_y, all_predictions)
+                all_y, all_predictions = self.__yolo_filter_predictions(all_y, all_predictions)
+                yolo_map = self.__yolo_map(all_y, all_predictions)
+
+                self.__log('Yolo mAP: {}'.format(yolo_map))
             return
+
+    def __yolo_coord_convert(self, labels, preds):
+        """
+        Converts Yolo labeled and predicted bounding boxes from xywh coords to x1y1x2y2 coords. Also accounts for
+        required sigmoid and exponential conversions in the predictions (including the confidences)
+
+        :param labels: ndarray with Yolo ground-truth bounding boxes (size ?x6)
+        :param preds: ndarray with Yolo predicted bounding boxes (size ?x(NUM_BOXES*5))
+        :return: `labels` and `preds` with the bounding box coords changed from xywh to x1y1x2y2 and predicted box
+        confidences converted to percents
+        """
+
+        def xywh_to_xyxy(x, y, w, h):
+            x1 = x - w/2
+            x2 = x + w/2
+            y1 = y - h/2
+            y2 = y + h/2
+            return x1, y1, x2, y2
+
+        # Labels are already sensible numbers, so convert them first
+        lab_x, lab_y, lab_w, lab_h = labels[..., 2:6]
+        lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(lab_x, lab_y, lab_w, lab_h)
+        labels[..., 2:6] = np.stack([lab_x1, lab_y1, lab_x2, lab_y2], axis=-1)
+
+        # Extract the class predictions and reorganize the predicted boxes
+        class_preds = preds[..., self.__NUM_BOXES*5:]
+        preds = np.reshape(preds[..., 0:self.__NUM_BOXES*5], preds.shape[:-1] + (self.__NUM_BOXES, 5))
+
+        # Predictions are not, so apply sigmoids and exponentials first and then convert them
+        pred_x = expit(preds[..., 0])
+        pred_y = expit(preds[..., 1])
+        pred_w = np.exp(preds[..., 2]) * self.__ANCHORS[:, 0]
+        pred_h = np.exp(preds[..., 3]) * self.__ANCHORS[:, 1]
+        pred_conf = expit(preds[..., 4])
+        pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x, pred_y, pred_w, pred_h)
+        preds[..., :] = np.stack([pred_x1, pred_y1, pred_x2, pred_y2, pred_conf], axis=-1)
+
+        # Reattach the class predictions
+        preds = np.reshape(preds, preds.shape[:-2] + (self.__NUM_BOXES*5,))
+        preds = np.concatenate([preds, class_preds], axis=-1)
+
+        return labels, preds
+
+    def __yolo_filter_predictions(self, labels, preds, thresh_sig=0.6, thresh_overlap=0.3):
+        """
+        Filters the predicted bounding boxes by eliminating insignificant and overlapping predictions
+
+        :param labels: ndarray with ground truth bounding box labels for each image in each grid square. Labels
+        are a 6-value list: [object-ness, class, x1, y1, x2, y2]
+        :param preds: ndarray with predicted bounding boxes for each image in each grid square. Predictions
+        are a list of, for each box, [x1, y1, x2, y2, conf] followed by a list of class predictions
+        :return: `labels` and `preds` with only the significant and maximal confidence predictions remaining
+        """
+        # Extract the class predictions and separate the predicted boxes
+        grid_count = self.__batch_size * self.__grid_h * self.__grid_w
+        class_preds = preds[..., self.__NUM_BOXES * 5:]
+        preds = np.reshape(preds[..., 0:self.__NUM_BOXES * 5], preds.shape[:-1] + (self.__NUM_BOXES, 5))
+
+        # In each grid square, the highest confidence box is the one responsible for prediction
+        max_conf_idx = np.argmax(preds[..., 4], axis=-1)
+        n_ele = grid_count*5
+        preds = preds.transpose((0, 2, 1))  # Place box dimension last
+        preds = preds.reshape(n_ele, -1)  # Compress grid and value dims
+        preds = preds[np.arange(n_ele), max_conf_idx.ravel()]  # Index value dim
+        preds = preds.reshape(grid_count, 5)  # Decompress grid and value dims
+
+        # Eliminate insignificant predicted boxes
+        insig_mask = preds[:, 4] < thresh_sig
+        class_preds = class_preds[insig_mask, :]
+        preds = preds[insig_mask, :]
+        labels = labels[insig_mask, :]
+
+        # Apply non-maximal suppression (i.e. eliminate boxes that overlap with a more confidant box)
+        maximal_idx = []
+        conf_order = np.argsort(preds[:, 4])
+        pair_iou = np.array([self.__compute_iou(preds[i, 0:4], preds[j, 0:4])
+                             for i in range(grid_count) for j in range(grid_count)])
+        pair_iou = pair_iou.reshape(grid_count, grid_count)
+        while len(conf_order) > 0:
+            # Take the most confidant box, then cull the list down to boxes that don't overlap with it
+            cur_grid = conf_order[-1]
+            maximal_idx.append(cur_grid)
+            non_overlap = pair_iou[cur_grid, conf_order] < thresh_overlap
+            if np.any(non_overlap):
+                conf_order = conf_order[non_overlap]
+            else:
+                break
+
+        class_preds = class_preds[maximal_idx, :]
+        preds = preds[maximal_idx, :]
+        labels = labels[maximal_idx, :]
+        preds = np.stack([preds, class_preds], axis=-1)
+
+        return labels, preds
+
+    def __yolo_map(self, labels, preds):
+        """
+        Calculates the mean average precision of Yolo object and class predictions
+
+        :param labels: ndarray with ground truth bounding box labels for each significant predicted box. Labels are a
+        6-value list: [object-ness, class, x1, y1, x2, y2]
+        :param preds: ndarray with significant predicted bounding boxes. Predictions are a list of box parameters
+        [x1, y1, x2, y2, conf] followed by a list of class predictions
+        :return: The mean average percision (mAP) of the predictions
+        """
+        # TODO
+        return 0
 
     def shut_down(self):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
