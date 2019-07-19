@@ -1448,15 +1448,21 @@ class DPPModel(object):
 
                 return abs_mean.astype(np.float32)
             elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
-                # Compress the batch size and grid square coordinates
-                grid_count = self.__batch_size * self.__grid_h * self.__grid_w
-                all_y = np.reshape(all_y, (grid_count, 6))
-                all_predictions = np.reshape(all_predictions, (grid_count, 26))
+                # Make the images heterogeneous, storing their separate grids in a list
+                test_labels = [all_y[i, ...] for i in range(all_y.shape[0])]
+                test_preds = [all_predictions[i, ...] for i in range(all_predictions.shape[0])]
+                n_images = len(test_labels)
 
-                all_y, all_predictions = self.__yolo_coord_convert(all_y, all_predictions)
-                all_y, all_predictions = self.__yolo_filter_predictions(all_y, all_predictions)
-                yolo_map = self.__yolo_map(all_y, all_predictions)
+                # Convert coordinates, then filter out the positive ground truth labels and significant predictions
+                for i in range(n_images):
+                    conv_label, conv_pred = self.__yolo_coord_convert(test_labels[i], test_preds[i])
+                    conv_label = conv_label[conv_label[..., 0] == 1, :]
+                    conv_pred = self.__yolo_filter_predictions(conv_pred)
+                    test_labels[i] = conv_label
+                    test_preds[i] = conv_pred
 
+                # Get and log the map
+                yolo_map = self.__yolo_map(test_labels, test_preds)
                 self.__log('Yolo mAP: {}'.format(yolo_map))
             return
 
@@ -1465,7 +1471,7 @@ class DPPModel(object):
         Converts Yolo labeled and predicted bounding boxes from xywh coords to x1y1x2y2 coords. Also accounts for
         required sigmoid and exponential conversions in the predictions (including the confidences)
 
-        :param labels: ndarray with Yolo ground-truth bounding boxes (size ?x6)
+        :param labels: ndarray with Yolo ground-truth bounding boxes (size ?x(NUM_CLASSES+5))
         :param preds: ndarray with Yolo predicted bounding boxes (size ?x(NUM_BOXES*5))
         :return: `labels` and `preds` with the bounding box coords changed from xywh to x1y1x2y2 and predicted box
         confidences converted to percents
@@ -1479,19 +1485,21 @@ class DPPModel(object):
             return x1, y1, x2, y2
 
         # Labels are already sensible numbers, so convert them first
-        lab_x, lab_y, lab_w, lab_h = labels[..., 2:6]
+        lab_coord_idx = np.arange(labels.shape[-1]-4, labels.shape[-1])
+        lab_class, lab_x, lab_y, lab_w, lab_h = np.split(labels, lab_coord_idx, axis=-1)
         lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(lab_x, lab_y, lab_w, lab_h)
-        labels[..., 2:6] = np.stack([lab_x1, lab_y1, lab_x2, lab_y2], axis=-1)
+        labels = np.concatenate([lab_class, lab_x1, lab_y1, lab_x2, lab_y2], axis=-1)
 
         # Extract the class predictions and reorganize the predicted boxes
         class_preds = preds[..., self.__NUM_BOXES*5:]
         preds = np.reshape(preds[..., 0:self.__NUM_BOXES*5], preds.shape[:-1] + (self.__NUM_BOXES, 5))
 
         # Predictions are not, so apply sigmoids and exponentials first and then convert them
+        anchors = np.array(self.__ANCHORS)
         pred_x = expit(preds[..., 0])
         pred_y = expit(preds[..., 1])
-        pred_w = np.exp(preds[..., 2]) * self.__ANCHORS[:, 0]
-        pred_h = np.exp(preds[..., 3]) * self.__ANCHORS[:, 1]
+        pred_w = np.exp(preds[..., 2]) * anchors[:, 0]
+        pred_h = np.exp(preds[..., 3]) * anchors[:, 1]
         pred_conf = expit(preds[..., 4])
         pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x, pred_y, pred_w, pred_h)
         preds[..., :] = np.stack([pred_x1, pred_y1, pred_x2, pred_y2, pred_conf], axis=-1)
@@ -1502,41 +1510,38 @@ class DPPModel(object):
 
         return labels, preds
 
-    def __yolo_filter_predictions(self, labels, preds, thresh_sig=0.6, thresh_overlap=0.3):
+    def __yolo_filter_predictions(self, preds, thresh_sig=0.6, thresh_overlap=0.3):
         """
         Filters the predicted bounding boxes by eliminating insignificant and overlapping predictions
 
-        :param labels: ndarray with ground truth bounding box labels for each image in each grid square. Labels
-        are a 6-value list: [object-ness, class, x1, y1, x2, y2]
-        :param preds: ndarray with predicted bounding boxes for each image in each grid square. Predictions
+        :param preds: ndarray with predicted bounding boxes for one image in each grid square. Predictions
         are a list of, for each box, [x1, y1, x2, y2, conf] followed by a list of class predictions
-        :return: `labels` and `preds` with only the significant and maximal confidence predictions remaining
+        :return: `preds` with only the significant and maximal confidence predictions remaining
         """
         # Extract the class predictions and separate the predicted boxes
-        grid_count = self.__batch_size * self.__grid_h * self.__grid_w
+        grid_count = preds.shape[0]
         class_preds = preds[..., self.__NUM_BOXES * 5:]
         preds = np.reshape(preds[..., 0:self.__NUM_BOXES * 5], preds.shape[:-1] + (self.__NUM_BOXES, 5))
 
         # In each grid square, the highest confidence box is the one responsible for prediction
         max_conf_idx = np.argmax(preds[..., 4], axis=-1)
-        n_ele = grid_count*5
-        preds = preds.transpose((0, 2, 1))  # Place box dimension last
-        preds = preds.reshape(n_ele, -1)  # Compress grid and value dims
-        preds = preds[np.arange(n_ele), max_conf_idx.ravel()]  # Index value dim
-        preds = preds.reshape(grid_count, 5)  # Decompress grid and value dims
+        responsible_boxes = [preds[i, max_conf_idx[i], :] for i in range(grid_count)]
+        preds = np.stack(responsible_boxes, axis=0)
 
         # Eliminate insignificant predicted boxes
-        insig_mask = preds[:, 4] < thresh_sig
-        class_preds = class_preds[insig_mask, :]
-        preds = preds[insig_mask, :]
-        labels = labels[insig_mask, :]
+        sig_mask = preds[:, 4] > thresh_sig
+        if not np.any(sig_mask):
+            return None
+        class_preds = class_preds[sig_mask, :]
+        preds = preds[sig_mask, :]
 
         # Apply non-maximal suppression (i.e. eliminate boxes that overlap with a more confidant box)
         maximal_idx = []
+        sig_grid_count = preds.shape[0]
         conf_order = np.argsort(preds[:, 4])
         pair_iou = np.array([self.__compute_iou(preds[i, 0:4], preds[j, 0:4])
-                             for i in range(grid_count) for j in range(grid_count)])
-        pair_iou = pair_iou.reshape(grid_count, grid_count)
+                             for i in range(sig_grid_count) for j in range(sig_grid_count)])
+        pair_iou = pair_iou.reshape(sig_grid_count, sig_grid_count)
         while len(conf_order) > 0:
             # Take the most confidant box, then cull the list down to boxes that don't overlap with it
             cur_grid = conf_order[-1]
@@ -1549,19 +1554,18 @@ class DPPModel(object):
 
         class_preds = class_preds[maximal_idx, :]
         preds = preds[maximal_idx, :]
-        labels = labels[maximal_idx, :]
         preds = np.stack([preds, class_preds], axis=-1)
 
-        return labels, preds
+        return preds
 
     def __yolo_map(self, labels, preds):
         """
         Calculates the mean average precision of Yolo object and class predictions
 
-        :param labels: ndarray with ground truth bounding box labels for each significant predicted box. Labels are a
-        6-value list: [object-ness, class, x1, y1, x2, y2]
-        :param preds: ndarray with significant predicted bounding boxes. Predictions are a list of box parameters
-        [x1, y1, x2, y2, conf] followed by a list of class predictions
+        :param labels: List of ndarrays with ground truth bounding box labels for each image. Labels are a 6-value
+        list: [object-ness, class, x1, y1, x2, y2]
+        :param preds: List of ndarrays with significant predicted bounding boxes in each image. Predictions are a list
+        of box parameters [x1, y1, x2, y2, conf] followed by a list of class predictions
         :return: The mean average percision (mAP) of the predictions
         """
         # TODO
