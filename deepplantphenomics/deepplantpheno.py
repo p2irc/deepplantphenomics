@@ -1456,7 +1456,11 @@ class DPPModel(object):
                 # Convert coordinates, then filter out the positive ground truth labels and significant predictions
                 for i in range(n_images):
                     conv_label, conv_pred = self.__yolo_coord_convert(test_labels[i], test_preds[i])
-                    conv_label = conv_label[conv_label[..., 0] == 1, :]
+                    truth_mask = conv_label[..., 0] == 1
+                    if not np.any(truth_mask):
+                        conv_label = None
+                    else:
+                        conv_label = conv_label[truth_mask, :]
                     conv_pred = self.__yolo_filter_predictions(conv_pred)
                     test_labels[i] = conv_label
                     test_preds[i] = conv_pred
@@ -1478,6 +1482,16 @@ class DPPModel(object):
         """
 
         def xywh_to_xyxy(x, y, w, h):
+            x_centre = np.arange(self.__grid_w * self.__grid_h) % self.__grid_w
+            y_centre = np.arange(self.__grid_w * self.__grid_h) // self.__grid_w
+            scale_x = self.__image_width / self.__grid_w
+            scale_y = self.__image_height / self.__grid_h
+
+            x = (x + x_centre) * scale_x
+            y = (y + y_centre) * scale_y
+            w = w * scale_x
+            h = h * scale_y
+
             x1 = x - w/2
             x2 = x + w/2
             y1 = y - h/2
@@ -1487,8 +1501,15 @@ class DPPModel(object):
         # Labels are already sensible numbers, so convert them first
         lab_coord_idx = np.arange(labels.shape[-1]-4, labels.shape[-1])
         lab_class, lab_x, lab_y, lab_w, lab_h = np.split(labels, lab_coord_idx, axis=-1)
-        lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(lab_x, lab_y, lab_w, lab_h)
-        labels = np.concatenate([lab_class, lab_x1, lab_y1, lab_x2, lab_y2], axis=-1)
+        lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(np.squeeze(lab_x),  # Squeezing to aid broadcasting in helper
+                                                      np.squeeze(lab_y),
+                                                      np.squeeze(lab_w),
+                                                      np.squeeze(lab_h))
+        labels = np.concatenate([lab_class,
+                                 lab_x1[:, np.newaxis],  # Dummy dimensions to enable concatenation
+                                 lab_y1[:, np.newaxis],
+                                 lab_x2[:, np.newaxis],
+                                 lab_y2[:, np.newaxis]], axis=-1)
 
         # Extract the class predictions and reorganize the predicted boxes
         class_preds = preds[..., self.__NUM_BOXES*5:]
@@ -1501,8 +1522,15 @@ class DPPModel(object):
         pred_w = np.exp(preds[..., 2]) * anchors[:, 0]
         pred_h = np.exp(preds[..., 3]) * anchors[:, 1]
         pred_conf = expit(preds[..., 4])
-        pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x, pred_y, pred_w, pred_h)
-        preds[..., :] = np.stack([pred_x1, pred_y1, pred_x2, pred_y2, pred_conf], axis=-1)
+        pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x.T,  # Transposes to aid broadcasting in helper
+                                                          pred_y.T,
+                                                          pred_w.T,
+                                                          pred_h.T)
+        preds[..., :] = np.stack([pred_x1.T,  # Transposes to restore original shape
+                                  pred_y1.T,
+                                  pred_x2.T,
+                                  pred_y2.T,
+                                  pred_conf], axis=-1)
 
         # Reattach the class predictions
         preds = np.reshape(preds, preds.shape[:-2] + (self.__NUM_BOXES*5,))
@@ -1566,7 +1594,7 @@ class DPPModel(object):
         list: [object-ness, class, x1, y1, x2, y2]
         :param preds: List of ndarrays with significant predicted bounding boxes in each image. Predictions are a list
         of box parameters [x1, y1, x2, y2, conf] followed by a list of class predictions
-        :return: The mean average percision (mAP) of the predictions
+        :return: The mean average precision (mAP) of the predictions
         """
         # TODO
         return 0
