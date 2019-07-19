@@ -1596,8 +1596,63 @@ class DPPModel(object):
         of box parameters [x1, y1, x2, y2, conf] followed by a list of class predictions
         :return: The mean average precision (mAP) of the predictions
         """
-        # TODO
-        return 0
+        thresh_positive = 0.5
+
+        # Go over each prediction in each image and determine if it's a true or false positive
+        detections = []
+        for im_lab, im_pred in zip(labels, preds):
+            # No predictions means no positives
+            if im_pred is None:
+                continue
+            n_pred = im_pred.shape[0]
+
+            # No labels means all false positives
+            if im_lab is None:
+                for i in range(n_pred):
+                    detections.append((im_pred[i, 4], 0))
+                continue
+            n_lab = im_lab.shape[0]
+
+            # Add a 7th value to the labels so we can tell which ones get matched up with true positives
+            im_lab = im_lab.append(np.zeros((n_lab, 1)), axis=-1)
+
+            # Calculate the IoUs of all the prediction and label pairings, then record each detection as a true or
+            # false positive with the prediction confidence
+            pair_ious = np.array([self.__compute_iou(im_pred[i, 2:6], im_lab[j, 0:4])
+                                  for i in range(n_pred) for j in range(n_lab)])
+            pair_ious = np.reshape(pair_ious, (n_pred, n_lab))
+            for i in range(n_pred):
+                j = np.argmax(pair_ious[i, :])
+                if pair_ious[i, j] >= thresh_positive and not im_lab[j, 6]:
+                    detections.append((im_pred[i, 4], 1))
+                    im_lab[j, 6] = 1
+                else:
+                    detections.append((im_pred[i, 4], 0))
+
+        # If there are no valid predictions at all, the mAP is 0
+        if not detections:
+            return 0
+
+        # With multiple classes, we would also have class tags in the detection tuples so the below code could generate
+        # and iterate over class-separated detection lists, giving multiple AP values and one true mean AP. We aren't
+        # doing that right now because of our one-class plant detector assumption
+
+        # Determine the precision-recall curve from the cumulative detected true and false positives (in order of
+        # descending confidence)
+        detections = np.array(sorted(detections, key=lambda d: d[0], reverse=True))
+        n_truths = sum([x.shape[0] if (x is not None) else 0
+                        for x in labels])
+        n_positives = detections.shape[0]
+        true_positives = np.cumsum(detections[:, 1])
+        precision = true_positives / np.arange(n_positives)
+        recall = true_positives / n_truths
+
+        # Calculate the area under the precision-recall curve (== AP)
+        for i in range(precision.size - 1, 0, -1):  # Make precision values the maximum precision at further recalls
+            precision[i - 1] = np.max((precision[i], precision[i-1]))
+        ap = np.sum((precision[1:] - precision[0:-1]) / (recall[1:] - recall[0:-1]))
+
+        return ap
 
     def shut_down(self):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
@@ -2208,8 +2263,9 @@ class DPPModel(object):
         y2 = np.minimum(box1[3], box2[3])
 
         intersection_area = np.maximum(0., x2 - x1) * np.maximum(0., y2 - y1)
-        union_area = ((box1[2] - box1[0]) * (box1[3] - box1[1])) + (
-                    (box2[2] - box2[0]) * (box2[3] - box2[1])) - intersection_area
+        union_area = ((box1[2] - box1[0]) * (box1[3] - box1[1])) \
+                     + ((box2[2] - box2[0]) * (box2[3] - box2[1])) \
+                     - intersection_area
 
         return intersection_area / union_area
 
@@ -3025,7 +3081,7 @@ class DPPModel(object):
         if self.__all_labels is not None:
             labels = self.__all_labels
 
-            self.__raw_image_files = sorted_paths
+            self.__raw_image_files = images
             self.__raw_labels = labels
 
     def load_images_from_list(self, image_files):
@@ -3658,6 +3714,7 @@ class DPPModel(object):
         with open(filename, 'r') as f:
             box_data = json.load(f)
         for box in sorted(box_data.items()):
+            self.__all_ids.append(box[0]) # Name of corresponding image
             w_original = box[1]['width']
             h_original = box[1]['height']
             boxes = []
