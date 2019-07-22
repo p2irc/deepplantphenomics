@@ -158,6 +158,9 @@ class DPPModel(object):
         self.__NUM_CLASSES = None
         self.__ANCHORS = None
         self.__NUM_BOXES = None
+        self.__THRESH_SIG = 0
+        self.__THRESH_OVERLAP = 1
+        self.__THRESH_CORRECT = 0
 
         # Wrapper options
         self.__debug = None
@@ -542,12 +545,16 @@ class DPPModel(object):
         self.__patch_width = width
         self.__with_patching = True
 
-    def set_yolo_parameters(self, grid_size, labels, anchors, num_boxes=5):
+    def set_yolo_parameters(self, grid_size, labels, anchors, num_boxes=5,
+                            thresh_sig=0.6, thresh_overlap=0.3, thresh_correct=0.5):
         self.__grid_h = grid_size[0]
         self.__grid_w = grid_size[1]
         self.__LABELS = labels
         self.__NUM_CLASSES = len(labels)
         self.__NUM_BOXES = num_boxes
+        self.__THRESH_SIG = thresh_sig
+        self.__THRESH_OVERLAP = thresh_overlap
+        self.__THRESH_CORRECT = thresh_correct
 
         # scale anchors to grid size
         self.__ANCHORS = []
@@ -1538,7 +1545,7 @@ class DPPModel(object):
 
         return labels, preds
 
-    def __yolo_filter_predictions(self, preds, thresh_sig=0.6, thresh_overlap=0.3):
+    def __yolo_filter_predictions(self, preds):
         """
         Filters the predicted bounding boxes by eliminating insignificant and overlapping predictions
 
@@ -1557,7 +1564,7 @@ class DPPModel(object):
         preds = np.stack(responsible_boxes, axis=0)
 
         # Eliminate insignificant predicted boxes
-        sig_mask = preds[:, 4] > thresh_sig
+        sig_mask = preds[:, 4] > self.__THRESH_SIG
         if not np.any(sig_mask):
             return None
         class_preds = class_preds[sig_mask, :]
@@ -1574,15 +1581,17 @@ class DPPModel(object):
             # Take the most confidant box, then cull the list down to boxes that don't overlap with it
             cur_grid = conf_order[-1]
             maximal_idx.append(cur_grid)
-            non_overlap = pair_iou[cur_grid, conf_order] < thresh_overlap
+            non_overlap = pair_iou[cur_grid, conf_order] < self.__THRESH_OVERLAP
             if np.any(non_overlap):
                 conf_order = conf_order[non_overlap]
             else:
                 break
 
+        # Stick things back together. maximal_idx is not sorted, but box and class predictions should still match up
+        # and the original grid order shouldn't matter for mAP calculations
         class_preds = class_preds[maximal_idx, :]
         preds = preds[maximal_idx, :]
-        preds = np.stack([preds, class_preds], axis=-1)
+        preds = np.concatenate([preds, class_preds], axis=-1)
 
         return preds
 
@@ -1596,8 +1605,6 @@ class DPPModel(object):
         of box parameters [x1, y1, x2, y2, conf] followed by a list of class predictions
         :return: The mean average precision (mAP) of the predictions
         """
-        thresh_positive = 0.5
-
         # Go over each prediction in each image and determine if it's a true or false positive
         detections = []
         for im_lab, im_pred in zip(labels, preds):
@@ -1614,7 +1621,7 @@ class DPPModel(object):
             n_lab = im_lab.shape[0]
 
             # Add a 7th value to the labels so we can tell which ones get matched up with true positives
-            im_lab = im_lab.append(np.zeros((n_lab, 1)), axis=-1)
+            im_lab = np.concatenate([im_lab, np.zeros((n_lab, 1))], axis=-1)
 
             # Calculate the IoUs of all the prediction and label pairings, then record each detection as a true or
             # false positive with the prediction confidence
@@ -1623,7 +1630,7 @@ class DPPModel(object):
             pair_ious = np.reshape(pair_ious, (n_pred, n_lab))
             for i in range(n_pred):
                 j = np.argmax(pair_ious[i, :])
-                if pair_ious[i, j] >= thresh_positive and not im_lab[j, 6]:
+                if pair_ious[i, j] >= self.__THRESH_CORRECT and not im_lab[j, 6]:
                     detections.append((im_pred[i, 4], 1))
                     im_lab[j, 6] = 1
                 else:
@@ -1644,13 +1651,13 @@ class DPPModel(object):
                         for x in labels])
         n_positives = detections.shape[0]
         true_positives = np.cumsum(detections[:, 1])
-        precision = true_positives / np.arange(n_positives)
+        precision = true_positives / np.arange(1, n_positives+1)
         recall = true_positives / n_truths
 
         # Calculate the area under the precision-recall curve (== AP)
         for i in range(precision.size - 1, 0, -1):  # Make precision values the maximum precision at further recalls
             precision[i - 1] = np.max((precision[i], precision[i-1]))
-        ap = np.sum((precision[1:] - precision[0:-1]) / (recall[1:] - recall[0:-1]))
+        ap = np.sum(precision[1:] * (recall[1:] - recall[0:-1]))
 
         return ap
 
