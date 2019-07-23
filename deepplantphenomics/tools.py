@@ -25,24 +25,6 @@ class tools(object):
 
 
     @staticmethod
-    def classify_arabidopsis_strain(x, batch_size=32):
-        """
-        Uses a pre-trained network to classify arabidopsis strain
-        """
-
-        net = networks.arabidopsisStrainClassifier(batch_size=batch_size)
-        predictions = net.forward_pass(x)
-        net.shut_down()
-
-        # Convert from class probabilities to labels
-        indices = np.argmax(predictions, axis=1)
-        mapping = {0: 'Col-0', 1: 'ein2', 2: 'pgm', 3: 'adh1', 4: 'ctr'}
-        labels = [mapping[index] for index in indices]
-
-        return labels
-
-
-    @staticmethod
     def segment_vegetation(x, batch_size=8):
         """
         Uses a pre-trained fully convolutional network to perform vegetation segmentation
