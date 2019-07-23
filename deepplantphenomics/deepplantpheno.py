@@ -252,12 +252,13 @@ class DPPModel(object):
 
     def set_train_test_split(self, ratio):
         """DEPRECATED
-        Set a ratio for the number of samples to use as training set"""
+        Set a ratio for the total number of samples to use as a training set, using the rest of the samples for testing
+        (i.e. no validation samples)"""
         if not isinstance(ratio, float) and ratio != 1:
             raise TypeError("ratio must be a float or 1")
         if ratio <= 0 or ratio > 1:
             raise ValueError("ratio must be between 0 and 1")
-        warnings.warn("set_train_test_split() is deprecated and will be removed soon. "+
+        warnings.warn("set_train_test_split() is deprecated and will be removed soon. " +
                       "Use set_test_split() and set_validation_split() instead. See docs for more information.")
 
         self.__test_split = 1 - ratio
@@ -269,7 +270,7 @@ class DPPModel(object):
         self.__validation_split = 0
 
     def set_test_split(self, ratio):
-        """Set a ratio for the number of samples to use as training set"""
+        """Set a ratio for the total number of samples to use as a testing set"""
         if not isinstance(ratio, float) and ratio != 0:
             raise TypeError("ratio must be a float or 0")
         if ratio < 0 or ratio > 1:
@@ -282,12 +283,12 @@ class DPPModel(object):
             self.__testing = True
         self.__test_split = ratio
         if self.__test_split + self.__validation_split > 0.5:
-            warnings.warn('WARNING: Less than 50% of data is being used for training. '+
+            warnings.warn('WARNING: Less than 50% of data is being used for training. ' +
                           '({test}% testing and {val}% validation)'.format(test=int(self.__test_split * 100),
                                                                            val=int(self.__validation_split * 100)))
 
     def set_validation_split(self, ratio):
-        """Set a ratio for the number of samples to use as training set"""
+        """Set a ratio for the total number of samples to use as a validation set"""
         if not isinstance(ratio, float) and ratio != 0:
             raise TypeError("ratio must be a float or 0")
         if ratio < 0 or ratio > 1:
@@ -300,7 +301,7 @@ class DPPModel(object):
             self.__validation = True
         self.__validation_split = ratio
         if self.__test_split + self.__validation_split > 0.5:
-            warnings.warn('WARNING: Less than 50% of data is being used for training. '+
+            warnings.warn('WARNING: Less than 50% of data is being used for training. ' +
                           '({test}% testing and {val}% validation)'.format(test=int(self.__test_split * 100),
                                                                            val=int(self.__validation_split * 100)))
 
