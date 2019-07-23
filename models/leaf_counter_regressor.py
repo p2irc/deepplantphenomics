@@ -34,16 +34,16 @@ model.load_ippn_leaf_count_dataset_from_directory('./data/Ara2013-Canon')
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='tanh')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_output_layer()

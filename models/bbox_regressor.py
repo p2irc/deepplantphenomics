@@ -33,16 +33,16 @@ model.load_lemnatec_images_from_directory('./data')
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[5, 5, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 16], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 16, 64], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_fully_connected_layer(output_size=384, activation_function='relu')

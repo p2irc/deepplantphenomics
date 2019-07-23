@@ -35,10 +35,10 @@ model.load_ippn_dataset_from_directory('./data/Ara2013-Canon', 'DAG')
 # Define a model architecture
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[3, 3, channels, 16], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, channels, 16], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[3, 3, 16, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[3, 3, 16, 64], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_fully_connected_layer(output_size=2048, activation_function='relu')
