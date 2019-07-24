@@ -90,15 +90,6 @@ model.begin_training()
 2. `git clone https://github.com/p2irc/deepplantphenomics.git` 
 3. `pip install ./deepplantphenomics`
 
-## Downloading Pre-trained Networks
-
-The package uses [Git Large File Storage](https://git-lfs.github.com/) (git-lfs) to handle the saved network states included in this repository, as they can sometimes be very large.
-
-If you had git-lfs installed when you installed the packages, then you automatically downloaded the saved networks. If you want to download the states after installing the package, install git-lfs and then run the following inside of the top level `deepplantphenomics` folder: 
-1. ``git lfs fetch`` 
-2. ``git lfs pull``
-3. ``pip install --upgrade .``
-
 ## Contributing
 
 Contributions are always welcome. If you would like to make a contribution, please fork from the develop branch.
