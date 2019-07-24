@@ -133,63 +133,6 @@ class rosetteLeafRegressor(object):
         self.model.shut_down()
 
 
-class arabidopsisStrainClassifier(object):
-    model = None
-
-    img_height = 128
-    img_width = 128
-
-    __dir_name = 'arabidopsis-strain-classifier'
-
-    def __init__(self, batch_size=32):
-        """A network which predicts arabidopsis strain/mutant via a convolutional neural net"""
-
-        m_path, _ = os.path.split(__file__)
-        checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
-
-        import deepplantphenomics as dpp
-
-        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
-
-        # Define model hyperparameters
-        self.model.set_batch_size(batch_size)
-        self.model.set_number_of_threads(1)
-        self.model.set_image_dimensions(self.img_height, self.img_width, 3)
-        self.model.set_resize_images(True)
-
-        self.model.set_augmentation_crop(True)
-
-        # Define a model architecture
-        self.model.add_input_layer()
-
-        self.model.add_convolutional_layer(filter_dimension=[5, 5, 3, 32], stride_length=1, activation_function='relu')
-        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-        self.model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu')
-        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-        self.model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu')
-        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-        self.model.add_convolutional_layer(filter_dimension=[5, 5, 64, 64], stride_length=1, activation_function='relu')
-        self.model.add_pooling_layer(kernel_size=3, stride_length=2)
-
-        self.model.add_fully_connected_layer(output_size=4096, activation_function='relu')
-        self.model.add_dropout_layer(0.5)
-        self.model.add_fully_connected_layer(output_size=4096, activation_function='relu')
-        self.model.add_dropout_layer(0.5)
-
-        self.model.add_output_layer(output_size=5)
-
-    def forward_pass(self, x):
-        y = self.model.forward_pass_with_file_inputs(x)
-
-        return y
-
-    def shut_down(self):
-        self.model.shut_down()
-
-
 class vegetationSegmentationNetwork(object):
     model = None
 

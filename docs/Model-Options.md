@@ -62,7 +62,7 @@ Set the type of problem for the model. Default is `'classification'`, other opti
 set_train_test_split()
 ```
 
-Set the ratio of training samples to testing samples.
+Set the ratio of training samples to testing samples (assuming no validation samples).
 
 This method has been deprecated. `set_test_split()` and `set_validation_split()` should be used instead.
 
@@ -70,13 +70,13 @@ This method has been deprecated. `set_test_split()` and `set_validation_split()`
 set_test_split()
 ```
 
-Set the ratio for the number of samples to use as training set.
+Set the ratio of the total number of samples to use as a testing set after training.
 
 ```
 set_validation_split()
 ```
 
-Set the ratio for the number of samples to use as training set.
+Set the ratio of the total number of samples to use as a validation set during training.
 
 ## Input Options
 

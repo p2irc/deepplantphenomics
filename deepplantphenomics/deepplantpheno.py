@@ -252,12 +252,13 @@ class DPPModel(object):
 
     def set_train_test_split(self, ratio):
         """DEPRECATED
-        Set a ratio for the number of samples to use as training set"""
+        Set a ratio for the total number of samples to use as a training set, using the rest of the samples for testing
+        (i.e. no validation samples)"""
         if not isinstance(ratio, float) and ratio != 1:
             raise TypeError("ratio must be a float or 1")
         if ratio <= 0 or ratio > 1:
             raise ValueError("ratio must be between 0 and 1")
-        warnings.warn("set_train_test_split() is deprecated and will be removed soon. "+
+        warnings.warn("set_train_test_split() is deprecated and will be removed soon. " +
                       "Use set_test_split() and set_validation_split() instead. See docs for more information.")
 
         self.__test_split = 1 - ratio
@@ -269,7 +270,7 @@ class DPPModel(object):
         self.__validation_split = 0
 
     def set_test_split(self, ratio):
-        """Set a ratio for the number of samples to use as training set"""
+        """Set a ratio for the total number of samples to use as a testing set"""
         if not isinstance(ratio, float) and ratio != 0:
             raise TypeError("ratio must be a float or 0")
         if ratio < 0 or ratio > 1:
@@ -282,12 +283,12 @@ class DPPModel(object):
             self.__testing = True
         self.__test_split = ratio
         if self.__test_split + self.__validation_split > 0.5:
-            warnings.warn('WARNING: Less than 50% of data is being used for training. '+
+            warnings.warn('WARNING: Less than 50% of data is being used for training. ' +
                           '({test}% testing and {val}% validation)'.format(test=int(self.__test_split * 100),
                                                                            val=int(self.__validation_split * 100)))
 
     def set_validation_split(self, ratio):
-        """Set a ratio for the number of samples to use as training set"""
+        """Set a ratio for the total number of samples to use as a validation set"""
         if not isinstance(ratio, float) and ratio != 0:
             raise TypeError("ratio must be a float or 0")
         if ratio < 0 or ratio > 1:
@@ -300,7 +301,7 @@ class DPPModel(object):
             self.__validation = True
         self.__validation_split = ratio
         if self.__test_split + self.__validation_split > 0.5:
-            warnings.warn('WARNING: Less than 50% of data is being used for training. '+
+            warnings.warn('WARNING: Less than 50% of data is being used for training. ' +
                           '({test}% testing and {val}% validation)'.format(test=int(self.__test_split * 100),
                                                                            val=int(self.__validation_split * 100)))
 
@@ -792,7 +793,7 @@ class DPPModel(object):
             if self.__reg_coeff is not None:
                 l2_cost = tf.squeeze(tf.reduce_sum(
                     [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self.__layers
-                     if isinstance(layer, layers.fullyConnectedLayer) or isinstance(layer, layers.convLayer)]))
+                     if isinstance(layer, layers.fullyConnectedLayer)]))
             else:
                 l2_cost = 0.0
 
@@ -2109,16 +2110,13 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
-    def add_convolutional_layer(self, filter_dimension, stride_length, activation_function,
-                                regularization_coefficient=None):
+    def add_convolutional_layer(self, filter_dimension, stride_length, activation_function):
         """
         Add a convolutional layer to the model.
 
         :param filter_dimension: array of dimensions in the format [x_size, y_size, depth, num_filters]
         :param stride_length: convolution stride length
         :param activation_function: the activation function to apply to the activation map
-        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
-         set by set_regularization_coefficient)
         """
         if len(self.__layers) < 1:
             raise RuntimeError("A convolutional layer cannot be the first layer added to the model. "+
@@ -2142,20 +2140,10 @@ class DPPModel(object):
             raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
                              " Choose one of: "+
                              " ".join("'"+x+"'" for x in self.__supported_activation_functions))
-        if regularization_coefficient is not None:
-            if not isinstance(regularization_coefficient, float):
-                raise TypeError("regularization_coefficient must be a float or None")
-            if regularization_coefficient < 0:
-                raise ValueError("regularization_coefficient must be non-negative")
 
         self.__num_layers_conv += 1
         layer_name = 'conv%d' % self.__num_layers_conv
         self.__log('Adding convolutional layer %s...' % layer_name)
-
-        if regularization_coefficient is None and self.__reg_coeff is not None:
-            regularization_coefficient = self.__reg_coeff
-        elif regularization_coefficient is None and self.__reg_coeff is None:
-            regularization_coefficient = 0.0
 
         with self.__graph.as_default():
             layer = layers.convLayer(layer_name,
@@ -2163,8 +2151,7 @@ class DPPModel(object):
                                      filter_dimension,
                                      stride_length,
                                      activation_function,
-                                     self.__weight_initializer,
-                                     regularization_coefficient)
+                                     self.__weight_initializer)
 
         self.__log('Filter dimensions: {0} Outputs: {1}'.format(filter_dimension, layer.output_size))
 
@@ -2417,16 +2404,14 @@ class DPPModel(object):
                                          filter_dimension,
                                          1,
                                          None,
-                                         self.__weight_initializer,
-                                         regularization_coefficient)
+                                         self.__weight_initializer)
             elif self.__problem_type is definitions.ProblemType.OBJECTDETECTION:
                 layer = layers.convLayer('output',
                                          copy.deepcopy(self.__last_layer().output_size),
                                          filter_dimension,
                                          1,
                                          None,
-                                         self.__weight_initializer,
-                                         regularization_coefficient)
+                                         self.__weight_initializer)
             else:
                 layer = layers.fullyConnectedLayer('output',
                                                    copy.deepcopy(self.__last_layer().output_size),

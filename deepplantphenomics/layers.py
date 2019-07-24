@@ -4,7 +4,7 @@ import copy
 
 class convLayer(object):
     def __init__(self, name, input_size, filter_dimension, stride_length,
-                 activation_function, initializer, regularization_coefficient):
+                 activation_function, initializer):
         self.name = name
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
@@ -12,7 +12,6 @@ class convLayer(object):
         self.__initializer = initializer
         self.input_size = input_size
         self.output_size = copy.deepcopy(input_size)
-        self.regularization_coefficient = regularization_coefficient
 
         padding = 2*(math.floor(filter_dimension[0] / 2))
         self.output_size[1] = int((self.output_size[1] - filter_dimension[0] + padding) / stride_length + 1)
@@ -55,7 +54,6 @@ class convLayer(object):
             activations = tf.nn.selu(activations)
 
         self.activations = activations
-
 
         if activations.shape[-1] == 1:
             return tf.squeeze(activations)

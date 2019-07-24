@@ -31,13 +31,13 @@ model.load_cifar10_dataset_from_directory('./data/cifar10')
 # Simple CIFAR-10 model
 model.add_input_layer()
 
-model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, channels, 32], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
-model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu', regularization_coefficient=0.0)
+model.add_convolutional_layer(filter_dimension=[5, 5, 32, 64], stride_length=1, activation_function='relu')
 model.add_pooling_layer(kernel_size=3, stride_length=2)
 
 model.add_fully_connected_layer(output_size=256, activation_function='relu')

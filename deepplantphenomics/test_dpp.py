@@ -212,10 +212,6 @@ def test_add_convolutional_layer(model):
         model.add_convolutional_layer([1, 2, 3, 4], 1, 555)
     with pytest.raises(ValueError):
         model.add_convolutional_layer([1, 2, 3, 4], 1, 'Nico')
-    with pytest.raises(TypeError):
-        model.add_convolutional_layer([1, 2, 3, 4], 1, 'relu', "5")
-    with pytest.raises(ValueError):
-        model.add_convolutional_layer([1, 2, 3, 4], 1, 'relu', -1.0)
     model.add_convolutional_layer(np.array([1,1,1,1]), 1, 'relu')
     assert isinstance(model._DPPModel__last_layer(), layers.convLayer)
 
