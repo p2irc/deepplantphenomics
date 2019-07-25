@@ -55,10 +55,7 @@ class convLayer(object):
 
         self.activations = activations
 
-        if activations.shape[-1] == 1:
-            return tf.squeeze(activations)
-        else:
-            return activations
+        return activations
 
 class upsampleLayer(object):
     def __init__(self, name, input_size, filter_size, num_filters, upscale_factor,
