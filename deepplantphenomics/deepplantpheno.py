@@ -1625,7 +1625,7 @@ class DPPModel(object):
 
             # Calculate the IoUs of all the prediction and label pairings, then record each detection as a true or
             # false positive with the prediction confidence
-            pair_ious = np.array([self.__compute_iou(im_pred[i, 2:6], im_lab[j, 0:4])
+            pair_ious = np.array([self.__compute_iou(im_pred[i, 0:4], im_lab[j, 2:6])
                                   for i in range(n_pred) for j in range(n_lab)])
             pair_ious = np.reshape(pair_ious, (n_pred, n_lab))
             for i in range(n_pred):
