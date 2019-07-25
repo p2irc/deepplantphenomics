@@ -1362,7 +1362,7 @@ class DPPModel(object):
                                                   5*self.__NUM_BOXES + self.__NUM_CLASSES))
 
             # Main test loop
-            for i in range(num_batches):
+            for i in tqdm(range(num_batches)):
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                     batch_mean = self.__session.run([self.__graph_ops['test_losses']])
                     sum = sum + np.mean(batch_mean)
