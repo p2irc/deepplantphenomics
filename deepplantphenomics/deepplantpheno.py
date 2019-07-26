@@ -2733,7 +2733,7 @@ class DPPModel(object):
 
         self.__raw_image_files = image_files
         self.__raw_labels = labels
-        self.__split_labels = False ### Band-aid fix
+        self.__split_labels = False  # Band-aid fix
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """
@@ -2760,13 +2760,13 @@ class DPPModel(object):
 
         self.__raw_image_files = image_files
         self.__raw_labels = seg_files
-        self.__split_labels = False ### Band-aid fix
-
-
+        self.__split_labels = False  # Band-aid fix
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
+        labels = []
+        ids = []
         if column == 'treatment':
             labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 2, 0)
         elif column == 'strain':
@@ -2777,7 +2777,7 @@ class DPPModel(object):
             warnings.warn('Unknown column in IPPN dataset')
             exit()
 
-        image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
+        image_files = [os.path.join(dirname, im_id + '_rgb.png') for im_id in ids]
 
         self.__total_raw_samples = len(image_files)
 
@@ -2797,7 +2797,6 @@ class DPPModel(object):
 
         self.__raw_image_files = image_files
         self.__raw_labels = labels
-
 
     def load_ippn_tray_dataset_from_directory(self, dirname):
         """
@@ -2828,11 +2827,10 @@ class DPPModel(object):
 
         self.__total_raw_samples = len(images)
 
-        # need to add one-hot encodings for class and object-cell location
-        # it will be one-hot for the class, then 4 bbox coords (x,y,w,h), then one-hot for which grid-cell contains
-        # the object which will be only one 1 (rest zeroes), or all zeroes
-        # e.g. [0,0,...,1,...,0,223,364,58,62,0,0,...,1,...,0,0] but since there is only one class for the ippn
-        # dataset we get [1,x,y,w,h,0,...,1,...,0]
+        # need to add object-ness flag and one-hot encodings for class
+        # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
+        # e.g. [1,0,0,...,1,...,0,223,364,58,62] but since there is only one class for the ippn dataset we get
+        # [1,1,x,y,w,h]
         if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
             # for scaling bbox coords
             # scaling image down to the grid size
@@ -2844,10 +2842,9 @@ class DPPModel(object):
                 curr_img_labels = []
                 num_boxes = len(curr_img_coords) // 4
                 for i in range(num_boxes):
-                    curr_box = []
-                    # add the class label
-                    # (there is only one class for ippn)
-                    curr_box.append(1)
+                    # start the current box label with the object-ness flag and class label (there is only one class
+                    # for ippn)
+                    curr_box = [1, 1]
                     # add scaled bbox coords
                     j = i * 4
                     # x and y offsets from grid position
@@ -2862,18 +2859,9 @@ class DPPModel(object):
                     curr_box.append(y_grid_offset)
                     curr_box.append(w_ratio)
                     curr_box.append(h_ratio)
-                    # add one-hot grid-cell location
-                    # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
-                    # would be 4 (or 3 when 0-indexing)
-                    one_hot_grid_loc = [0] * (self.__grid_w * self.__grid_h)
-                    grid_loc = (y_grid_loc * self.__grid_w) + x_grid_loc
-                    one_hot_grid_loc[int(grid_loc)] = 1
-                    curr_box.extend(one_hot_grid_loc)
-                    # using extend because I had trouble with converting a list of lists to a tensor using our string
-                    # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-                    # train shuffle batch has been the current hacky fix
                     curr_img_labels.extend(curr_box)
                 labels_with_one_hot.append(curr_img_labels)
+            self.__raw_labels = labels_with_one_hot
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
@@ -2882,7 +2870,7 @@ class DPPModel(object):
         images = self.__apply_preprocessing(images)
 
         self.__raw_image_files = images
-        self.__raw_labels = labels_with_one_hot
+        self.__raw_labels = self.__all_labels
 
         ### visual image check/debug, printing image and bounding boxes ###
         # img = cv2.imread(self.__raw_image_files[0], 1)
@@ -2910,14 +2898,13 @@ class DPPModel(object):
         # cv2.imshow('image', img)
         # cv2.waitKey(0)
 
-
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
         if self.__image_height is None or self.__image_width is None or self.__image_depth is None:
-            raise RuntimeError("Image dimensions need to be set before loading data."+
+            raise RuntimeError("Image dimensions need to be set before loading data." +
                                " Try using DPPModel.set_image_dimensions() first.")
         if self.__maximum_training_batches is None:
-            raise RuntimeError("The number of maximum training epochs needs to be set before loading data."+
+            raise RuntimeError("The number of maximum training epochs needs to be set before loading data." +
                                " Try using DPPModel.set_maximum_training_epochs() first.")
 
         labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Leaf_counts.csv'), 1, 0)
@@ -2934,7 +2921,6 @@ class DPPModel(object):
 
         self.__raw_image_files = image_files
         self.__raw_labels = labels
-
 
     def load_inra_dataset_from_directory(self, dirname):
         """Loads the RGB images and labels from the INRA dataset."""
@@ -2973,16 +2959,17 @@ class DPPModel(object):
         self.__queue_capacity = 60000
 
         train_labels, train_images = loaders.read_csv_labels_and_ids(os.path.join(train_dir, 'train.txt'), 1, 0,
-                                                                         character=' ')
+                                                                     character=' ')
+
         def one_hot(labels, num_classes):
-            return [[1 if i==label else 0 for i in range(num_classes)] for label in labels]
+            return [[1 if i == label else 0 for i in range(num_classes)] for label in labels]
 
         # transform into numerical one-hot labels
         train_labels = [int(label) for label in train_labels]
         train_labels = one_hot(train_labels, self.__total_classes)
 
         test_labels, test_images = loaders.read_csv_labels_and_ids(os.path.join(test_dir, 'test.txt'), 1, 0,
-                                                                       character=' ')
+                                                                   character=' ')
 
         # transform into numerical one-hot labels
         test_labels = [int(label) for label in test_labels]
@@ -3016,7 +3003,7 @@ class DPPModel(object):
 
         # Load all file names and labels into arrays
         subdirs = list(filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
-                         [os.path.join(dirname, f) for f in os.listdir(dirname)]))
+                              [os.path.join(dirname, f) for f in os.listdir(dirname)]))
 
         num_classes = len(subdirs)
 
@@ -3053,7 +3040,7 @@ class DPPModel(object):
 
         # Load all snapshot subdirectories
         subdirs = list(filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
-                         [os.path.join(dirname, f) for f in os.listdir(dirname)]))
+                              [os.path.join(dirname, f) for f in os.listdir(dirname)]))
 
         image_files = []
 
@@ -3110,10 +3097,10 @@ class DPPModel(object):
             self.__raw_image_files = images
             if not self.__with_patching:
                 self.__raw_labels = self.__all_labels
-            else: # some problems need to generate special patched data from loaded images
+            else:  # some problems need to generate special patched data from loaded images
                 if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                     if self.__loss_fn == 'yolo':
-                        self.__raw_image_files, self.__all_labels= self.object_detection_patching_and_augmentation()
+                        self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
                         self.convert_labels_to_yolo_format()
                         self.__raw_labels = self.__all_labels
                         self.__total_raw_samples = len(self.__raw_image_files)
@@ -3121,7 +3108,6 @@ class DPPModel(object):
         else:
             self.__raw_image_files = images
             self.__images_only = True
-
 
         ### visual image check, printing image and bounding boxes ###
         # img = cv2.imread(self.__raw_image_files[4], 1)
@@ -3576,7 +3562,7 @@ class DPPModel(object):
         self.__all_labels, self.__all_ids = loaders.read_csv_multi_labels_and_ids(filepath, id_column)
 
     def load_images_with_ids_from_directory(self, dir):
-        """Loads images from a directroy, relating them to labels by the IDs which were loaded from a CSV file"""
+        """Loads images from a directory, relating them to labels by the IDs which were loaded from a CSV file"""
 
         # Load all images in directory
         image_files = [os.path.join(dir, name) for name in os.listdir(dir) if
@@ -3642,7 +3628,7 @@ class DPPModel(object):
                       os.path.isfile(os.path.join(dir, name)) & name.endswith('.xml')]
 
         for voc_file in file_paths:
-            id, x_min, x_max, y_min, y_max = loaders.read_single_bounding_box_from_pascal_voc(voc_file)
+            im_id, x_min, x_max, y_min, y_max = loaders.read_single_bounding_box_from_pascal_voc(voc_file)
 
             # re-scale coordinates if images are being resized
             if self.__resize_images:
@@ -3651,14 +3637,12 @@ class DPPModel(object):
                 y_min = int(y_min * (float(self.__image_height) / self.__image_height_original))
                 y_max = int(y_max * (float(self.__image_height) / self.__image_height_original))
 
-            self.__all_ids.append(id)
+            self.__all_ids.append(im_id)
             self.__all_labels.append([x_min, x_max, y_min, y_max])
 
-        # need to add one-hot encodings for class and object-cell location
-        # it will be one-hot for the class, then 4 bbox coords (x,y,w,h), then one-hot for which grid-cell contains
-        # the object which will be only one 1 (rest zeroes), or all zeroes
-        # e.g. [0,0,...,1,...,0,223,364,58,62,0,0,...,1,...,0,0] but since there is only one class for the ippn
-        # dataset we get [1,x,y,w,h,0,...,1,...,0]
+        # need to add object-ness flag and one-hot encodings for class
+        # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
+        # e.g. [1,0,0,...,1,...,0,223,364,58,62]
         if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
             # for scaling bbox coords
             # scaling image down to the grid size
@@ -3667,7 +3651,7 @@ class DPPModel(object):
 
             labels_with_one_hot = []
             for curr_img_coords in self.__all_labels:
-                curr_img_grid_locs = [] # for duplicates; current hacky fix
+                curr_img_grid_locs = []  # for duplicates; current hacky fix
                 curr_img_labels = np.zeros((self.__grid_w * self.__grid_h) * (1 + self.__NUM_CLASSES + 4))
 
                 # only one object per image so no need to loop here
@@ -3697,19 +3681,20 @@ class DPPModel(object):
                 # would be 4 (or 3 when 0-indexing)
                 grid_loc = (y_grid_loc * self.__grid_w) + x_grid_loc
 
-            ### 1 for obj then 1 since only once class <- needs to be made more general for multiple classes ###
+                # 1 for obj then 1 since only once class <- needs to be made more general for multiple classes
                 # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
                 # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
                 # x,y,w,h then use the in this next line below
                 # cur_box = []... vec_size = len(currbox)....
                 vec_size = (1 + self.__NUM_CLASSES + 4)
-                curr_img_labels[int(grid_loc)*vec_size:(int(grid_loc)+1)*vec_size] = [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
+                curr_img_labels[int(grid_loc)*vec_size:(int(grid_loc)+1)*vec_size] = \
+                    [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
                 # using extend because I had trouble with converting a list of lists to a tensor using our string
                 # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
                 # train shuffle batch has been the current hacky fix
                 labels_with_one_hot.append(curr_img_labels)
 
-        self.__all_labels = labels_with_one_hot
+            self.__all_labels = labels_with_one_hot
 
     def load_json_labels_from_file(self, filename):
         """Loads bounding boxes for multiple images from a single json file."""
@@ -3756,8 +3741,8 @@ class DPPModel(object):
                 self.convert_labels_to_yolo_format()
 
     def convert_labels_to_yolo_format(self):
-        '''Takes the labels that are in the json format and turns them into formatted arrays
-        that the network and yolo loss function are expecting to work with'''
+        """Takes the labels that are in the json format and turns them into formatted arrays
+        that the network and yolo loss function are expecting to work with"""
 
         # for scaling bbox coords
         # scaling image down to the grid size
