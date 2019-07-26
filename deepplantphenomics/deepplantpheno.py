@@ -3101,7 +3101,7 @@ class DPPModel(object):
                 if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
                     if self.__loss_fn == 'yolo':
                         self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
-                        self.convert_labels_to_yolo_format()
+                        self.__convert_labels_to_yolo_format()
                         self.__raw_labels = self.__all_labels
                         self.__total_raw_samples = len(self.__raw_image_files)
                         self.__log('Total raw patch examples is %d' % self.__total_raw_samples)
@@ -3715,13 +3715,6 @@ class DPPModel(object):
                 x_max = plant['all_points_x'][1]
                 y_min = plant['all_points_y'][0]
                 y_max = plant['all_points_y'][1]
-                # some are 5000x2000 and others are 2000x5000 so we need to make things more uniform
-                # images are already transposed after running tiff2png.py
-                if box[1]['width'] > box[1]['height']:
-                    x_min, y_min = y_min, x_min
-                    x_max, y_max = y_max, x_max
-                    w_original = box[1]['height']
-                    h_original = box[1]['width']
 
                 # re-scale coordinates if images are being resized
                 if self.__resize_images:
@@ -3738,9 +3731,9 @@ class DPPModel(object):
         # e.g. [1,0,0,...,1,...,0,x,y,w,h]
         if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
             if not self.__with_patching:
-                self.convert_labels_to_yolo_format()
+                self.__convert_labels_to_yolo_format()
 
-    def convert_labels_to_yolo_format(self):
+    def __convert_labels_to_yolo_format(self):
         """Takes the labels that are in the json format and turns them into formatted arrays
         that the network and yolo loss function are expecting to work with"""
 
