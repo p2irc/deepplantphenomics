@@ -12,6 +12,7 @@ import datetime
 import time
 import warnings
 import copy
+from collections.abc import Sequence
 from scipy.special import expit
 from PIL import Image
 from tqdm import tqdm
@@ -151,13 +152,14 @@ class DPPModel(object):
 
         self.__num_regression_outputs = 1
 
-        # Yolo parameters, defined in set_yolo_parameters
-        self.__grid_w = None
-        self.__grid_h = None
-        self.__LABELS = None
-        self.__NUM_CLASSES = None
-        self.__ANCHORS = None
-        self.__NUM_BOXES = None
+        # Yolo parameters, non-default values defined by set_yolo_parameters
+        self.__grid_w = 7
+        self.__grid_h = 7
+        self.__LABELS = ['plant']
+        self.__NUM_CLASSES = 1
+        self.__RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
+        self.__ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
+        self.__NUM_BOXES = 5
         self.__THRESH_SIG = 0.6
         self.__THRESH_OVERLAP = 0.3
         self.__THRESH_CORRECT = 0.5
@@ -469,6 +471,12 @@ class DPPModel(object):
         self.__image_height = image_height
         self.__image_depth = image_depth
 
+        # Generate image-scaled anchors for YOLO object detection
+        if self.__RAW_ANCHORS:
+            scale_w = self.__grid_w / self.__image_width
+            scale_h = self.__grid_h / self.__image_height
+            self.__ANCHORS = [(anchor[0] * scale_w, anchor[1] * scale_h) for anchor in self.__RAW_ANCHORS]
+
     def set_original_image_dimensions(self, image_height, image_width):
         """
         Specify the original size of the image, before resizing.
@@ -548,33 +556,46 @@ class DPPModel(object):
     def set_yolo_parameters(self, grid_size=None, labels=None, anchors=None):
         """
         Set YOLO parameters for the grid size, class labels, and anchor/prior sizes
-        :param grid_size: 2-element list with the width and height of the YOLO grid. Default = [7,7]
+        :param grid_size: 2-element list/tuple with the width and height of the YOLO grid. Default = [7,7]
         :param labels: List of class labels for detection. Default = ['plant']
         :param anchors: List of 2-element anchor/prior widths and heights.
         Default = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
         """
-        # Fill in list parameters with arguments or defaults, because mutable function defaults are dangerous
+        if not self.__image_width or not self.__image_height:
+            raise RuntimeError("Image dimensions need to be chosen before setting YOLO parameters")
+
+        # Do type checks and fill in list parameters with arguments or defaults, because mutable function defaults are
+        # dangerous
         if grid_size:
+            if not isinstance(grid_size, Sequence) or len(grid_size) != 2:
+                raise TypeError("grid_size should be a 2-element integer list")
             self.__grid_w, self.__grid_h = grid_size
         else:
             self.__grid_w, self.__grid_h = [7,7]
         if labels:
+            if not isinstance(labels, Sequence) or not any([isinstance(lab, str) for lab in labels]):
+                raise TypeError("labels should be a string list")
             self.__LABELS = labels
             self.__NUM_CLASSES = len(labels)
         else:
             self.__LABELS = ['plant']
             self.__NUM_CLASSES = 1
-        if not anchors:
-            anchors = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
+        if anchors:
+            if not isinstance(anchors, Sequence):
+                raise TypeError("anchors should be a list/tuple of integer lists/tuples")
+            if not any([(isinstance(a, Sequence) and len(a) == 2) for a in anchors]):
+                raise TypeError("anchors should contain 2-element integer lists/tuples")
+            self.__RAW_ANCHORS = anchors
+        else:
+            self.__RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
 
         # Fill in non-mutable parameters
         self.__NUM_BOXES = len(anchors)
-        self.set_yolo_thresholds()
 
-        # Scale anchors/priors to the grid size
+        # Scale anchors to the grid size
         scale_w = self.__grid_w / self.__image_width
         scale_h = self.__grid_h / self.__image_height
-        self.__ANCHORS = [(anchor[0]*scale_w, anchor[1]*scale_h) for anchor in anchors]
+        self.__ANCHORS = [(anchor[0]*scale_w, anchor[1]*scale_h) for anchor in self.__RAW_ANCHORS]
 
     def set_yolo_thresholds(self, thresh_sig=0.6, thresh_overlap=0.3, thresh_correct=0.5):
         """Set YOLO IoU thresholds for bounding box significance (during output filtering), overlap (during non-maximal
