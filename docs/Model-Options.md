@@ -164,13 +164,11 @@ Train on randomly extracted patches, of size `height`x`width`, of the original i
 ```
 set_yolo_parameters(grid_size=[7,7],
                     class_list=['plant'], 
-                    anchors=[[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]],
-                    num_boxes=5)
+                    anchors=[[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]])
 ```
 
 Sets several parameters needed for the Yolo-based object detector.
 
-- Yolo splits images into a grid and makes bounding box predictions in each grid square.`grid_size` defines the number of grid squares along the image height and width.  
-- `class_list` is a list of names for possible object classes in images. (DPP currently only supports one class at a time)
-- `anchors` defines the widths and heights of anchors/prior boxes which the bounding box predictions use as a basis for detecting objects of various sizes and aspect ratios.
-- `num_boxes` sets the number of bounding box predictions in make in each grid square.
+- Yolo splits images into a grid and makes bounding box predictions in each grid square.`grid_size` defines the number of grid squares along the image width and height. Defaults to [7,7].
+- `class_list` is a list of names for possible object classes in images. This defaults to a single 'plant' class. (DPP currently only supports one class at a time)
+- `anchors` defines the widths and heights of anchors/prior boxes which the bounding box predictions use as a basis for detecting objects of various sizes and aspect ratios. The five anchors listed above are the default values and should be fine for most detectors.

@@ -158,9 +158,9 @@ class DPPModel(object):
         self.__NUM_CLASSES = None
         self.__ANCHORS = None
         self.__NUM_BOXES = None
-        self.__THRESH_SIG = 0
-        self.__THRESH_OVERLAP = 1
-        self.__THRESH_CORRECT = 0
+        self.__THRESH_SIG = 0.6
+        self.__THRESH_OVERLAP = 0.3
+        self.__THRESH_CORRECT = 0.5
 
         # Wrapper options
         self.__debug = None
@@ -545,25 +545,43 @@ class DPPModel(object):
         self.__patch_width = width
         self.__with_patching = True
 
-    def set_yolo_parameters(self, grid_size, labels, anchors, num_boxes=5,
-                            thresh_sig=0.6, thresh_overlap=0.3, thresh_correct=0.5):
-        self.__grid_h = grid_size[0]
-        self.__grid_w = grid_size[1]
-        self.__LABELS = labels
-        self.__NUM_CLASSES = len(labels)
-        self.__NUM_BOXES = num_boxes
+    def set_yolo_parameters(self, grid_size=None, labels=None, anchors=None):
+        """
+        Set YOLO parameters for the grid size, class labels, and anchor/prior sizes
+        :param grid_size: 2-element list with the width and height of the YOLO grid. Default = [7,7]
+        :param labels: List of class labels for detection. Default = ['plant']
+        :param anchors: List of 2-element anchor/prior widths and heights.
+        Default = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
+        """
+        # Fill in list parameters with arguments or defaults, because mutable function defaults are dangerous
+        if grid_size:
+            self.__grid_w, self.__grid_h = grid_size
+        else:
+            self.__grid_w, self.__grid_h = [7,7]
+        if labels:
+            self.__LABELS = labels
+            self.__NUM_CLASSES = len(labels)
+        else:
+            self.__LABELS = ['plant']
+            self.__NUM_CLASSES = 1
+        if not anchors:
+            anchors = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
+
+        # Fill in non-mutable parameters
+        self.__NUM_BOXES = len(anchors)
+        self.set_yolo_thresholds()
+
+        # Scale anchors/priors to the grid size
+        scale_w = self.__grid_w / self.__image_width
+        scale_h = self.__grid_h / self.__image_height
+        self.__ANCHORS = [(anchor[0]*scale_w, anchor[1]*scale_h) for anchor in anchors]
+
+    def set_yolo_thresholds(self, thresh_sig=0.6, thresh_overlap=0.3, thresh_correct=0.5):
+        """Set YOLO IoU thresholds for bounding box significance (during output filtering), overlap (during non-maximal
+        suppression), and correctness (for mAP calculation)"""
         self.__THRESH_SIG = thresh_sig
         self.__THRESH_OVERLAP = thresh_overlap
         self.__THRESH_CORRECT = thresh_correct
-
-        # scale anchors to grid size
-        self.__ANCHORS = []
-        scale_w = self.__grid_w / self.__image_width
-        scale_h = self.__grid_h / self.__image_height
-        for anchor in anchors:
-            w = anchor[0] * scale_w
-            h = anchor[1] * scale_h
-            self.__ANCHORS.append((w, h))
 
     def _yolo_compute_iou(self, pred_box, true_box):
         """Helper function to compute the intersection over union of pred_box and true_box
