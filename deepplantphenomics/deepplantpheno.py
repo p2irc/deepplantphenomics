@@ -567,30 +567,35 @@ class DPPModel(object):
         # Do type checks and fill in list parameters with arguments or defaults, because mutable function defaults are
         # dangerous
         if grid_size:
-            if not isinstance(grid_size, Sequence) or len(grid_size) != 2:
+            if not isinstance(grid_size, Sequence) or len(grid_size) != 2 \
+                    or not all([isinstance(x, int) for x in grid_size]):
                 raise TypeError("grid_size should be a 2-element integer list")
             self.__grid_w, self.__grid_h = grid_size
         else:
             self.__grid_w, self.__grid_h = [7,7]
+
         if labels:
-            if not isinstance(labels, Sequence) or not any([isinstance(lab, str) for lab in labels]):
+            if not isinstance(labels, Sequence) or isinstance(labels, str) \
+                    or not all([isinstance(lab, str) for lab in labels]):
                 raise TypeError("labels should be a string list")
             self.__LABELS = labels
             self.__NUM_CLASSES = len(labels)
         else:
             self.__LABELS = ['plant']
             self.__NUM_CLASSES = 1
+
         if anchors:
             if not isinstance(anchors, Sequence):
                 raise TypeError("anchors should be a list/tuple of integer lists/tuples")
-            if not any([(isinstance(a, Sequence) and len(a) == 2) for a in anchors]):
-                raise TypeError("anchors should contain 2-element integer lists/tuples")
+            if not all([(isinstance(a, Sequence) and len(a) == 2
+                     and isinstance(a[0], int) and isinstance(a[1], int)) for a in anchors]):
+                raise TypeError("anchors should contain 2-element lists/tuples")
             self.__RAW_ANCHORS = anchors
         else:
             self.__RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
 
         # Fill in non-mutable parameters
-        self.__NUM_BOXES = len(anchors)
+        self.__NUM_BOXES = len(self.__RAW_ANCHORS)
 
         # Scale anchors to the grid size
         scale_w = self.__grid_w / self.__image_width

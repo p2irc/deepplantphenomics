@@ -177,6 +177,33 @@ def test_set_problem_type(model):
     model.set_problem_type('semantic_segmentation')
     assert model._DPPModel__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION
 
+def test_set_yolo_parameters():
+    model = dpp.DPPModel()
+    with pytest.raises(RuntimeError):
+        model.set_yolo_parameters()
+    model.set_image_dimensions(448, 448, 3)
+    model.set_yolo_parameters()
+
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters(True, ['plant', 'knat'], [(100, 30), (200, 10), (50, 145)])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters(13, ['plant', 'knat'], [(100, 30), (200, 10), (50, 145)])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13], ['plant', 'knat'], [(100, 30), (200, 10), (50, 145)])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13, 13], 'plant', [(100, 30), (200, 10), (50, 145)])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13, 13], ['plant', 2], [(100, 30), (200, 10), (50, 145)])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13, 13], ['plant', 'knat'], 100)
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13, 13], ['plant', 'knat'], [(100, 30), (200, 10), 50])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13, 13], ['plant', 'knat'], [(100, 30), (200, 10), (145,)])
+    with pytest.raises(TypeError):
+        model.set_yolo_parameters([13, 13], ['plant', 'knat'], [(100, 30), (200, 10), (145, 'a')])
+    model.set_yolo_parameters([13, 13], ['plant', 'knat'], [(100, 30), (200, 10), (50, 145)])
+
 # adding layers may require some more indepth testing
 def test_add_input_layer(model):
     model.set_batch_size(1)

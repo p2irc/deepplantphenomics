@@ -20,10 +20,12 @@ model.set_resize_images(True)
 model.set_problem_type('object_detection')
 prior_boxes = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
 model.set_yolo_parameters(grid_size=[7,7], labels=['plant'],
-                          anchors=prior_boxes, num_boxes=5)
+                          anchors=prior_boxes)
 ```
 
 `set_yolo_parameters()` is used to set most of the settings specific to YOLO object detection. The grid size that it uses (typically with the same, odd,  width & height) and a list of the classes/labels have to be provided. YOLO also requires a list of anchors/priors for each bounding box; these are the widths and heights of reference boxes that allow the multiple bounding box predictions to detect objects of various aspect ratios.
+
+The YOLO specific parameters default to a grid size of 7x7, a single 'plant' label, and anchors of [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]. These settings are typical for most cases, and calling `set_yolo_parameters` is optional if all of these are left at their default values.
 
 ## Data/Label Loading
 
