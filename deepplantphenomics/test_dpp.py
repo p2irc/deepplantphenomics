@@ -76,6 +76,10 @@ def test_set_augmentation_brightness_and_contrast(model):
     with pytest.raises(TypeError):
         model.set_augmentation_crop("True")
 
+def test_set_augmentation_rotation(model):
+    with pytest.raises(TypeError):
+        model.set_augmentation_rotation("True")
+
 def test_set_regularization_coefficient(model):
     with pytest.raises(TypeError):
         model.set_regularization_coefficient("5")

@@ -82,6 +82,7 @@ class DPPModel(object):
         self.__augmentation_flip_vertical = False
         self.__augmentation_crop = False
         self.__augmentation_contrast = False
+        self.__augmentation_rotate = False
         self.__crop_amount = 0.75
 
         # Dataset storage
@@ -369,6 +370,13 @@ class DPPModel(object):
             raise TypeError("contr must be a bool")
 
         self.__augmentation_contrast = contr
+
+    def set_augmentation_rotation(self, rot):
+        """Randomly rotate training images"""
+        if not isinstance(rot, bool):
+            raise TypeError("rot must be a bool")
+
+        self.__augmentation_rotate = rot
 
     def set_regularization_coefficient(self, lamb):
         """Set lambda for L2 weight decay"""
