@@ -3575,18 +3575,18 @@ class DPPModel(object):
 
                     self.__log('Performing bounding box estimation...')
                     bbs = bbr.forward_pass(images)
-
                     bbr.shut_down()
-                    bbr = None
 
                     images = zip(images, bbs)
 
                     self.__log('Bounding box estimation finished, performing segmentation...')
 
-                    processed_images = Parallel(n_jobs=self.__num_threads) \
-                        (delayed(preprocessing.do_parallel_auto_segmentation)
-                         (i[0], i[1], self.__processed_images_dir, self.__image_height, self.__image_width) for i in
-                         images)
+                    processed_images = \
+                        Parallel(n_jobs=self.__num_threads)(delayed(preprocessing.do_parallel_auto_segmentation)
+                                                            (i[0], i[1], self.__processed_images_dir,
+                                                             self.__image_height,
+                                                             self.__image_width)
+                                                            for i in images)
 
                     images = processed_images
 
@@ -3599,7 +3599,7 @@ class DPPModel(object):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self.__graph.as_default():
 
-            # house keeping
+            # Try to get the number of samples the normal way
             if isinstance(train_images, tf.Tensor):
                 self.__total_training_samples = train_images.get_shape().as_list()[0]
                 if self.__testing:
@@ -3615,8 +3615,8 @@ class DPPModel(object):
                 if self.__validation:
                     self.__total_validation_samples = len(val_images)
 
-            # most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
-            # will have None for size, so we manually calculate it here when that is the case
+            # Most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
+            # will have None for its size, so the above won't work and we manually calculate it here
             if self.__total_training_samples is None:
                 self.__total_training_samples = int(self.__total_raw_samples)
                 if self.__testing:
@@ -3626,12 +3626,12 @@ class DPPModel(object):
                     self.__total_validation_samples = int(self.__total_raw_samples * self.__validation_split)
                     self.__total_training_samples = self.__total_training_samples - self.__total_validation_samples
 
-            # verbosity
+            # Logging verbosity
             self.__log('Total training samples is {0}'.format(self.__total_training_samples))
             self.__log('Total validation samples is {0}'.format(self.__total_validation_samples))
             self.__log('Total testing samples is {0}'.format(self.__total_testing_samples))
 
-            # moderation features queues
+            # Create moderation features queues
             if train_mf is not None:
                 train_moderation_queue = tf.train.slice_input_producer([train_mf], shuffle=False)
                 self.__train_moderation_features = tf.cast(train_moderation_queue[0], tf.float32)
@@ -3644,7 +3644,7 @@ class DPPModel(object):
                 val_moderation_queue = tf.train.slice_input_producer([val_mf], shuffle=False)
                 self.__val_moderation_features = tf.cast(val_moderation_queue[0], tf.float32)
 
-            # calculate number of batches to run
+            # Calculate number of batches to run
             batches_per_epoch = self.__total_training_samples / float(self.__batch_size)
             self.__maximum_training_batches = int(self.__maximum_training_batches * batches_per_epoch)
 
@@ -3654,13 +3654,14 @@ class DPPModel(object):
             self.__log('Batches per epoch: {:f}'.format(batches_per_epoch))
             self.__log('Running to {0} batches'.format(self.__maximum_training_batches))
 
-            # create input queues
+            # Create input queues
             train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
             if self.__testing:
                 test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
             if self.__validation:
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
+            # Apply pre-processing to the image labels (which are images for semantic segmentation)
             if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
                 self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]), channels=1)
                 # normalize to 1.0
@@ -3687,7 +3688,7 @@ class DPPModel(object):
                     self.__val_labels = tf.image.convert_image_dtype(self.__val_labels, dtype=tf.float32)
                     if self.__resize_images:
                         self.__val_labels = tf.image.resize_images(self.__val_labels,
-                                                                    [self.__image_height, self.__image_width])
+                                                                   [self.__image_height, self.__image_width])
                         self.__val_labels = tf.reduce_mean(self.__val_labels, axis=2)
             else:
                 self.__train_labels = train_input_queue[1]
@@ -3696,16 +3697,16 @@ class DPPModel(object):
                 if self.__validation:
                     self.__val_labels = val_input_queue[1]
 
-            # pre-processing for training and testing images
+            # Apply pre-processing for training and testing images
             if image_type is 'jpg':
                 self.__train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
                                                            channels=self.__image_depth)
                 if self.__testing:
                     self.__test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
-                                                          channels=self.__image_depth)
+                                                              channels=self.__image_depth)
                 if self.__validation:
                     self.__val_images = tf.image.decode_jpeg(tf.read_file(val_input_queue[0]),
-                                                              channels=self.__image_depth)
+                                                             channels=self.__image_depth)
             else:
                 self.__train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
                                                           channels=self.__image_depth)
@@ -3714,16 +3715,16 @@ class DPPModel(object):
                                                              channels=self.__image_depth)
                 if self.__validation:
                     self.__val_images = tf.image.decode_png(tf.read_file(val_input_queue[0]),
-                                                              channels=self.__image_depth)
+                                                            channels=self.__image_depth)
 
-            # convert images to float and normalize to 1.0
+            # Convert images to float and normalize to 1.0
             self.__train_images = tf.image.convert_image_dtype(self.__train_images, dtype=tf.float32)
             if self.__testing:
                 self.__test_images = tf.image.convert_image_dtype(self.__test_images, dtype=tf.float32)
             if self.__validation:
                 self.__val_images = tf.image.convert_image_dtype(self.__val_images, dtype=tf.float32)
 
-            if self.__resize_images is True:
+            if self.__resize_images:
                 self.__train_images = tf.image.resize_images(self.__train_images,
                                                              [self.__image_height, self.__image_width])
                 if self.__testing:
@@ -3733,8 +3734,8 @@ class DPPModel(object):
                     self.__val_images = tf.image.resize_images(self.__val_images,
                                                                [self.__image_height, self.__image_width])
 
-
-            if self.__augmentation_crop is True:
+            # Apply the various augmentations to the images
+            if self.__augmentation_crop:
                 self.__image_height = int(self.__image_height * self.__crop_amount)
                 self.__image_width = int(self.__image_width * self.__crop_amount)
 
@@ -3744,9 +3745,9 @@ class DPPModel(object):
                                                                                 self.__image_width)
                 if self.__validation:
                     self.__val_images = tf.image.resize_image_with_crop_or_pad(self.__val_images, self.__image_height,
-                                                                                self.__image_width)
+                                                                               self.__image_width)
 
-            if self.__crop_or_pad_images is True:
+            if self.__crop_or_pad_images:
                 # pad or crop to deal with images of different sizes
                 self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images,
                                                                              self.__image_height,
@@ -3774,15 +3775,15 @@ class DPPModel(object):
                                                                                    self.__image_height,
                                                                                    self.__image_width)
 
-            if self.__augmentation_flip_horizontal is True:
+            if self.__augmentation_flip_horizontal:
                 # apply flip horizontal augmentation
                 self.__train_images = tf.image.random_flip_left_right(self.__train_images)
 
-            if self.__augmentation_flip_vertical is True:
+            if self.__augmentation_flip_vertical:
                 # apply flip vertical augmentation
                 self.__train_images = tf.image.random_flip_up_down(self.__train_images)
 
-            if self.__augmentation_contrast is True:
+            if self.__augmentation_contrast:
                 # apply random contrast and brightness augmentation
                 self.__train_images = tf.image.random_brightness(self.__train_images, max_delta=63)
                 self.__train_images = tf.image.random_contrast(self.__train_images, lower=0.2, upper=1.8)
@@ -3800,8 +3801,6 @@ class DPPModel(object):
                 self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
             if self.__validation:
                 self.__val_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
-
-
 
     def __parse_images(self, images, image_type='png'):
         """Takes some images as input, creates producer of processed images internally to this instance"""
