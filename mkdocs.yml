@@ -15,5 +15,6 @@ pages:
       - Tutorials:
         - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
         - Tutorial - Deploying your Trained Model: Tutorial-Deployment.md
+        - Tutorial - Training an Object Detector: Tutorial-Training-An-Object-Detector.md
 
 theme: readthedocs

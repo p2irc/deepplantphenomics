@@ -56,7 +56,11 @@ Set the weight initialization scheme for convolutional and fully connected layer
 set_problem_type()
 ```
 
-Set the type of problem for the model. Default is `'classification'`, other options are `'regression'` or `'semantic_segmentation'` (really just pixel-wise regression with a fully convolutional network, but useful for segmentation applications. See [semantic segmentation](/Semantic-Segmentation/)).
+Set the type of problem for the model. Possible problem types include:
+- `classification` (default)
+- `regression`
+- `semantic_segmentation` (pixel-wise regression with a fully convolutional network, useful for segmentation applications; see [semantic segmentation](/Semantic-Segmentation/))
+- `object_detection` (a one-class object detector based on [Yolov2](https://arxiv.org/pdf/1612.08242.pdf))
 
 ```
 set_train_test_split()
@@ -154,3 +158,17 @@ set_patch_size(height=128, width=128)
 ```
 
 Train on randomly extracted patches, of size `height`x`width`, of the original images. Testing is then performed by splitting the image into patches of `height`x`width`, passing the patches individually through the network, and then stitching the results back together to form the full image. 
+
+## YOLO Object Detection Parameters
+
+```
+set_yolo_parameters(grid_size=[7,7],
+                    class_list=['plant'], 
+                    anchors=[[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]])
+```
+
+Sets several parameters needed for the Yolo-based object detector.
+
+- Yolo splits images into a grid and makes bounding box predictions in each grid square.`grid_size` defines the number of grid squares along the image width and height. Defaults to [7,7].
+- `class_list` is a list of names for possible object classes in images. This defaults to a single 'plant' class. (DPP currently only supports one class at a time)
+- `anchors` defines the widths and heights of anchors/prior boxes which the bounding box predictions use as a basis for detecting objects of various sizes and aspect ratios. The five anchors listed above are the default values and should be fine for most detectors.
