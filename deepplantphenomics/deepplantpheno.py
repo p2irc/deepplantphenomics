@@ -12,6 +12,7 @@ import datetime
 import time
 import warnings
 import copy
+import math
 from scipy.special import expit
 from PIL import Image
 from tqdm import tqdm
@@ -3736,6 +3737,7 @@ class DPPModel(object):
 
             # Apply the various augmentations to the images
             if self.__augmentation_crop:
+                # Apply random crops to images
                 self.__image_height = int(self.__image_height * self.__crop_amount)
                 self.__image_width = int(self.__image_width * self.__crop_amount)
 
@@ -3748,7 +3750,7 @@ class DPPModel(object):
                                                                                self.__image_width)
 
             if self.__crop_or_pad_images:
-                # pad or crop to deal with images of different sizes
+                # Apply padding or cropping to deal with images of different sizes
                 self.__train_images = tf.image.resize_image_with_crop_or_pad(self.__train_images,
                                                                              self.__image_height,
                                                                              self.__image_width)
@@ -3776,17 +3778,22 @@ class DPPModel(object):
                                                                                    self.__image_width)
 
             if self.__augmentation_flip_horizontal:
-                # apply flip horizontal augmentation
+                # Apply random horizontal flips
                 self.__train_images = tf.image.random_flip_left_right(self.__train_images)
 
             if self.__augmentation_flip_vertical:
-                # apply flip vertical augmentation
+                # Apply random vertical flips
                 self.__train_images = tf.image.random_flip_up_down(self.__train_images)
 
             if self.__augmentation_contrast:
-                # apply random contrast and brightness augmentation
+                # Apply random contrast and brightness adjustments
                 self.__train_images = tf.image.random_brightness(self.__train_images, max_delta=63)
                 self.__train_images = tf.image.random_contrast(self.__train_images, lower=0.2, upper=1.8)
+
+            if self.__augmentation_rotate:
+                # Apply random rotations
+                self.__train_images = tf.contrib.image.rotate(self.__train_images,
+                                                              tf.random_uniform([self.__batch_size], maxval=2*math.pi))
 
             # mean-center all inputs
             self.__train_images = tf.image.per_image_standardization(self.__train_images)
