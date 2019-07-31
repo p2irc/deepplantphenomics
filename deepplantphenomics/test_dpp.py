@@ -59,10 +59,20 @@ def test_set_resize_images(model):
 def test_set_augmentation_flip_horizontal(model):
     with pytest.raises(TypeError):
         model.set_augmentation_flip_horizontal("True")
+    with pytest.raises(RuntimeError):
+        model.set_problem_type("semantic_segmentation")
+        model.set_augmentation_flip_horizontal(True)
+    model.set_problem_type("regression")
+    model.set_augmentation_flip_horizontal(True)
 
 def test_set_augmentation_flip_vertical(model):
     with pytest.raises(TypeError):
         model.set_augmentation_flip_vertical("True")
+    with pytest.raises(RuntimeError):
+        model.set_problem_type("semantic_segmentation")
+        model.set_augmentation_flip_horizontal(True)
+    model.set_problem_type("regression")
+    model.set_augmentation_flip_vertical(True)
 
 def test_set_augmentation_crop(model):
     with pytest.raises(TypeError):
@@ -71,14 +81,30 @@ def test_set_augmentation_crop(model):
         model.set_augmentation_crop(True, "5")
     with pytest.raises(ValueError):
         model.set_augmentation_crop(False, -1.0)
+    with pytest.raises(RuntimeError):
+        model.set_problem_type("semantic_segmentation")
+        model.set_augmentation_crop(True)
+    model.set_problem_type("regression")
+    model.set_augmentation_crop(True)
 
 def test_set_augmentation_brightness_and_contrast(model):
     with pytest.raises(TypeError):
         model.set_augmentation_crop("True")
+    model.set_problem_type("regression")
+    model.set_augmentation_brightness_and_contrast(True)
+
+    model.set_augmentation_brightness_and_contrast(False)
+    model.set_problem_type("semantic_segmentation")
+    model.set_augmentation_brightness_and_contrast(True)
 
 def test_set_augmentation_rotation(model):
     with pytest.raises(TypeError):
         model.set_augmentation_rotation("True")
+    with pytest.raises(RuntimeError):
+        model.set_problem_type("semantic_segmentation")
+        model.set_augmentation_rotation(True)
+    model.set_problem_type("regression")
+    model.set_augmentation_rotation(True)
 
 def test_set_regularization_coefficient(model):
     with pytest.raises(TypeError):

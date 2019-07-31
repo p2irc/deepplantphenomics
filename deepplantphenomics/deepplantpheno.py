@@ -343,6 +343,9 @@ class DPPModel(object):
         """Randomly flip training images horizontally"""
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
+        if self.__problem_type not in [definitions.ProblemType.CLASSIFICATION,
+                                       definitions.ProblemType.REGRESSION]:
+            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
 
         self.__augmentation_flip_horizontal = flip
 
@@ -350,6 +353,9 @@ class DPPModel(object):
         """Randomly flip training images vertically"""
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
+        if self.__problem_type not in [definitions.ProblemType.CLASSIFICATION,
+                                       definitions.ProblemType.REGRESSION]:
+            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
 
         self.__augmentation_flip_vertical = flip
 
@@ -361,6 +367,9 @@ class DPPModel(object):
             raise TypeError("crop_ratio must be a float")
         if crop_ratio <= 0 or crop_ratio > 1:
             raise ValueError("crop_ratio must be in (0, 1]")
+        if self.__problem_type not in [definitions.ProblemType.CLASSIFICATION,
+                                       definitions.ProblemType.REGRESSION]:
+            raise RuntimeError("Crop augmentations are incompatible with the current problem type")
 
         self.__augmentation_crop = resize
         self.__crop_amount = crop_ratio
@@ -376,6 +385,9 @@ class DPPModel(object):
         """Randomly rotate training images"""
         if not isinstance(rot, bool):
             raise TypeError("rot must be a bool")
+        if self.__problem_type not in [definitions.ProblemType.CLASSIFICATION,
+                                       definitions.ProblemType.REGRESSION]:
+            raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
 
         self.__augmentation_rotate = rot
 
