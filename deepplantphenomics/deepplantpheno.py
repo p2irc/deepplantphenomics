@@ -3803,9 +3803,13 @@ class DPPModel(object):
                 self.__train_images = tf.image.random_contrast(self.__train_images, lower=0.2, upper=1.8)
 
             if self.__augmentation_rotate:
-                # Apply random rotations
-                self.__train_images = tf.contrib.image.rotate(self.__train_images,
-                                                              tf.random_uniform([1], maxval=2*math.pi))
+                # Apply random rotations, then crop out black borders and resize
+                angle = tf.random_uniform([1], maxval=2*math.pi)
+                rot_crop_fraction = 0.50  # TODO implement function for calculating this
+                self.__train_images = tf.contrib.image.rotate(self.__train_images, angle, interpolation='BILINEAR')
+                self.__train_images = tf.image.central_crop(self.__train_images, rot_crop_fraction)
+                self.__train_images = tf.image.resize_images(self.__train_images,
+                                                             [self.__image_height, self.__image_width])
 
             # mean-center all inputs
             self.__train_images = tf.image.per_image_standardization(self.__train_images)
