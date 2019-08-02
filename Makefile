@@ -6,3 +6,6 @@ documentation:
 
 install:
 	pip install .
+
+test:
+	python -m pytest .
