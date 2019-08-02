@@ -3805,7 +3805,7 @@ class DPPModel(object):
             if self.__augmentation_rotate:
                 # Apply random rotations
                 self.__train_images = tf.contrib.image.rotate(self.__train_images,
-                                                              tf.random_uniform([self.__batch_size], maxval=2*math.pi))
+                                                              tf.random_uniform([1], maxval=2*math.pi))
 
             # mean-center all inputs
             self.__train_images = tf.image.per_image_standardization(self.__train_images)
