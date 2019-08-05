@@ -4,7 +4,7 @@
 
 Deep Plant Phenomics (DPP) is a platform for plant phenotyping using deep learning. Think of it as [Keras](https://keras.io/) for plant scientists.
 
-DPP integrates [Tensorflow](https://www.tensorflow.org/) for learning and [PlantCV](http://plantcv.danforthcenter.org/) for image processing. This means that it is able to run on both CPUs and GPUs, and scale easily across devices.
+DPP integrates [Tensorflow](https://www.tensorflow.org/) for learning. This means that it is able to run on both CPUs and GPUs, and scale easily across devices.
 
 Read the [doumentation](http://deep-plant-phenomics.readthedocs.io/en/latest/) for tutorials, or see the included examples.
 
@@ -83,12 +83,10 @@ model.begin_training()
 
 ## Installation
 
-0. The package should work on Python 2.7 or 3.x, but if using 2.7 you need the [enum34](https://pypi.python.org/pypi/enum34) package installed.
-1. Install the following dependencies, following the directions provided according to your platform and requirements:
-    - [Tensorflow](https://www.tensorflow.org/) (1.0 or later)
-    - [PlantCV](http://plantcv.danforthcenter.org/) (Only required for the `auto-segmentation` preprocessor)
-2. `git clone https://github.com/p2irc/deepplantphenomics.git` 
-3. `pip install ./deepplantphenomics`
+1. `git clone https://github.com/p2irc/deepplantphenomics.git`
+2. `pip install ./deepplantphenomics`
+
+Note: The package now requires Python 3.6 or greater. Python 2.7 is no longer supported.
 
 ## Contributing
 

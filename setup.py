@@ -13,7 +13,6 @@ setup(
     install_requires=[
         'tensorflow',
         'numpy',
-        'joblib',
         'tqdm'
     ]
 )
