@@ -95,6 +95,7 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
            test_images, test_labels, test_mf,\
            val_images, val_labels, val_mf
 
+
 def label_string_to_tensor(x, batch_size, num_outputs=None):
     sparse = tf.string_split(x, delimiter=' ')
     values = tf.string_to_number(sparse.values)
@@ -120,6 +121,7 @@ def read_csv_labels(file_name, column_number=False, character=','):
             labels.append(temp[column_number])
 
     return labels
+
 
 def read_csv_rows(file_name, column_number=False, character=','):
     """
@@ -225,6 +227,7 @@ def box_coordinates_to_pascal_voc_coordinates(coords):
     max_y = coords[5]
 
     return (min_x, max_x, min_y, max_y)
+
 
 def box_coordinates_to_xywh_coordinates(coords):
     """Converts x1,y1,x2,y2 to x,y,w,h where x,y is center point and w,h is width and height of the box"""
