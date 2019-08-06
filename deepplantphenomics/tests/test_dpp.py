@@ -194,7 +194,20 @@ def test_set_problem_type(model):
     model.set_problem_type('regression')
     assert model._DPPModel__problem_type == definitions.ProblemType.REGRESSION
     model.set_problem_type('semantic_segmentation')
-    assert model._DPPModel__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION
+    assert model._DPPModel__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION
+
+
+@pytest.mark.parametrize("prob_type,bad_loss,good_loss", [('classification', 'l2', 'softmax cross entropy'),
+                                                          ('regression', 'softmax cross entropy', 'l2'),
+                                                          ('semantic_segmentation', 'l2', 'sigmoid cross entropy'),
+                                                          ('object_detection', 'l2', 'yolo')])
+def test_set_loss_function(model, prob_type, bad_loss, good_loss):
+    model.set_problem_type(prob_type)
+    with pytest.raises(TypeError):
+        model.set_loss_function(0)
+    with pytest.raises(ValueError):
+        model.set_loss_function(bad_loss)
+    model.set_loss_function(good_loss)
 
 
 def test_set_yolo_parameters():
