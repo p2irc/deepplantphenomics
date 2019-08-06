@@ -3805,7 +3805,7 @@ class DPPModel(object):
             if self.__augmentation_rotate:
                 # Apply random rotations, then crop out black borders and resize
                 angle = tf.random_uniform([1], maxval=2*math.pi)
-                rot_crop_fraction = 0.50  # TODO implement function for calculating this
+                rot_crop_fraction = 0.50  # self.__rotation_crop_fraction(angle)
                 self.__train_images = tf.contrib.image.rotate(self.__train_images, angle, interpolation='BILINEAR')
                 self.__train_images = tf.image.central_crop(self.__train_images, rot_crop_fraction)
                 self.__train_images = tf.image.resize_images(self.__train_images,
@@ -3864,3 +3864,42 @@ class DPPModel(object):
             input_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
 
             self.__all_images = input_images
+
+    def __rotation_crop_fraction(self, angle):
+        """
+        Calculates the crop fraction required to crop out black borders in a rotated image. Based on
+        rotatedRectWithMaxArea in this StackOverflow answer: https://stackoverflow.com/a/16778797
+        :param angle: Float, The image's rotation angle in radians
+        :return: Float, The required crop fraction
+        """
+
+        # Determine which sides of the original image are the shorter and longer sides
+        lengths = tf.cond(tf.less_equal(self.__image_width, self.__image_height),
+                          lambda: tf.cast([self.__image_width, self.__image_height], dtype=tf.float32),
+                          lambda: tf.cast([self.__image_height, self.__image_width], dtype=tf.float32))
+        short_length = lengths[0]
+        long_length = lengths[1]
+
+        # Get the absolute sin and cos of the angle, since the quadrant doesn't affect us
+        sin_a = abs(tf.sin(angle))
+        cos_a = abs(tf.cos(angle))
+
+        # Get the width and height of the required cropped image
+        def rect_case_1():
+            x = 0.5*short_length
+            return tf.cond(tf.less_equal(self.__image_width, self.__image_height),
+                           lambda: [x/sin_a, x/cos_a],
+                           lambda: [x/cos_a, x/sin_a])
+
+        def rect_case_2():
+            cos_2a = cos_a*cos_a - sin_a*sin_a
+            return [(self.__image_width*cos_a - self.__image_height*sin_a)/cos_2a,
+                    (self.__image_height*cos_a - self.__image_width*sin_a)/cos_2a]
+
+        crop_width_height = tf.cond(tf.logical_or(short_length <= 2*sin_a*cos_a*long_length,
+                                                  abs(sin_a - cos_a) < 1e-10),
+                                    lambda: rect_case_1(),
+                                    lambda: rect_case_2())
+
+        # Use the crop width and height to calculate the required crop ratio
+        return (crop_width_height[0]*crop_width_height[1]) / (self.__image_width*self.__image_height)
