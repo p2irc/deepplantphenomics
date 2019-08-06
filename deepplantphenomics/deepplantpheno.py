@@ -72,6 +72,7 @@ class DPPModel(object):
         self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']                # ... regression
         self.__supported_loss_fns_ss = ['sigmoid cross entropy']                             # ... semantic segmentation
         self.__supported_loss_fns_od = ['yolo']                                              # ... object detection
+        self.__supported_predefined_models = ['vgg-16']
 
         # Augmentation options
         self.__augmentation_flip_horizontal = False
@@ -138,9 +139,9 @@ class DPPModel(object):
         self.__maximum_training_batches = None
         self.__reg_coeff = None
         self.__optimizer = 'adam'
-        self.__weight_initializer = 'normal'
+        self.__weight_initializer = 'xavier'
 
-        self.__learning_rate = 0.01
+        self.__learning_rate = 0.001
         self.__lr_decay_factor = None
         self.__lr_decay_epochs = None
 
@@ -2713,6 +2714,42 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
+    def use_predefined_model(self, model_name):
+        if model_name not in self.__supported_predefined_models:
+            raise ValueError("'" + model_name + "' is not one of the currently supported predefined models." +
+                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first," +
+                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_predefined_models))
+
+        if model_name == 'vgg-16':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+            self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+
+            self.add_output_layer()
+
     def load_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=False):
         """
         Loads the png images in the given directory into an internal representation, using the labels provided in a CSV
@@ -4018,7 +4055,6 @@ class DPPModel(object):
                 self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
             if self.__validation:
                 self.__val_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
-
 
 
     def __parse_images(self, images, image_type='png'):
