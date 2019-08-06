@@ -184,13 +184,6 @@ def test_set_patch_size(model):
         model.set_patch_size(1, -1)
 
 
-def test_add_preprocessor(model):
-    with pytest.raises(TypeError):
-        model.add_preprocessor(5)
-    with pytest.raises(ValueError):
-        model.add_preprocessor('Nico')
-
-
 def test_set_problem_type(model):
     with pytest.raises(TypeError):
         model.set_problem_type(5)

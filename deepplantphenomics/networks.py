@@ -25,8 +25,6 @@ class boundingBoxRegressor(object):
 
         self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
 
-        self.model.clear_preprocessors()
-
         # Define model hyperparameters
         self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
@@ -91,8 +89,6 @@ class rosetteLeafRegressor(object):
         import deepplantphenomics as dpp
 
         self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
-
-        self.model.clear_preprocessors()
 
         # Define model hyperparameters
         self.model.set_batch_size(batch_size)

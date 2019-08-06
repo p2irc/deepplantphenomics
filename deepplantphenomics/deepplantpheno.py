@@ -1,11 +1,8 @@
 from . import layers
 from . import loaders
-from . import preprocessing
 from . import definitions
-from . import networks
 import numpy as np
 import tensorflow as tf
-from joblib import Parallel, delayed
 import os
 import json
 import datetime
@@ -28,8 +25,7 @@ class DPPModel(object):
         :param debug: If True, debug messages are printed to the console.
         :param load_from_saved: Optionally, pass the name of a directory containing the checkpoint file.
         :param save_checkpoints: If True, trainable parameters will be saved at intervals during training.
-        :param initialize: If False, a new Tensorflow session will not be initialized with the instance. This is useful,
-         for example, if you want to perform preprocessing only and will not be using a Tensorflow graph.
+        :param initialize: If False, a new Tensorflow session will not be initialized with the instance.
         :param tensorboard_dir: Optionally, provide the path to your Tensorboard logs directory.
         :param report_rate: Set the frequency at which progress is reported during training (also the rate at which new
         timepoints are recorded to Tensorboard).
@@ -63,13 +59,11 @@ class DPPModel(object):
 
         self.__crop_or_pad_images = False
         self.__resize_images = False
-        self.__preprocessing_steps = []
 
         self.__processed_images_dir = './DPP-Processed'
 
         # supported implementations, we may add more to in future
         self.__supported_problem_types = ['classification', 'regression', 'semantic_segmentation', 'object_detection']
-        self.__supported_preprocessing_steps = ['auto-segmentation']
         self.__supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
         self.__supported_weight_initializers = ['normal', 'xavier']
         self.__supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
@@ -78,6 +72,7 @@ class DPPModel(object):
         self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']                # ... regression
         self.__supported_loss_fns_ss = ['sigmoid cross entropy']                             # ... semantic segmentation
         self.__supported_loss_fns_od = ['yolo']                                              # ... object detection
+        self.__supported_predefined_models = ['vgg-16']
 
         # Augmentation options
         self.__augmentation_flip_horizontal = False
@@ -144,9 +139,9 @@ class DPPModel(object):
         self.__maximum_training_batches = None
         self.__reg_coeff = None
         self.__optimizer = 'adam'
-        self.__weight_initializer = 'normal'
+        self.__weight_initializer = 'xavier'
 
-        self.__learning_rate = 0.01
+        self.__learning_rate = 0.001
         self.__lr_decay_factor = None
         self.__lr_decay_epochs = None
 
@@ -497,20 +492,6 @@ class DPPModel(object):
         self.__has_moderation = True
         self.__moderation_features_size = moderation_features.shape[1]
         self.__all_moderation_features = moderation_features
-
-    def add_preprocessor(self, selection):
-        """Add a data preprocessing step"""
-        if not isinstance(selection, str):
-            raise TypeError("selection must be a str")
-        if not selection in self.__supported_preprocessing_steps:
-            raise ValueError("'"+selection+"' is not one of the currently supported preprocessing steps." +
-                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_preprocessing_steps))
-
-        self.__preprocessing_steps.append(selection)
-
-    def clear_preprocessors(self):
-        """Clear all preprocessing steps"""
-        self.__preprocessing_steps = []
 
     def set_problem_type(self, type):
         """Set the problem type to be solved, either classification or regression"""
@@ -1884,7 +1865,7 @@ class DPPModel(object):
                 remainder = self.__batch_size - remainder
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = self.__apply_preprocessing(x)
+            images = x
             self.__parse_images(images)
 
             x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
@@ -2017,7 +1998,7 @@ class DPPModel(object):
                     num_batches += 1
                     remainder = self.__batch_size - remainder
                 # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-                images = self.__apply_preprocessing(x)
+                images = x
                 self.__parse_images(images)
                 # set up and then initialize the queue
                 x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
@@ -2118,7 +2099,7 @@ class DPPModel(object):
                     remainder = self.__batch_size - remainder
 
                 # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-                images = self.__apply_preprocessing(x)
+                images = x
                 self.__parse_images(images)
 
                 x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size,
@@ -2729,6 +2710,42 @@ class DPPModel(object):
 
         self.__layers.append(layer)
 
+    def use_predefined_model(self, model_name):
+        if model_name not in self.__supported_predefined_models:
+            raise ValueError("'" + model_name + "' is not one of the currently supported predefined models." +
+                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first," +
+                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_predefined_models))
+
+        if model_name == 'vgg-16':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+            self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+
+            self.add_output_layer()
+
     def load_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=False):
         """
         Loads the png images in the given directory into an internal representation, using the labels provided in a CSV
@@ -2890,9 +2907,6 @@ class DPPModel(object):
 
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
-
-        # do preprocessing
-        images = self.__apply_preprocessing(images)
 
         self.__raw_image_files = images
         self.__raw_labels = self.__all_labels
@@ -3092,8 +3106,7 @@ class DPPModel(object):
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
-        # do preprocessing
-        images = self.__apply_preprocessing(sorted_paths)
+        images = sorted_paths
 
         # prepare images for training (if there are any labels loaded)
 
@@ -3114,8 +3127,7 @@ class DPPModel(object):
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
-        # do preprocessing
-        images = self.__apply_preprocessing(image_files)
+        images = image_files
 
         # prepare images for training (if there are any labels loaded)
         if self.__all_labels is not None:
@@ -3609,8 +3621,7 @@ class DPPModel(object):
         self.__log('Total raw examples is %d' % self.__total_raw_samples)
         self.__log('Parsing dataset...')
 
-        # do preprocessing
-        processed_images = self.__apply_preprocessing(sorted_paths)
+        processed_images = sorted_paths
 
         # prepare images for training (if there are any labels loaded)
         if self.__all_labels is not None:
@@ -3832,39 +3843,6 @@ class DPPModel(object):
 
         self.__all_labels = labels_with_one_hot
 
-    def __apply_preprocessing(self, images):
-        if not len(self.__preprocessing_steps) == 0:
-            self.__log('Performing preprocessing steps...')
-
-            if not os.path.isdir(self.__processed_images_dir):
-                os.mkdir(self.__processed_images_dir)
-
-            for step in self.__preprocessing_steps:
-                if step == 'auto-segmentation':
-                    self.__log('Performing auto-segmentation...')
-
-                    self.__log('Initializing bounding box regressor model...')
-                    bbr = networks.boundingBoxRegressor(height=self.__image_height, width=self.__image_width)
-
-                    self.__log('Performing bounding box estimation...')
-                    bbs = bbr.forward_pass(images)
-
-                    bbr.shut_down()
-                    bbr = None
-
-                    images = zip(images, bbs)
-
-                    self.__log('Bounding box estimation finished, performing segmentation...')
-
-                    processed_images = Parallel(n_jobs=self.__num_threads) \
-                        (delayed(preprocessing.do_parallel_auto_segmentation)
-                         (i[0], i[1], self.__processed_images_dir, self.__image_height, self.__image_width) for i in
-                         images)
-
-                    images = processed_images
-
-        return images
-
     def __parse_dataset(self, train_images, train_labels, train_mf,
                         test_images, test_labels, test_mf,
                         val_images, val_labels, val_mf,
@@ -4073,7 +4051,6 @@ class DPPModel(object):
                 self.__test_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
             if self.__validation:
                 self.__val_images.set_shape([self.__image_height, self.__image_width, self.__image_depth])
-
 
 
     def __parse_images(self, images, image_type='png'):
