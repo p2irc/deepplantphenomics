@@ -3804,10 +3804,10 @@ class DPPModel(object):
 
             if self.__augmentation_rotate:
                 # Apply random rotations, then crop out black borders and resize
-                angle = tf.random_uniform([1], maxval=2*math.pi)
-                rot_crop_fraction = 0.50  # self.__rotation_crop_fraction(angle)
+                angle = tf.random_uniform([], maxval=2*math.pi)
+                rot_crop_fraction = self.__rotation_crop_fraction(angle)
                 self.__train_images = tf.contrib.image.rotate(self.__train_images, angle, interpolation='BILINEAR')
-                self.__train_images = tf.image.central_crop(self.__train_images, rot_crop_fraction)
+                self.__train_images = tf.image.central_crop(self.__train_images, rot_crop_fraction)  # TODO change to custom function
                 self.__train_images = tf.image.resize_images(self.__train_images,
                                                              [self.__image_height, self.__image_width])
 
@@ -3869,8 +3869,8 @@ class DPPModel(object):
         """
         Calculates the crop fraction required to crop out black borders in a rotated image. Based on
         rotatedRectWithMaxArea in this StackOverflow answer: https://stackoverflow.com/a/16778797
-        :param angle: Float, The image's rotation angle in radians
-        :return: Float, The required crop fraction
+        :param angle: Scalar, The rotation angle for the image, in radians
+        :return: Scalar, The required crop fraction for the image
         """
 
         # Determine which sides of the original image are the shorter and longer sides
@@ -3896,8 +3896,8 @@ class DPPModel(object):
             return [(self.__image_width*cos_a - self.__image_height*sin_a)/cos_2a,
                     (self.__image_height*cos_a - self.__image_width*sin_a)/cos_2a]
 
-        crop_width_height = tf.cond(tf.logical_or(short_length <= 2*sin_a*cos_a*long_length,
-                                                  abs(sin_a - cos_a) < 1e-10),
+        crop_width_height = tf.cond(tf.logical_or(tf.less_equal(short_length, 2*sin_a*cos_a*long_length),
+                                                  tf.less(abs(sin_a - cos_a), 1e-10)),
                                     lambda: rect_case_1(),
                                     lambda: rect_case_2())
 
