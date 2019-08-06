@@ -419,26 +419,22 @@ class DPPModel(object):
         if not isinstance(loss_fn, str):
             raise TypeError("loss_fn must be a str")
         loss_fn = loss_fn.lower()
-        if self.__problem_type == definitions.ProblemType.CLASSIFICATION and loss_fn not in self.__supported_loss_fns_cls:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for classification."+
-                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
-                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_cls))
-        elif self.__problem_type == definitions.ProblemType.REGRESSION and loss_fn not in self.__supported_loss_fns_cls:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for regression."+
-                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
-                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_reg))
-        elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION and loss_fn not in self.__supported_loss_fns_ss:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for semantic segmentation."+
-                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
-                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_ss))
-        elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION and loss_fn not in self.__supported_loss_fns_od:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for object detection."+
-                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first,"+
-                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_loss_fns_od))
-        else:
-            warnings.warn("Loss function and/or problem type not recognized. See documentation for list of supported "+
-                          "functions and problem types.")
+
+        type_loss_map = {definitions.ProblemType.CLASSIFICATION: self.__supported_loss_fns_cls,
+                         definitions.ProblemType.REGRESSION: self.__supported_loss_fns_reg,
+                         definitions.ProblemType.SEMANTIC_SEGMETNATION: self.__supported_loss_fns_ss,
+                         definitions.ProblemType.OBJECT_DETECTION: self.__supported_loss_fns_od}
+
+        if self.__problem_type not in type_loss_map.keys():
+            warnings.warn("Problem type not recognized. See documentation for list of supported functions and problem "
+                          "types.")
             exit()
+
+        if loss_fn not in type_loss_map[self.__problem_type]:
+            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for " +
+                             self.__problem_type.name + ". Make sure you have the correct problem type set with " +
+                             "DPPModel.set_problem_type() first, or choose one of " +
+                             " ".join("'" + x + "'" for x in type_loss_map[self.__problem_type]))
 
         self.__loss_fn = loss_fn
 
@@ -448,7 +444,7 @@ class DPPModel(object):
             raise TypeError("initializer must be a str")
         initializer = initializer.lower()
         if not initializer in self.__supported_weight_initializers:
-            raise ValueError("'"+initializer+"' is not one of the currently supported weight initializers."+
+            raise ValueError("'"+initializer+"' is not one of the currently supported weight initializers." +
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_weight_initializers))
 
         self.__weight_initializer = initializer
@@ -507,7 +503,7 @@ class DPPModel(object):
         if not isinstance(selection, str):
             raise TypeError("selection must be a str")
         if not selection in self.__supported_preprocessing_steps:
-            raise ValueError("'"+selection+"' is not one of the currently supported preprocessing steps."+
+            raise ValueError("'"+selection+"' is not one of the currently supported preprocessing steps." +
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_preprocessing_steps))
 
         self.__preprocessing_steps.append(selection)
@@ -521,7 +517,7 @@ class DPPModel(object):
         if not isinstance(type, str):
             raise TypeError("type must be a str")
         if not type in self.__supported_problem_types:
-            raise ValueError("'"+type+"' is not one of the currently supported problem types."+
+            raise ValueError("'"+type+"' is not one of the currently supported problem types." +
                              " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_problem_types))
 
         if type == 'classification':
@@ -531,10 +527,10 @@ class DPPModel(object):
             self.__problem_type = definitions.ProblemType.REGRESSION
             self.__loss_fn = self.__supported_loss_fns_reg[0]
         elif type == 'semantic_segmentation':
-            self.__problem_type = definitions.ProblemType.SEMANTICSEGMETNATION
+            self.__problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
             self.__loss_fn = self.__supported_loss_fns_ss[0]
         elif type == 'object_detection':
-            self.__problem_type = definitions.ProblemType.OBJECTDETECTION
+            self.__problem_type = definitions.ProblemType.OBJECT_DETECTION
             self.__loss_fn = self.__supported_loss_fns_od[0]
         else:
             warnings.warn('Problem type specified not supported')
@@ -803,20 +799,20 @@ class DPPModel(object):
 
             # Reshape input to the expected image dimensions
             x = tf.reshape(x, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
-            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 y = tf.reshape(y, shape=[-1, self.__image_height, self.__image_width, 1])
 
             # If this is a regression problem, unserialize the label
             if self.__problem_type == definitions.ProblemType.REGRESSION:
                 y = loaders.label_string_to_tensor(y, self.__batch_size, self.__num_regression_outputs)
-            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 y = loaders.label_string_to_tensor(y, self.__batch_size)
                 vec_size = 1 + self.__NUM_CLASSES + 4
                 y = tf.reshape(y, [self.__batch_size, self.__grid_w*self.__grid_h, vec_size])
 
             # if using patching we extract a patch of image here (object detection patching is different
             # and is done when data is loaded)
-            if self.__with_patching and self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
+            if self.__with_patching and self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
                 # Take a slice
                 patch_width = self.__patch_width
                 patch_height = self.__patch_height
@@ -827,7 +823,7 @@ class DPPModel(object):
                 offsets = [x for x in zip(offset_h, offset_w)]
                 x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
                                              normalized=False, centered=False)
-                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     y = tf.image.extract_glimpse(y, [patch_height, patch_width], offsets, normalized=False,
                                                  centered=False)
 
@@ -865,13 +861,13 @@ class DPPModel(object):
                     regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
                 # define the cost
                 self.__graph_ops['cost'] = tf.add(regression_loss, l2_cost)
-            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'sigmoid cross entropy':
                     pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
                 # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
-            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'yolo':
                     yolo_loss = self._yolo_loss_function(
@@ -953,7 +949,7 @@ class DPPModel(object):
                                                                                self.__batch_size,
                                                                                self.__num_regression_outputs)
 
-            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 if self.__testing:
                     self.__graph_ops['y_test'] = tf.reshape(self.__graph_ops['y_test'],
                                                             shape=[-1, self.__image_height, self.__image_width, 1])
@@ -961,7 +957,7 @@ class DPPModel(object):
                     self.__graph_ops['y_val'] = tf.reshape(self.__graph_ops['y_val'],
                                                            shape=[-1, self.__image_height, self.__image_width, 1])
 
-            if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 vec_size = 1 + self.__NUM_CLASSES + 4
                 if self.__testing:
                     self.__graph_ops['y_test'] = loaders.label_string_to_tensor(self.__graph_ops['y_test'],
@@ -980,7 +976,7 @@ class DPPModel(object):
 
             # if using patching we need to properly pull patches from the images (object detection patching is different
             # and is done when data is loaded)
-            if self.__with_patching and self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
+            if self.__with_patching and self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
                 # Take a slice of image. Same size and location (offsets) as the slice from training.
                 patch_width = self.__patch_width
                 patch_height = self.__patch_height
@@ -990,7 +986,7 @@ class DPPModel(object):
                 if self.__validation:
                     x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
                                                       normalized=False, centered=False)
-                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     if self.__testing:
                         self.__graph_ops['y_test'] = tf.image.extract_glimpse(self.__graph_ops['y_test'],
                                                                               [patch_height, patch_width], offsets,
@@ -1014,7 +1010,7 @@ class DPPModel(object):
                     self.__graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
             # For object detection, the network outputs need to be reshaped to match y_test and y_val
-            if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 if self.__testing:
                     self.__graph_ops['x_test_predicted'] = tf.reshape(self.__graph_ops['x_test_predicted'],
                                                                       [self.__batch_size,
@@ -1052,7 +1048,7 @@ class DPPModel(object):
                         self.__graph_ops['val_losses'] = self.__l2_norm(
                             tf.subtract(self.__graph_ops['x_val_predicted'], self.__graph_ops['y_val']))
                     self.__graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self.__graph_ops['val_losses']))
-            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 if self.__testing:
                     self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test'][:, :, :, 0]), axis=2)
@@ -1064,7 +1060,7 @@ class DPPModel(object):
                     self.__graph_ops['val_losses'] = tf.transpose(
                         tf.reduce_mean(self.__graph_ops['val_losses'], axis=1))
                     self.__graph_ops['val_cost'] = tf.reduce_mean(self.__graph_ops['val_losses'])
-            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 if self.__testing:
                     if self.__loss_fn == 'yolo':
                         self.__graph_ops['test_losses'] = self._yolo_loss_function(self.__graph_ops['y_test'],
@@ -1109,7 +1105,7 @@ class DPPModel(object):
                 # Summaries for semantic segmentation
                 # we send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
                 # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     train_images_summary = self.__get_weights_as_image(
                         tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)),
                         self.__layers[-1].output_size)
@@ -1122,7 +1118,7 @@ class DPPModel(object):
                             self.__layers[-1].output_size)
                         tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
-                if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     tf.summary.scalar('train/yolo_loss', yolo_loss, collections=['custom_summaries'])
                     if self.__validation:
                         tf.summary.scalar('validation/loss', self.__graph_ops['val_losses'],
@@ -1232,8 +1228,8 @@ class DPPModel(object):
                                             samples_per_sec))
 
                             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                                 self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION or \
-                                 self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                                 self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
+                                 self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                                 loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
                                                                             self.__graph_ops['val_cost']])
 
@@ -1265,8 +1261,8 @@ class DPPModel(object):
                                             samples_per_sec))
 
                             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                                 self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION or \
-                                 self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                                 self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
+                                 self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
 
                                 loss = self.__session.run([self.__graph_ops['cost']])
 
@@ -1395,7 +1391,7 @@ class DPPModel(object):
 
             sum = 0.0
             all_losses = np.empty(shape=(self.__num_regression_outputs))
-            if self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
+            if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
                 all_y = np.empty(shape=(self.__num_regression_outputs))
                 all_predictions = np.empty(shape=self.__num_regression_outputs)
             else:
@@ -1418,10 +1414,10 @@ class DPPModel(object):
                     all_losses = np.concatenate((all_losses, r_losses), axis=0)
                     all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
                     all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
-                elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     r_losses = self.__session.run([self.__graph_ops['test_losses']])
                     all_losses = np.concatenate((all_losses, r_losses[0]), axis=0)
-                elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     r_y, r_predicted = self.__session.run([self.__graph_ops['y_test'],
                                                            self.__graph_ops['x_test_predicted']])
                     all_y = np.concatenate((all_y, r_y), axis=0)
@@ -1429,7 +1425,7 @@ class DPPModel(object):
 
             # Delete the weird first entries
             all_losses = np.delete(all_losses, 0)
-            if self.__problem_type != definitions.ProblemType.OBJECTDETECTION:
+            if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
                 all_y = np.delete(all_y, 0)
                 all_predictions = np.delete(all_predictions, 0)
             else:
@@ -1454,7 +1450,7 @@ class DPPModel(object):
 
                 return 1.0-mean.astype(np.float32)
             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                 self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                 self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
                 abs_mean = np.mean(np.abs(all_losses))
                 abs_var = np.var(np.abs(all_losses))
@@ -1499,7 +1495,7 @@ class DPPModel(object):
                 self.__log(hist)
 
                 return abs_mean.astype(np.float32)
-            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 # Make the images heterogeneous, storing their separate grids in a list
                 test_labels = [all_y[i, ...] for i in range(all_y.shape[0])]
                 test_preds = [all_predictions[i, ...] for i in range(all_predictions.shape[0])]
@@ -1840,7 +1836,7 @@ class DPPModel(object):
                 total_outputs = np.empty([1, self.__last_layer().output_size])
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 total_outputs = np.empty([1, self.__num_regression_outputs])
-            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 if self.__with_patching:
                     # we want the largest multiple of of patch height/width that is smaller than the original
                     # image height/width, for the final image dimensions
@@ -1856,7 +1852,7 @@ class DPPModel(object):
                     total_outputs = np.empty([1, final_height, final_width])
                 else:
                     total_outputs = np.empty([1, self.__image_height, self.__image_width])
-            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 if self.__with_patching:
                     # we want the largest multiple of patch height/width that is smaller than the original
                     # image height/width, for the final image dimensions
@@ -1909,7 +1905,7 @@ class DPPModel(object):
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             if self.__with_patching:
-                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     num_patch_rows = final_height // patch_height
                     num_patch_cols = final_width // patch_width
                     for i in range(num_batches):
@@ -1940,7 +1936,7 @@ class DPPModel(object):
                             # need to match total_outputs dimensions, so we add a dimension to the shape to match
                             full_img = np.array([full_img]) # shape transformation: (x,y) --> (1,x,y)
                             total_outputs = np.append(total_outputs, full_img, axis=0) # add the final img to the list of imgs
-                elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     # for i in range(num_batches):
                     #     xx = self.__session.run(x_pred)
                     #     # init_op = tf.global_variables_initializer()
@@ -1959,7 +1955,7 @@ class DPPModel(object):
             else:
                 for i in range(int(num_batches)):
                     xx = self.__session.run(x_pred)
-                    if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                    if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                         xx = np.reshape(xx, [self.__batch_size, -1])
                     for img in np.array_split(xx, self.__batch_size):
                         total_outputs = np.append(total_outputs, img, axis=0)
@@ -1996,7 +1992,7 @@ class DPPModel(object):
             interpreted_outputs = self.forward_pass_with_file_inputs(x)
 
         ### Semantic Segmentation ###
-        elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+        elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
             with self.__graph.as_default():
                 # check for patching needs
                 if self.__with_patching:
@@ -2092,7 +2088,7 @@ class DPPModel(object):
                 interpreted_outputs[i, :, :] = mask
 
         ### Object Detection ###
-        elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+        elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
             with self.__graph.as_default():
                 # check for patching needs
                 if self.__with_patching:
@@ -2674,7 +2670,7 @@ class DPPModel(object):
                 raise TypeError("output_size must be an int or None")
             if output_size <= 0:
                 raise ValueError("output_size must be positive")
-            if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 raise RuntimeError("output_size should be None for problem_type semantic_segmentation")
 
         self.__log('Adding output layer...')
@@ -2691,9 +2687,9 @@ class DPPModel(object):
                 num_out = self.__total_classes
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 num_out = self.__num_regression_outputs
-            elif self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+            elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
-            elif self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                 # yolo S x S x (5B + K)
                 num_out = self.__grid_w * self.__grid_h * (5*self.__NUM_BOXES + self.__NUM_CLASSES)
                 filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]),
@@ -2705,14 +2701,14 @@ class DPPModel(object):
             num_out = output_size
 
         with self.__graph.as_default():
-            if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
+            if self.__problem_type is definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 layer = layers.convLayer('output',
                                          copy.deepcopy(self.__last_layer().output_size),
                                          filter_dimension,
                                          1,
                                          None,
                                          self.__weight_initializer)
-            elif self.__problem_type is definitions.ProblemType.OBJECTDETECTION:
+            elif self.__problem_type is definitions.ProblemType.OBJECT_DETECTION:
                 layer = layers.convLayer('output',
                                          copy.deepcopy(self.__last_layer().output_size),
                                          filter_dimension,
@@ -2773,7 +2769,7 @@ class DPPModel(object):
         :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
         """
 
-        if self.__problem_type is not definitions.ProblemType.SEMANTICSEGMETNATION:
+        if self.__problem_type is not definitions.ProblemType.SEMANTIC_SEGMETNATION:
             warnings.warn('Trying to load a segmentation dataset, but the problem type is not properly set.')
             exit()
 
@@ -2847,7 +2843,7 @@ class DPPModel(object):
         for label in labels:
             curr_label = []
             for nums in label:
-                if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     # yolo wants x,y,w,h for coords
                     curr_label.extend(loaders.box_coordinates_to_xywh_coordinates(nums))
                 else:
@@ -2860,7 +2856,7 @@ class DPPModel(object):
         # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
         # e.g. [1,0,0,...,1,...,0,223,364,58,62] but since there is only one class for the ippn dataset we get
         # [1,1,x,y,w,h]
-        if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+        if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
             # for scaling bbox coords
             # scaling image down to the grid size
             scale_ratio_w = self.__grid_w / self.__image_width_original
@@ -3127,7 +3123,7 @@ class DPPModel(object):
             if not self.__with_patching:
                 self.__raw_labels = self.__all_labels
             else:  # some problems need to generate special patched data from loaded images
-                if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     if self.__loss_fn == 'yolo':
                         self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
                         self.__convert_labels_to_yolo_format()
@@ -3672,7 +3668,7 @@ class DPPModel(object):
         # need to add object-ness flag and one-hot encodings for class
         # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
         # e.g. [1,0,0,...,1,...,0,223,364,58,62]
-        if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+        if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
             # for scaling bbox coords
             # scaling image down to the grid size
             scale_ratio_w = self.__grid_w / self.__image_width
@@ -3758,7 +3754,7 @@ class DPPModel(object):
         # need to add one-hot encodings for class and object existence label
         # it will 1 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
         # e.g. [1,0,0,...,1,...,0,x,y,w,h]
-        if self.__problem_type == definitions.ProblemType.OBJECTDETECTION:
+        if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
             if not self.__with_patching:
                 self.__convert_labels_to_yolo_format()
 
@@ -3938,7 +3934,7 @@ class DPPModel(object):
             if self.__validation:
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
-            if self.__problem_type is definitions.ProblemType.SEMANTICSEGMETNATION:
+            if self.__problem_type is definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 self.__train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]), channels=1)
                 # normalize to 1.0
                 self.__train_labels = tf.image.convert_image_dtype(self.__train_labels, dtype=tf.float32)
@@ -4038,7 +4034,7 @@ class DPPModel(object):
                                                                                self.__image_width)
 
                 # if doing semantic segmentation, then the corresponding mask would also need to be cropped/padded
-                if self.__problem_type == definitions.ProblemType.SEMANTICSEGMETNATION:
+                if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     self.__train_labels = tf.image.resize_image_with_crop_or_pad(self.__train_labels,
                                                                                  self.__image_height,
                                                                                  self.__image_width)
