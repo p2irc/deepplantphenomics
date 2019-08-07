@@ -143,6 +143,7 @@ class DPPModel(object):
 
         self.__learning_rate = 0.001
         self.__lr_decay_factor = None
+        self.__epochs_per_decay = None
         self.__lr_decay_epochs = None
 
         self.__num_regression_outputs = 1
@@ -390,12 +391,9 @@ class DPPModel(object):
             raise TypeError("epochs_per_day must be an int")
         if epochs_per_decay <= 0:
             raise ValueError("epochs_per_day must be positive")
-        if self.__total_training_samples == 0:
-            raise RuntimeError("Data needs to be loaded before learning rate decay can be set.")
 
         self.__lr_decay_factor = decay_factor
-        # needs to be reexamined
-        self.__lr_decay_epochs = epochs_per_decay * (self.__total_training_samples * (1-self.__test_split))
+        self.__epochs_per_decay = epochs_per_decay
 
     def set_optimizer(self, optimizer):
         """Set the optimizer to use"""
@@ -1781,6 +1779,8 @@ class DPPModel(object):
 
     def __set_learning_rate(self):
         if self.__lr_decay_factor is not None:
+            # needs to be reexamined
+            self.__lr_decay_epochs = self.__epochs_per_decay * (self.__total_training_samples * (1 - self.__test_split))
             self.__learning_rate = tf.train.exponential_decay(self.__learning_rate,
                                                               self.__global_epoch,
                                                               self.__lr_decay_epochs,

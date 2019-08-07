@@ -111,8 +111,11 @@ def test_set_learning_rate_decay(model):
         model.set_learning_rate_decay(0.5, 5.0)
     with pytest.raises(ValueError):
         model.set_learning_rate_decay(0.5, -1)
-    with pytest.raises(RuntimeError):
-        model.set_learning_rate_decay(0.5, 1)
+
+    model.set_learning_rate_decay(0.01, 100)
+    assert model._DPPModel__lr_decay_factor == 0.01
+    assert model._DPPModel__epochs_per_decay == 100
+    assert model._DPPModel__lr_decay_epochs is None
 
 
 def test_set_optimizer(model):
