@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 import os.path
+import tensorflow as tf
 from deepplantphenomics import deepplantpheno as dpp
 from deepplantphenomics import definitions
 from deepplantphenomics import layers
@@ -55,10 +56,19 @@ def test_set_maximum_training_epochs(model):
 
 
 def test_set_learning_rate(model):
+    # Give the type checking a workout
     with pytest.raises(TypeError):
         model.set_learning_rate("5")
     with pytest.raises(ValueError):
         model.set_learning_rate(-0.001)
+
+    # Ensure a good value sets the rate properly
+    model.set_learning_rate(0.01)
+    assert model._DPPModel__learning_rate == 0.01
+
+    # Ensure that the internal learning rate setter doesn't touch it (due to no decay settings)
+    model._DPPModel__set_learning_rate()
+    assert model._DPPModel__learning_rate == 0.01
 
 
 def test_set_crop_or_pad_images(model):
@@ -103,6 +113,7 @@ def test_set_regularization_coefficient(model):
 
 
 def test_set_learning_rate_decay(model):
+    # Give the type checking a workout
     with pytest.raises(TypeError):
         model.set_learning_rate_decay("5", 1)
     with pytest.raises(ValueError):
@@ -112,10 +123,22 @@ def test_set_learning_rate_decay(model):
     with pytest.raises(ValueError):
         model.set_learning_rate_decay(0.5, -1)
 
+    # Ensure that a good set of inputs sets model parameters properly
     model.set_learning_rate_decay(0.01, 100)
     assert model._DPPModel__lr_decay_factor == 0.01
     assert model._DPPModel__epochs_per_decay == 100
     assert model._DPPModel__lr_decay_epochs is None
+
+    # Ensure that the internal learning rate setter handles decay properly
+    model._DPPModel__total_training_samples = 100
+    model._DPPModel__test_split = 0.20
+    model._DPPModel__learning_rate = 0.1
+    model._DPPModel__global_epoch = 0
+    model._DPPModel__set_learning_rate()
+    assert model._DPPModel__lr_decay_epochs == 8000
+    assert isinstance(model._DPPModel__learning_rate, tf.Tensor)
+    with tf.Session() as sess:
+        assert sess.run(model._DPPModel__learning_rate) == pytest.approx(0.1)
 
 
 def test_set_optimizer(model):
