@@ -1368,10 +1368,11 @@ class DPPModel(object):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            sum = 0.0
-            all_losses = np.empty(shape=(self.__num_regression_outputs))
-            if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                all_y = np.empty(shape=(self.__num_regression_outputs))
+            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                loss_sum = 0.0
+            elif self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
+                all_losses = np.empty(shape=self.__num_regression_outputs)
+                all_y = np.empty(shape=self.__num_regression_outputs)
                 all_predictions = np.empty(shape=self.__num_regression_outputs)
             else:
                 all_y = np.empty(shape=(self.__batch_size,
@@ -1382,10 +1383,10 @@ class DPPModel(object):
                                                   5*self.__NUM_BOXES + self.__NUM_CLASSES))
 
             # Main test loop
-            for i in tqdm(range(num_batches)):
+            for _ in tqdm(range(num_batches)):
                 if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                     batch_mean = self.__session.run([self.__graph_ops['test_losses']])
-                    sum = sum + np.mean(batch_mean)
+                    loss_sum = loss_sum + np.mean(batch_mean)
                 elif self.__problem_type == definitions.ProblemType.REGRESSION:
                     r_losses, r_y, r_predicted = self.__session.run([self.__graph_ops['test_losses'],
                                                                      self.__graph_ops['y_test'],
@@ -1402,34 +1403,36 @@ class DPPModel(object):
                     all_y = np.concatenate((all_y, r_y), axis=0)
                     all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
 
-            # Delete the weird first entries
-            all_losses = np.delete(all_losses, 0)
-            if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                all_y = np.delete(all_y, 0)
-                all_predictions = np.delete(all_predictions, 0)
-            else:
-                all_y = np.delete(all_y, 0, axis=0)
-                all_predictions = np.delete(all_predictions, 0, axis=0)
+            # Delete the weird first entries in losses, y values, and predictions
+            if self.__problem_type != definitions.ProblemType.CLASSIFICATION:
+                all_losses = np.delete(all_losses, 0)
+                if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
+                    all_y = np.delete(all_y, 0)
+                    all_predictions = np.delete(all_predictions, 0)
+                else:
+                    all_y = np.delete(all_y, 0, axis=0)
+                    all_predictions = np.delete(all_predictions, 0, axis=0)
 
             # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
             # we want to get rid of)
-            extra = self.__batch_size - (self.__total_testing_samples % self.__batch_size)
-            if extra != self.__batch_size: # this checks if it has any extra
-                mask_extra = np.ones(self.__batch_size * num_batches, dtype=bool)
-                mask_extra[range(self.__batch_size * num_batches - extra, self.__batch_size * num_batches)] = False
-                all_losses = all_losses[mask_extra, ...]
-                all_y = all_y[mask_extra, ...]
-                all_predictions = all_predictions[mask_extra, ...]
+            if self.__problem_type != definitions.ProblemType.CLASSIFICATION:
+                extra = self.__batch_size - (self.__total_testing_samples % self.__batch_size)
+                if extra != self.__batch_size:
+                    mask_extra = np.ones(self.__batch_size * num_batches, dtype=bool)
+                    mask_extra[range(self.__batch_size * num_batches - extra, self.__batch_size * num_batches)] = False
+                    all_losses = all_losses[mask_extra, ...]
+                    all_y = all_y[mask_extra, ...]
+                    all_predictions = all_predictions[mask_extra, ...]
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
-                mean = (sum / num_batches)
+                mean = (loss_sum / num_batches)
 
                 self.__log('Average test accuracy: {:.5f}'.format(mean))
 
                 return 1.0-mean.astype(np.float32)
             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                 self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
+                    self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
                 abs_mean = np.mean(np.abs(all_losses))
                 abs_var = np.var(np.abs(all_losses))
@@ -1439,8 +1442,8 @@ class DPPModel(object):
                 var = np.var(all_losses)
                 mse = np.mean(np.square(all_losses))
                 std = np.sqrt(var)
-                max = np.amax(all_losses)
-                min = np.amin(all_losses)
+                loss_max = np.amax(all_losses)
+                loss_min = np.amin(all_losses)
 
                 hist, _ = np.histogram(all_losses, bins=100)
 
@@ -1448,8 +1451,8 @@ class DPPModel(object):
                 self.__log('Loss standard deviation: {}'.format(std))
                 self.__log('Mean absolute loss: {}'.format(abs_mean))
                 self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-                self.__log('Min error: {}'.format(min))
-                self.__log('Max error: {}'.format(max))
+                self.__log('Min error: {}'.format(loss_min))
+                self.__log('Max error: {}'.format(loss_max))
                 self.__log('MSE: {}'.format(mse))
 
                 if len(all_y) > 0:
@@ -1458,11 +1461,11 @@ class DPPModel(object):
                     unexplained_error = np.sum(np.square(all_losses))
                     # division by zero can happen when using small test sets
                     if total_error == 0:
-                        R2 = -np.inf
+                        r2 = -np.inf
                     else:
-                        R2 = 1. - (unexplained_error / total_error)
+                        r2 = 1. - (unexplained_error / total_error)
 
-                    self.__log('R^2: {}'.format(R2))
+                    self.__log('R^2: {}'.format(r2))
                     self.__log('All test labels:')
                     self.__log(all_y)
 
