@@ -82,9 +82,10 @@ class DPPModel(object):
         self.__augmentation_flip_horizontal = False
         self.__augmentation_flip_vertical = False
         self.__augmentation_crop = False
+        self.__crop_amount = 0.75
         self.__augmentation_contrast = False
         self.__augmentation_rotate = False
-        self.__crop_amount = 0.75
+        self.__rotate_crop_borders = False
 
         # Dataset storage
         self.__all_ids = None
@@ -381,15 +382,18 @@ class DPPModel(object):
 
         self.__augmentation_contrast = contr
 
-    def set_augmentation_rotation(self, rot):
+    def set_augmentation_rotation(self, rot, crop_borders=False):
         """Randomly rotate training images"""
         if not isinstance(rot, bool):
             raise TypeError("rot must be a bool")
+        if not isinstance(crop_borders, bool):
+            raise TypeError("crop_borders must be a bool")
         if self.__problem_type not in [definitions.ProblemType.CLASSIFICATION,
                                        definitions.ProblemType.REGRESSION]:
             raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
 
         self.__augmentation_rotate = rot
+        self.__rotate_crop_borders = crop_borders
 
     def set_regularization_coefficient(self, lamb):
         """Set lambda for L2 weight decay"""
@@ -3803,13 +3807,16 @@ class DPPModel(object):
                 self.__train_images = tf.image.random_contrast(self.__train_images, lower=0.2, upper=1.8)
 
             if self.__augmentation_rotate:
-                # Apply random rotations, then crop out black borders and resize
-                small_crop_fraction = self.__smallest_crop_fraction()
+                # Apply random rotations, then optionally crop out black borders and resize
                 angle = tf.random_uniform([], maxval=2*math.pi)
                 self.__train_images = tf.contrib.image.rotate(self.__train_images, angle, interpolation='BILINEAR')
-                self.__train_images = tf.image.central_crop(self.__train_images, small_crop_fraction)
-                self.__train_images = tf.image.resize_images(self.__train_images,
-                                                             [self.__image_height, self.__image_width])
+                if self.__rotate_crop_borders:
+                    # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
+                    # consistent scale across the images
+                    small_crop_fraction = self.__smallest_crop_fraction()
+                    self.__train_images = tf.image.central_crop(self.__train_images, small_crop_fraction)
+                    self.__train_images = tf.image.resize_images(self.__train_images,
+                                                                 [self.__image_height, self.__image_width])
 
             # mean-center all inputs
             self.__train_images = tf.image.per_image_standardization(self.__train_images)
