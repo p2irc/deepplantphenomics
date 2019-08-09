@@ -3865,50 +3865,6 @@ class DPPModel(object):
 
             self.__all_images = input_images
 
-    def __rotation_crop_fraction(self, angle):
-        """
-        Calculates the crop fraction required to crop out black borders in a rotated image. Based on
-        rotatedRectWithMaxArea in this StackOverflow answer: https://stackoverflow.com/a/16778797
-        :param angle: Scalar, The rotation angle for the image, in radians
-        :return: Scalar, The required crop fraction for the image
-        """
-
-        # Determine which sides of the original image are the shorter and longer sides
-        width_is_longer = self.__image_width >= self.__image_height
-        if width_is_longer:
-            (long_length, short_length) = (self.__image_width, self.__image_height)
-        else:
-            (long_length, short_length) = (self.__image_height, self.__image_width)
-
-        # Get the absolute sin and cos of the angle, since the quadrant doesn't affect us
-        sin_a = abs(math.sin(angle))
-        cos_a = abs(math.cos(angle))
-
-        # Get the width and height of the required cropped image. There are 2 possible solutions depending on how large
-        # the aspect ratio is relative to the sin of the angle
-        def rect_case_1():
-            # Solution 1 for mid-range angles: One corner is at the midpoint of an edge and the other edge lies along
-            # the centre line of the rotated image
-            x = 0.5*short_length
-            if width_is_longer:
-                return [x/sin_a, x/cos_a]
-            else:
-                return [x/cos_a, x/sin_a]
-
-        def rect_case_2():
-            # Solution 2 for small and large angles: Each corner is respectively on each edge of the rotated image
-            cos_2a = cos_a*cos_a - sin_a*sin_a
-            return [(self.__image_width*cos_a - self.__image_height*sin_a)/cos_2a,
-                    (self.__image_height*cos_a - self.__image_width*sin_a)/cos_2a]
-
-        if short_length < 2*sin_a*cos_a*long_length or abs(sin_a - cos_a) < 1e-10:
-            (crop_width, crop_height) = rect_case_1()
-        else:
-            (crop_width, crop_height) = rect_case_2()
-
-        # Use the crop width and height to calculate the required crop ratio
-        return (crop_width*crop_height) / (self.__image_width*self.__image_height)
-
     def __smallest_crop_fraction(self):
         """
         Determine the angle and crop fraction for rotated images that gives the maximum border-less crop area for a
@@ -3918,23 +3874,30 @@ class DPPModel(object):
         :return: The crop fraction that achieves the smallest area among border-less crops for rotated images
         """
 
-        # As a special case, check if the images are square. If they are, then we know that the smallest crop fraction
-        # is for an angle of 45 degree == pi/4 radians.
-        if self.__image_width == self.__image_height:
-            return self.__rotation_crop_fraction(math.pi/4)
+        # Regardless of the aspect ratio, the smallest crop fraction always corresponds to the required crop for a 45
+        # degree or pi/4 radian rotation
+        angle = math.pi/4
 
         # Determine which sides of the original image are the shorter and longer sides
-        if self.__image_width <= self.__image_height:
-            (short_length, long_length) = (self.__image_width, self.__image_height)
-        else:
+        width_is_longer = self.__image_width >= self.__image_height
+        if width_is_longer:
             (short_length, long_length) = (self.__image_height, self.__image_width)
+        else:
+            (short_length, long_length) = (self.__image_width, self.__image_height)
 
-        # For rectangular images, the angle for the smallest crop fraction depends on the inverse aspect ratio such that
-        # (L_short/L_long) = Sin(2*angle). This repeats at pi/2 - angle and at the equivalent angles in other quadrants,
-        # but the smaller first quadrant answer will suffice.
-        angle_crop = math.asin(short_length/long_length)/2
+        # Get the absolute sin and cos of the angle, since the quadrant doesn't affect us
+        sin_a = abs(math.sin(angle))
+        cos_a = abs(math.cos(angle))
 
-        # The angle in turn gives us the crop fraction. Note that the function for Area vs Angle is piecewise and has a
-        # discontinuity at our crop angle. This will give the larger of the two values at that discontinuity. This might
-        # burn me...
-        return self.__rotation_crop_fraction(angle_crop)
+        # There are 2 possible solutions for the width and height in general depending on the angle and aspect ratio,
+        # but 45 degree rotations always fall into the solution below. This corresponds to a rectangle with one corner
+        # at the midpoint of an edge and the other corner along the centre line of the rotated image, although this
+        # cropped rectangle will ultimately be slid up so that it's centered inside the rotated image.
+        x = 0.5 * short_length
+        if width_is_longer:
+            (crop_width, crop_height) = (x / sin_a, x / cos_a)
+        else:
+            (crop_width, crop_height) = (x / cos_a, x / sin_a)
+
+        # Use the crop width and height to calculate the required crop ratio
+        return (crop_width * crop_height) / (self.__image_width * self.__image_height)
