@@ -285,9 +285,8 @@ class batchNormLayer(object):
         self.output_size = input_size
         self.name = name
 
-    def add_to_graph(self, graph):
-        with graph.as_default():
-            self.__layer = tf.keras.layers.BatchNormalization()
+    def add_to_graph(self):
+        self.__layer = tf.keras.layers.BatchNormalization()
 
     def forward_pass(self, x, deterministic):
         x = self.__layer.apply(x, training=(not deterministic))

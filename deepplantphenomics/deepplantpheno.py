@@ -72,7 +72,7 @@ class DPPModel(object):
         self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']                # ... regression
         self.__supported_loss_fns_ss = ['sigmoid cross entropy']                             # ... semantic segmentation
         self.__supported_loss_fns_od = ['yolo']                                              # ... object detection
-        self.__supported_predefined_models = ['vgg-16']
+        self.__supported_predefined_models = ['vgg-16', 'alexnet', 'xsmall']
 
         # Augmentation options
         self.__augmentation_flip_horizontal = False
@@ -1174,6 +1174,10 @@ class DPPModel(object):
                 self.__log('Beginning training...')
 
                 self.__set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self.__graph_ops['optimizer'] = tf.group([self.__graph_ops['optimizer'], update_ops])
 
                 # for i in range(self.__maximum_training_batches):
                 tqdm_range = tqdm(range(self.__maximum_training_batches))
@@ -2745,7 +2749,48 @@ class DPPModel(object):
             self.add_pooling_layer(kernel_size=2, stride_length=2)
 
             self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+            self.add_dropout_layer(0.5)
             self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+            self.add_dropout_layer(0.5)
+
+            self.add_output_layer()
+
+        if model_name == 'alexnet':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[11, 11, self.__image_depth, 48], stride_length=4, activation_function='relu')
+            self.add_normalization_layer()
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[5, 5, 48, 256], stride_length=1, activation_function='relu')
+            self.add_normalization_layer()
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 384], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 384, 384], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 384, 256], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+            self.add_dropout_layer(0.5)
+            self.add_fully_connected_layer(output_size=4096, activation_function='relu')
+            self.add_dropout_layer(0.5)
+
+            self.add_output_layer()
+
+        if model_name == 'xsmall':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 16], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 16, 32], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 32, 32], stride_length=1, activation_function='relu')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_fully_connected_layer(output_size=64, activation_function='relu')
 
             self.add_output_layer()
 
