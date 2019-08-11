@@ -289,6 +289,7 @@ class batchNormLayer(object):
         self.__layer = tf.keras.layers.BatchNormalization()
 
     def forward_pass(self, x, deterministic):
-        x = self.__layer.apply(x, training=(not deterministic))
+        # Batch size is always fixed, so we will always calculate based on a static batch size.
+        x = self.__layer.apply(x, training=True)
 
         return x

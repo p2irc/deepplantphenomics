@@ -11,7 +11,6 @@ model = dpp.DPPModel(debug=True, load_from_saved=False)
 channels = 3
 
 # Setup and hyperparameters
-model.set_number_of_threads(4)
 model.set_image_dimensions(32, 32, channels)
 
 model.set_regularization_coefficient(0.004)
