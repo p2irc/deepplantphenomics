@@ -13,6 +13,7 @@ setup(
     install_requires=[
         'tensorflow',
         'numpy',
-        'tqdm'
+        'tqdm',
+        'opencv-python'
     ]
 )
