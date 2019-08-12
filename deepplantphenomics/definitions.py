@@ -4,5 +4,5 @@ from enum import Enum
 class ProblemType(Enum):
     CLASSIFICATION = 1
     REGRESSION = 2
-    SEMANTICSEGMETNATION = 3
-    OBJECTDETECTION = 4
+    SEMANTIC_SEGMETNATION = 3
+    OBJECT_DETECTION = 4

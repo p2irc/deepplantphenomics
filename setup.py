@@ -11,8 +11,9 @@ setup(
     author_email='jordan.ubbens@usask.ca',
     description='Deep learning tools for plant phenotyping',
     install_requires=[
+        'tensorflow',
         'numpy',
-        'joblib',
-        'tqdm'
+        'tqdm',
+        'opencv-python'
     ]
 )
