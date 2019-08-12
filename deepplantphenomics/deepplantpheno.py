@@ -15,6 +15,7 @@ from scipy.special import expit
 from PIL import Image
 from tqdm import tqdm
 
+
 class DPPModel(object):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -68,10 +69,10 @@ class DPPModel(object):
         self.__supported_weight_initializers = ['normal', 'xavier']
         self.__supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
         self.__supported_pooling_types = ['max', 'avg']
-        self.__supported_loss_fns_cls = ['softmax cross entropy'] # supported loss functions for classification
-        self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']                # ... regression
-        self.__supported_loss_fns_ss = ['sigmoid cross entropy']                             # ... semantic segmentation
-        self.__supported_loss_fns_od = ['yolo']                                              # ... object detection
+        self.__supported_loss_fns_cls = ['softmax cross entropy']  # supported loss functions for classification
+        self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']               # ... regression
+        self.__supported_loss_fns_ss = ['sigmoid cross entropy']                            # ... semantic segmentation
+        self.__supported_loss_fns_od = ['yolo']                                             # ... object detection
         self.__supported_predefined_models = ['vgg-16', 'alexnet', 'xsmall', 'small', 'medium', 'large']
 
         # Augmentation options
@@ -225,12 +226,12 @@ class DPPModel(object):
 
         self.__num_threads = num_threads
 
-    def set_processed_images_dir(self, dir):
+    def set_processed_images_dir(self, im_dir):
         """Set the directory for storing processed images when pre-processing is used"""
-        if not isinstance(dir, str):
-            raise TypeError("dir must be a str")
+        if not isinstance(im_dir, str):
+            raise TypeError("im_dir must be a str")
 
-        self.__processed_images_dir = dir
+        self.__processed_images_dir = im_dir
 
     def set_batch_size(self, size):
         """Set the batch size"""
@@ -245,7 +246,7 @@ class DPPModel(object):
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
         if self.__problem_type != definitions.ProblemType.REGRESSION:
-            raise RuntimeError("The problem type needs to be set to 'regression' before setting the number "+
+            raise RuntimeError("The problem type needs to be set to 'regression' before setting the number " +
                                "of regression outputs. Try using DPPModel.set_problem_type() first.")
         if not isinstance(num, int):
             raise TypeError("num must be an int")
@@ -515,28 +516,28 @@ class DPPModel(object):
         self.__moderation_features_size = moderation_features.shape[1]
         self.__all_moderation_features = moderation_features
 
-    def set_problem_type(self, type):
+    def set_problem_type(self, p_type):
         """Set the problem type to be solved, either classification or regression"""
-        if not isinstance(type, str):
-            raise TypeError("type must be a str")
-        if not type in self.__supported_problem_types:
-            raise ValueError("'"+type+"' is not one of the currently supported problem types." +
-                             " Choose one of: "+" ".join("'"+x+"'" for x in self.__supported_problem_types))
+        if not isinstance(p_type, str):
+            raise TypeError("p_type must be a str")
+        if not p_type in self.__supported_problem_types:
+            raise ValueError("'" + p_type + "' is not one of the currently supported problem types." +
+                             " Choose one of: " + " ".join("'"+x+"'" for x in self.__supported_problem_types))
 
-        if type == 'classification':
+        if p_type == 'classification':
             self.__problem_type = definitions.ProblemType.CLASSIFICATION
             self.__loss_fn = self.__supported_loss_fns_cls[0]
-        elif type == 'regression':
+        elif p_type == 'regression':
             self.__problem_type = definitions.ProblemType.REGRESSION
             self.__loss_fn = self.__supported_loss_fns_reg[0]
-        elif type == 'semantic_segmentation':
+        elif p_type == 'semantic_segmentation':
             self.__problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
             self.__loss_fn = self.__supported_loss_fns_ss[0]
-        elif type == 'object_detection':
+        elif p_type == 'object_detection':
             self.__problem_type = definitions.ProblemType.OBJECT_DETECTION
             self.__loss_fn = self.__supported_loss_fns_od[0]
         else:
-            warnings.warn('Problem type specified not supported')
+            warnings.warn('Problem p_type specified not supported')
             exit()
 
     def set_patch_size(self, height, width):
@@ -572,7 +573,7 @@ class DPPModel(object):
                 raise TypeError("grid_size should be a 2-element integer list")
             self.__grid_w, self.__grid_h = grid_size
         else:
-            self.__grid_w, self.__grid_h = [7,7]
+            self.__grid_w, self.__grid_h = [7, 7]
 
         if labels:
             if not isinstance(labels, Sequence) or isinstance(labels, str) \
@@ -588,7 +589,7 @@ class DPPModel(object):
             if not isinstance(anchors, Sequence):
                 raise TypeError("anchors should be a list/tuple of integer lists/tuples")
             if not all([(isinstance(a, Sequence) and len(a) == 2
-                     and isinstance(a[0], int) and isinstance(a[1], int)) for a in anchors]):
+                         and isinstance(a[0], int) and isinstance(a[1], int)) for a in anchors]):
                 raise TypeError("anchors should contain 2-element lists/tuples")
             self.__RAW_ANCHORS = anchors
         else:
@@ -648,7 +649,7 @@ class DPPModel(object):
 
         prior_boxes = tf.convert_to_tensor(self.__ANCHORS)
 
-        ### object/no-object masks ###
+        # object/no-object masks #
         # create masks for grid cells with objects and with no objects
         obj_mask = tf.cast(y_true[..., 0], dtype=bool)
         no_obj_mask = tf.logical_not(obj_mask)
@@ -656,7 +657,7 @@ class DPPModel(object):
         obj_true = tf.boolean_mask(y_true, obj_mask)
         no_obj_pred = tf.boolean_mask(y_pred, no_obj_mask)
 
-        ### bbox coordinate loss ###
+        # bbox coordinate loss #
         # build a tensor of the predicted bounding boxes and confidences, classes will be stored separately
         # [x1,y1,w1,h1,conf1,x2,y2,w2,h2,conf2,x3,y3,w3,h3,conf3,...]
         pred_classes = obj_pred[..., self.__NUM_BOXES*5:]
@@ -665,10 +666,10 @@ class DPPModel(object):
         no_obj_pred = tf.reshape(no_obj_pred[..., 0:self.__NUM_BOXES*5], [-1, self.__NUM_BOXES, 5])
         t_x, t_y, t_w, t_h = obj_pred[..., 0], obj_pred[..., 1], obj_pred[..., 2], obj_pred[..., 3]
         t_o = obj_pred[..., 4]
-        pred_x = tf.sigmoid(t_x) + 0.00001 # concerned about underflow (might not actually be necessary)
+        pred_x = tf.sigmoid(t_x) + 0.00001  # concerned about underflow (might not actually be necessary)
         pred_y = tf.sigmoid(t_y) + 0.00001
-        pred_w = (tf.exp(t_w) + 0.00001) * prior_boxes[:,0]
-        pred_h = (tf.exp(t_h) + 0.00001) * prior_boxes[:,1]
+        pred_w = (tf.exp(t_w) + 0.00001) * prior_boxes[:, 0]
+        pred_h = (tf.exp(t_h) + 0.00001) * prior_boxes[:, 1]
         pred_conf = tf.sigmoid(t_o) + 0.00001
         predicted_boxes = tf.stack([pred_x, pred_y, pred_w, pred_h, pred_conf], axis=2)
 
@@ -682,17 +683,17 @@ class DPPModel(object):
 
         # compute loss on responsible boxes
         loss_xy = tf.square(tf.subtract(responsible_boxes[..., 0:2],
-                                        obj_true[...,1+self.__NUM_CLASSES:1+self.__NUM_CLASSES+2]))
+                                        obj_true[..., 1+self.__NUM_CLASSES:1+self.__NUM_CLASSES+2]))
         loss_wh = tf.square(tf.subtract(tf.sqrt(responsible_boxes[..., 2:4]),
                                         tf.sqrt(obj_true[..., 1+self.__NUM_CLASSES+2:1+self.__NUM_CLASSES+4])))
         coord_loss = tf.reduce_sum(tf.add(loss_xy, loss_wh))
 
-        ### confidence loss ###
+        # confidence loss #
         # grids that do contain an object, 1 * iou means we simply take the difference between the
         # iou's and the predicted confidence
 
-        ### this was to make responsible boxes confidences aim to go to 1 instead of their current iou score, this is
-        ### still being tested
+        # this was to make responsible boxes confidences aim to go to 1 instead of their current iou score, this is
+        # still being tested
         # non_resp_box_mask = tf.logical_not(resp_box_mask)
         # non_responsible_boxes = tf.boolean_mask(predicted_boxes, non_resp_box_mask)
         # non_responsible_ious = tf.boolean_mask(ious, non_resp_box_mask)
@@ -700,17 +701,16 @@ class DPPModel(object):
         # loss2 = tf.reduce_sum(tf.square(tf.subtract(non_responsible_ious, non_responsible_boxes[..., 4])))
         # loss_obj = loss1 + loss2
 
-        ### this is how the paper does it, the above 6 lines is experimental
-        obj_num_grids = tf.shape(predicted_boxes)[0] # [num_boxes, 5, 5]
-        loss_obj = tf.cast((1/obj_num_grids), dtype='float32') *\
-                   tf.reduce_sum(tf.square(tf.subtract(ious, predicted_boxes[...,4])))
+        # this is how the paper does it, the above 6 lines is experimental
+        obj_num_grids = tf.shape(predicted_boxes)[0]  # [num_boxes, 5, 5]
+        loss_obj = tf.cast((1/obj_num_grids), dtype='float32') * tf.reduce_sum(
+            tf.square(tf.subtract(ious, predicted_boxes[..., 4])))
 
         # grids that do not contain an object, 0 * iou means we simply take the predicted confidences of the
         # grids that do not have an object and square and sum (because they should be 0)
         no_obj_confs = tf.sigmoid(no_obj_pred[..., 4])
-        no_obj_num_grids = tf.shape(no_obj_confs)[0] # [number_of_grids_without_an_object, 5]
-        loss_no_obj =  tf.cast(1/(no_obj_num_grids), dtype='float32') *\
-                       tf.reduce_sum(tf.square(no_obj_confs))
+        no_obj_num_grids = tf.shape(no_obj_confs)[0]  # [number_of_grids_without_an_object, 5]
+        loss_no_obj = tf.cast(1/no_obj_num_grids, dtype='float32') * tf.reduce_sum(tf.square(no_obj_confs))
         # incase obj_pred or no_obj_confs is empty (e.g. no objects in the image) we need to make sure we dont
         # get nan's in our losses...
         loss_obj = tf.cond(tf.count_nonzero(y_true[..., 4]) > 0, lambda: loss_obj, lambda: 0.)
@@ -718,7 +718,7 @@ class DPPModel(object):
                               lambda: loss_no_obj, lambda: 0.)
         conf_loss = tf.add(loss_obj, loss_no_obj)
 
-        ### classification loss ###
+        # classification loss #
         # currently only one class, plant, will need to be made more general for multi-class in the future
         class_probs_pred = tf.nn.softmax(pred_classes)
         class_diffs = tf.subtract(obj_true[..., 1:1+self.__NUM_CLASSES], class_probs_pred)
@@ -726,7 +726,7 @@ class DPPModel(object):
 
         total_loss = coord_loss + conf_loss + class_loss
 
-        ### for some debug/checking, otherwise leave commented ###
+        # for some debug/checking, otherwise leave commented #
         # init_op = tf.global_variables_initializer()
         # self.__session.run(init_op)
         # self.__initialize_queue_runners()
@@ -739,7 +739,6 @@ class DPPModel(object):
         # print(self.__session.run([coord_loss, conf_loss, class_loss]))
 
         return total_loss
-
 
     def __add_layers_to_graph(self):
         """
@@ -767,9 +766,9 @@ class DPPModel(object):
             else:
                 # split the data into train/val/test sets, if there is no validation set or no moderation features
                 # being used they will be returned as 0 (val) or None (moderation features)
-                train_images, train_labels, train_mf,\
-                test_images, test_labels, test_mf,\
-                val_images, val_labels, val_mf,= \
+                train_images, train_labels, train_mf, \
+                test_images, test_labels, test_mf, \
+                val_images, val_labels, val_mf, = \
                     loaders.split_raw_data(self.__raw_image_files, self.__raw_labels, self.__test_split,
                                            self.__validation_split, self.__all_moderation_features,
                                            self.__training_augmentation_images, self.__training_augmentation_labels,
@@ -830,7 +829,6 @@ class DPPModel(object):
                     y = tf.image.extract_glimpse(y, [patch_height, patch_width], offsets, normalized=False,
                                                  centered=False)
 
-
             # Run the network operations
             if self.__has_moderation:
                 xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
@@ -867,7 +865,8 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'sigmoid cross entropy':
-                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
+                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                        logits=xx, labels=y[:, :, :, 0]))
                 # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
             elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
@@ -902,8 +901,9 @@ class DPPModel(object):
 
             # Compute gradients, clip them, the apply the clipped gradients
             # This is broken up so that we can add gradients to tensorboard
+            # need to make the 5.0 an adjustable hyperparameter
             gradients, variables = zip(*self.__graph_ops['optimizer'].compute_gradients(self.__graph_ops['cost']))
-            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)  # need to make this 5.0 an adjustable hyperparameter
+            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
             self.__graph_ops['optimizer'] = self.__graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
 
             # for classification problems we will compute the training accuracy, this is also used for tensorboard
@@ -973,9 +973,9 @@ class DPPModel(object):
                     self.__graph_ops['y_val'] = loaders.label_string_to_tensor(self.__graph_ops['y_val'],
                                                                                self.__batch_size)
                     self.__graph_ops['y_val'] = tf.reshape(self.__graph_ops['y_val'],
-                                                            shape=[self.__batch_size,
-                                                                   self.__grid_w * self.__grid_h,
-                                                                   vec_size])
+                                                           shape=[self.__batch_size,
+                                                                  self.__grid_w * self.__grid_h,
+                                                                  vec_size])
 
             # if using patching we need to properly pull patches from the images (object detection patching is different
             # and is done when data is loaded)
@@ -988,7 +988,7 @@ class DPPModel(object):
                                                       normalized=False, centered=False)
                 if self.__validation:
                     x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
-                                                      normalized=False, centered=False)
+                                                     normalized=False, centered=False)
                 if self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                     if self.__testing:
                         self.__graph_ops['y_test'] = tf.image.extract_glimpse(self.__graph_ops['y_test'],
@@ -996,8 +996,8 @@ class DPPModel(object):
                                                                               normalized=False, centered=False)
                     if self.__validation:
                         self.__graph_ops['y_val'] = tf.image.extract_glimpse(self.__graph_ops['y_val'],
-                                                                              [patch_height, patch_width], offsets,
-                                                                              normalized=False, centered=False)
+                                                                             [patch_height, patch_width], offsets,
+                                                                             normalized=False, centered=False)
 
             if self.__has_moderation:
                 if self.__testing:
@@ -1029,7 +1029,8 @@ class DPPModel(object):
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 if self.__testing:
                     test_class_predictions = tf.argmax(tf.nn.softmax(self.__graph_ops['x_test_predicted']), 1)
-                    test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self.__graph_ops['y_test'], 1))
+                    test_correct_predictions = tf.equal(test_class_predictions,
+                                                        tf.argmax(self.__graph_ops['y_test'], 1))
                     self.__graph_ops['test_losses'] = test_correct_predictions
                     self.__graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
                 if self.__validation:
@@ -1040,9 +1041,11 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.REGRESSION:
                 if self.__testing:
                     if self.__num_regression_outputs == 1:
-                        self.__graph_ops['test_losses'] = tf.squeeze(tf.stack(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
+                        self.__graph_ops['test_losses'] = tf.squeeze(tf.stack(
+                            tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test'])))
                     else:
-                        self.__graph_ops['test_losses'] = self.__l2_norm(tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
+                        self.__graph_ops['test_losses'] = self.__l2_norm(
+                            tf.subtract(self.__graph_ops['x_test_predicted'], self.__graph_ops['y_test']))
                 if self.__validation:
                     if self.__num_regression_outputs == 1:
                         self.__graph_ops['val_losses'] = tf.squeeze(
@@ -1054,8 +1057,11 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 if self.__testing:
                     self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test'][:, :, :, 0]), axis=2)
-                    self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
+                        logits=self.__graph_ops['x_test_predicted'],
+                        labels=self.__graph_ops['y_test'][:, :, :, 0]),
+                        axis=2)
+                    self.__graph_ops['test_losses'] = tf.transpose(
+                        tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
                 if self.__validation:
                     self.__graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=self.__graph_ops['x_val_predicted'], labels=self.__graph_ops['y_val'][:, :, :, 0]),
@@ -1067,12 +1073,11 @@ class DPPModel(object):
                 if self.__testing:
                     if self.__loss_fn == 'yolo':
                         self.__graph_ops['test_losses'] = self._yolo_loss_function(self.__graph_ops['y_test'],
-                                                          self.__graph_ops['x_test_predicted'])
+                                                                                   self.__graph_ops['x_test_predicted'])
                 if self.__validation:
                     if self.__loss_fn == 'yolo':
                         self.__graph_ops['val_losses'] = self._yolo_loss_function(self.__graph_ops['y_val'],
-                                                          self.__graph_ops['x_val_predicted'])
-
+                                                                                  self.__graph_ops['x_val_predicted'])
 
             # Epoch summaries for Tensorboard
             if self.__tb_dir is not None:
@@ -1170,7 +1175,8 @@ class DPPModel(object):
         # if (len(self.__layers) < 1):
         #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
         #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of layers.")
+        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
+        #                        layers.")
 
         with self.__graph.as_default():
             self.__assemble_graph()
@@ -1235,8 +1241,8 @@ class DPPModel(object):
                                             samples_per_sec))
 
                             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                                 self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
-                                 self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                                    self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
+                                    self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                                 loss, epoch_test_loss = self.__session.run([self.__graph_ops['cost'],
                                                                             self.__graph_ops['val_cost']])
 
@@ -1268,8 +1274,8 @@ class DPPModel(object):
                                             samples_per_sec))
 
                             elif self.__problem_type == definitions.ProblemType.REGRESSION or \
-                                 self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
-                                 self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                                    self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
+                                    self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
 
                                 loss = self.__session.run([self.__graph_ops['cost']])
 
@@ -1318,8 +1324,6 @@ class DPPModel(object):
         """
         self.__hyper_param_search = True
 
-        all_l2_reg = []
-        all_lr = []
         base_tb_dir = self.__tb_dir
 
         unaltered_image_height = self.__image_height
@@ -1725,37 +1729,37 @@ class DPPModel(object):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
         with self.__graph.as_default():
             pad = 1
-            grid_X = 4
+            grid_x = 4
 
-            # pad X and Y
+            # pad x and y
             x1 = tf.pad(kernel, tf.constant([[pad, 0], [pad, 0], [0, 0], [0, 0]]))
 
             # when kernel is dynamically shaped at runtime it has [?,?,?,?] dimensions which result in None's
             # thus size needs to be passed in so we have actual dimensions to work with (this is mostly from the
-            # upsampling layer) and grid_Y will be determined by batch size as we want to see each img in the batch
+            # upsampling layer) and grid_y will be determined by batch size as we want to see each img in the batch
             # However, for visualizing the weights we wont pass in a size parameter and as a result we need to
-            # compute grid_Y based off what is passed in and not the batch size because we want to see the
+            # compute grid_y based off what is passed in and not the batch size because we want to see the
             # convolution grid for each layer, not each batch.
             if size is not None:
                 # this is when visualizing the actual images
-                grid_Y = int(np.ceil(self.__batch_size / 4))
-                # X and Y dimensions, w.r.t. padding
-                Y = size[1] + pad
-                X = size[2] + pad
+                grid_y = int(np.ceil(self.__batch_size / 4))
+                # x and y dimensions, w.r.t. padding
+                y = size[1] + pad
+                x = size[2] + pad
                 num_channels = size[-1]
             else:
                 # this is when visualizing the weights
-                grid_Y = (kernel.get_shape().as_list()[-1] / 4)
-                # X and Y dimensions, w.r.t. padding
-                Y = kernel.get_shape()[0] + pad
-                X = kernel.get_shape()[1] + pad
+                grid_y = (kernel.get_shape().as_list()[-1] / 4)
+                # x and y dimensions, w.r.t. padding
+                y = kernel.get_shape()[0] + pad
+                x = kernel.get_shape()[1] + pad
                 num_channels = kernel.get_shape().as_list()[2]
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
-            x3 = tf.reshape(x2, tf.stack([grid_X, Y * grid_Y, X, num_channels]))
+            x3 = tf.reshape(x2, tf.stack([grid_x, y * grid_y, x, num_channels]))
             x4 = tf.transpose(x3, (0, 2, 1, 3))
-            x5 = tf.reshape(x4, tf.stack([1, X * grid_X, Y * grid_Y, num_channels]))
+            x5 = tf.reshape(x4, tf.stack([1, x * grid_x, y * grid_y, num_channels]))
             x6 = tf.transpose(x5, (2, 1, 3, 0))
             x7 = tf.transpose(x6, (3, 0, 1, 2))
 
@@ -1771,16 +1775,16 @@ class DPPModel(object):
         self.__log('Saving parameters...')
 
         if directory is None:
-            dir = './saved_state'
+            state_dir = './saved_state'
         else:
-            dir = directory + '/saved_state'
+            state_dir = directory + '/saved_state'
 
-        if not os.path.isdir(dir):
-            os.mkdir(dir)
+        if not os.path.isdir(state_dir):
+            os.mkdir(state_dir)
 
         with self.__graph.as_default():
             saver = tf.train.Saver(tf.trainable_variables())
-            saver.save(self.__session, dir + '/tfhSaved')
+            saver.save(self.__session, state_dir + '/tfhSaved')
 
         self.__has_trained = True
 
@@ -1833,7 +1837,6 @@ class DPPModel(object):
 
         return x
 
-
     def forward_pass_with_file_inputs(self, x):
         """
         Get network outputs with a list of filenames of images as input.
@@ -1881,7 +1884,7 @@ class DPPModel(object):
                     # pre-allocate output dimensions
                     total_outputs = np.empty([1,
                                               num_patches_horiz*num_patches_vert,
-                                              self.__grid_w * self.__grid_h * (5 * self.__NUM_BOXES + self.__NUM_CLASSES)])
+                                              self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES + self.__NUM_CLASSES)])
                 else:
                     total_outputs = np.empty([1, self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES+self.__NUM_CLASSES)])
             else:
@@ -1924,7 +1927,7 @@ class DPPModel(object):
                         xx = self.__session.run(x_pred)
 
                         # generalized image stitching
-                        for img in np.array_split(xx, self.__batch_size): # for each img in current batch
+                        for img in np.array_split(xx, self.__batch_size):  # for each img in current batch
                             # we are going to build a list of rows of imgs called img_rows, where each element
                             # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
                             # iterate through img_rows concatenating the rows vertically (axis=0) to build
@@ -1933,21 +1936,23 @@ class DPPModel(object):
                             img_rows = []
                             # for each row
                             for j in range(num_patch_rows):
-                                curr_row = img[j*num_patch_cols] # start new row with first img
+                                curr_row = img[j*num_patch_cols]  # start new row with first img
                                 # iterate through the rest of the row, concatenating img's together
                                 for k in range(1, num_patch_cols):
-                                    curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1) # horizontal cat
-                                img_rows.append(curr_row) # add row of img's to the list
+                                    # horizontal cat
+                                    curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
+                                img_rows.append(curr_row)  # add row of img's to the list
 
                             # start full img with the first full row of imgs
                             full_img = img_rows[0]
                             # iterate through rest of rows, concatenating rows together
                             for row_num in range(1, num_patch_rows):
-                                full_img = np.concatenate((full_img, img_rows[row_num]), axis=0) # vertical cat
+                                # vertical cat
+                                full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
 
                             # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                            full_img = np.array([full_img]) # shape transformation: (x,y) --> (1,x,y)
-                            total_outputs = np.append(total_outputs, full_img, axis=0) # add the final img to the list of imgs
+                            full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
+                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list of imgs
                 elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     # for i in range(num_batches):
                     #     xx = self.__session.run(x_pred)
@@ -1962,7 +1967,6 @@ class DPPModel(object):
                         xx = np.reshape(xx, [self.__batch_size, num_patches_vert*num_patches_horiz, -1])
                         for img in np.array_split(xx, self.__batch_size):
                             total_outputs = np.append(total_outputs, img, axis=0)
-
 
             else:
                 for i in range(int(num_batches)):
@@ -1991,19 +1995,19 @@ class DPPModel(object):
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
 
-        ### Classification ###
+        # Classification #
         if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
             # perform forward pass of the network to get raw outputs
             xx = self.forward_pass_with_file_inputs(x)
             # softmax
             interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
 
-        ### Regression ###
+        # Regression #
         elif self.__problem_type == definitions.ProblemType.REGRESSION:
             # nothing special required for regression
             interpreted_outputs = self.forward_pass_with_file_inputs(x)
 
-        ### Semantic Segmentation ###
+        # Semantic Segmentation #
         elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
             with self.__graph.as_default():
                 # check for patching needs
@@ -2014,7 +2018,7 @@ class DPPModel(object):
                     patch_width = self.__patch_width
                     final_height = (self.__image_height // patch_height) * patch_height
                     final_width = (self.__image_width // patch_width) * patch_width
-                    # find image differencees to determine recentering crop coords, we divide by 2 so that the leftover
+                    # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
                     # is equal on all sides of image
                     offset_height = (self.__image_height - final_height) // 2
                     offset_width = (self.__image_width - final_width) // 2
@@ -2032,11 +2036,13 @@ class DPPModel(object):
                 images = x
                 self.__parse_images(images)
                 # set up and then initialize the queue
-                x_test = tf.train.batch([self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
+                x_test = tf.train.batch(
+                    [self.__all_images], batch_size=self.__batch_size, num_threads=self.__num_threads)
                 x_test = tf.reshape(x_test, shape=[-1, self.__image_height, self.__image_width, self.__image_depth])
                 # if using patching we have to determine different image dimensions
                 if self.__with_patching:
-                    x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
+                    x_test = tf.image.crop_to_bounding_box(
+                        x_test, offset_height, offset_width, final_height, final_width)
                     # Split the images up into the multiple slices of size patch_height x patch_width
                     ksizes = [1, patch_height, patch_width, 1]
                     strides = [1, patch_height, patch_width, 1]
@@ -2054,27 +2060,29 @@ class DPPModel(object):
                     for i in range(num_batches):
                         xx = self.__session.run(x_pred)
                         # generalized image stitching
-                        for img in np.array_split(xx, self.__batch_size): # for each img in current batch
+                        for img in np.array_split(xx, self.__batch_size):  # for each img in current batch
                             # we are going to build a list of rows of imgs called img_rows, where each element
                             # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
                             # iterate through img_rows concatenating the rows vertically (axis=0) to build
                             # the full img
                             img_rows = []
-                            for j in range(num_patch_rows): # for each row
-                                curr_row = img[j*num_patch_cols] # start new row with first img
+                            for j in range(num_patch_rows):  # for each row
+                                curr_row = img[j*num_patch_cols]  # start new row with first img
                                 # iterate through the rest of the row, concatenating img's together
                                 for k in range(1, num_patch_cols):
-                                    curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1) # horizontal cat
-                                img_rows.append(curr_row) # add row of img's to the list
+                                    # vertical cat
+                                    curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
+                                img_rows.append(curr_row)  # add row of img's to the list
                             # start full img with the first full row of imgs
                             full_img = img_rows[0]
                             # iterate through rest of rows, concatenating rows together
                             for row_num in range(1, num_patch_rows):
-                                full_img = np.concatenate((full_img, img_rows[row_num]), axis=0) # vertical cat
+                                # vertical cat
+                                full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
                             # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                            full_img = np.array([full_img]) # shape transformation: (x,y) --> (1,x,y)
+                            full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
                             # this appending may be causing a border, might need to rewrite and specifically index
-                            total_outputs = np.append(total_outputs, full_img, axis=0) # add the final img to the array of imgs
+                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the array of imgs
                 else:
                     for i in range(int(num_batches)):
                         xx = self.__session.run(x_pred)
@@ -2099,7 +2107,7 @@ class DPPModel(object):
                 # store
                 interpreted_outputs[i, :, :] = mask
 
-        ### Object Detection ###
+        # Object Detection #
         elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
             with self.__graph.as_default():
                 # check for patching needs
@@ -2119,7 +2127,7 @@ class DPPModel(object):
                     # pre-allocate output dimensions
                     total_outputs = np.empty([1,
                                               num_patches_horiz*num_patches_vert,
-                                              self.__grid_w * self.__grid_h * (5 * self.__NUM_BOXES + self.__NUM_CLASSES)])
+                                              self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES + self.__NUM_CLASSES)])
                 else:
                     total_outputs = np.empty([1, self.__grid_w*self.__grid_h*(5*self.__NUM_BOXES+self.__NUM_CLASSES)])
                 num_batches = len(x) // self.__batch_size
@@ -2184,12 +2192,12 @@ class DPPModel(object):
             if self.__with_patching:
                 num_patches = num_patches_vert * num_patches_horiz
                 for img_data in total_outputs:
-                    ########################################################################################################
+                    ###################################################################################################
                     # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
                     # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
                     # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
                     # this may likely need to be made more general in future
-                    ########################################################################################################
+                    ###################################################################################################
                     for i in range(num_patches):
                         for j in range(self.__grid_w * self.__grid_h):
                             # We first find the responsible box by finding the one with the highest confidence
@@ -2204,8 +2212,8 @@ class DPPModel(object):
                             if box_confs[max_conf_idx] > 0.6:
                                 # This box has detected an object and we extract its coords
                                 pred_img = True
-                                pred_box = img_data[i, j*26+5*max_conf_idx : j*26+5*max_conf_idx+4]
-                            else: # No object detected
+                                pred_box = img_data[i, j*26+5*max_conf_idx:j*26+5*max_conf_idx+4]
+                            else:  # No object detected
                                 pred_img = False
                             # If an object is detected we now transform the data into the desired result
                             if pred_img:
@@ -2213,8 +2221,10 @@ class DPPModel(object):
                                 c_x = j % self.__grid_w
                                 c_y = j // self.__grid_w
                                 # x and y go from 'grid coords' to 'patch coords' to 'full img coords'
-                                x = (expit(pred_box[0]) + c_x) * (patch_width/self.__grid_w) + (i%num_patches_horiz)*patch_width
-                                y = (expit(pred_box[1]) + c_y) * (patch_height/self.__grid_h) + (i//num_patches_horiz)*patch_height
+                                x = (expit(pred_box[0]) + c_x) * (patch_width/self.__grid_w) \
+                                    + (i % num_patches_horiz)*patch_width
+                                y = (expit(pred_box[1]) + c_y) * (patch_height/self.__grid_h) \
+                                    + (i // num_patches_horiz)*patch_height
                                 # get the anchor box based on the highest conf (responsible box)
                                 prior_w = self.__ANCHORS[max_conf_idx][0]
                                 prior_h = self.__ANCHORS[max_conf_idx][1]
@@ -2227,32 +2237,32 @@ class DPPModel(object):
                                 total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
                     # Non - maximal suppression (Probably make into a general function)
                     all_boxes = np.array(total_pred_boxes)
-                    idxs = np.argsort(all_boxes[:, 4]) # sorts them smallest to largest by confidence
+                    idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
                     final_boxes_idxs = []
-                    while len(idxs) > 0: # sometimes we may delete multiple boxes so we use a while instead of for
-                        last = len(idxs) - 1 # since sorted in reverse order, we take the last one as having highest conf
+                    while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
+                        last = len(idxs) - 1  # since sorted in reverse order, we take the last one as having highest conf
                         i = idxs[last]
-                        final_boxes_idxs.append(i) # add it to the list (highest conf) then we check if there are duplicates to delete
-                        suppress = [last] # this is the list of idxs of boxes to stop checking (they will deleted)
-                        for pos in range(0, last): # search for duplicates
+                        final_boxes_idxs.append(i)  # add it to the list (highest conf) then we check if there are duplicates to delete
+                        suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
+                        for pos in range(0, last):  # search for duplicates
                             j = idxs[pos]
                             iou = self.__compute_iou(all_boxes[i], all_boxes[j])
-                            if iou > 0.3: # maybe should make this a tunable parameter
+                            if iou > 0.3:  # maybe should make this a tunable parameter
                                 suppress.append(pos)
-                        idxs = np.delete(idxs, suppress) # remove the box that was added and its duplicates
+                        idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
 
-                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :]) # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])  # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
             else:
                 print('made it')
                 # no patching
                 print(total_outputs.shape)
                 for img_data in total_outputs:
-                    ########################################################################################################
+                    ###################################################################################################
                     # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
                     # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
                     # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
                     # this may likely need to be made more general in future
-                    ########################################################################################################
+                    ###################################################################################################
                     for i in range(self.__grid_w * self.__grid_h):
                         # x,y,w,h,conf,x,y,w,h,cong,x,y,...... classes
                         box_conf1 = expit(img_data[i * 26 + 4])
@@ -2289,19 +2299,19 @@ class DPPModel(object):
 
                     # Non - maximal suppression (Probably make into a general function)
                     all_boxes = np.array(total_pred_boxes)
-                    idxs = np.argsort(all_boxes[:, 4]) # sorts them smallest to largest by confidence
+                    idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
                     final_boxes_idxs = []
-                    while len(idxs) > 0: # sometimes we may delete multiple boxes so we use a while instead of for
-                        last = len(idxs) - 1 # since sorted in reverse order, we take the last one as having highest conf
+                    while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
+                        last = len(idxs) - 1  # since sorted in reverse order, we take the last one as having highest conf
                         i = idxs[last]
-                        final_boxes_idxs.append(i) # add it to the list (highest conf) then we check if there are duplicates to delete
-                        suppress = [last] # this is the list of idxs of boxes to stop checking (they will deleted)
-                        for pos in range(0, last): # search for duplicates
+                        final_boxes_idxs.append(i)  # add it to the list (highest conf) then we check if there are duplicates to delete
+                        suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
+                        for pos in range(0, last):  # search for duplicates
                             j = idxs[pos]
                             iou = self.__compute_iou(all_boxes[i], all_boxes[j])
-                            if iou > 0.3: # maybe should make this a tunable parameter
+                            if iou > 0.3:  # maybe should make this a tunable parameter
                                 suppress.append(pos)
-                        idxs = np.delete(idxs, suppress) # remove the box that was added and its duplicates
+                        idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
                 interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])  # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
         else:
             warnings.warn('Problem type is not recognized')
@@ -2369,12 +2379,12 @@ class DPPModel(object):
 
     def __smooth_l1_norm(self, x):
         """Returns the smooth L1 norm of a tensor"""
-        HUBER_DELTA = 1 # may want to make this a tunable hyper parameter in future
+        huber_delta = 1  # may want to make this a tunable hyper parameter in future
         with self.__graph.as_default():
             x = tf.abs(x)
-            y = tf.map_fn(lambda ex: tf.where(ex<HUBER_DELTA,
+            y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
                                               0.5*ex**2,
-                                              HUBER_DELTA*(ex-0.5*HUBER_DELTA)), x)
+                                              huber_delta*(ex-0.5*huber_delta)), x)
 
         return y
 
@@ -2391,7 +2401,7 @@ class DPPModel(object):
     def add_input_layer(self):
         """Add an input layer to the network"""
         if len(self.__layers) > 0:
-            raise RuntimeError("Trying to add an input layer to a model that already contains other layers. "+
+            raise RuntimeError("Trying to add an input layer to a model that already contains other layers. " +
                                " The input layer need to be the first layer added to the model.")
 
         self.__log('Adding the input layer...')
@@ -2421,7 +2431,8 @@ class DPPModel(object):
         feat_size = self.__moderation_features_size
 
         with self.__graph.as_default():
-            layer = layers.moderationLayer(copy.deepcopy(self.__last_layer().output_size), feat_size, reshape, self.__batch_size)
+            layer = layers.moderationLayer(copy.deepcopy(
+                self.__last_layer().output_size), feat_size, reshape, self.__batch_size)
 
         self.__layers.append(layer)
 
@@ -2434,11 +2445,11 @@ class DPPModel(object):
         :param activation_function: the activation function to apply to the activation map
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A convolutional layer cannot be the first layer added to the model. "+
+            raise RuntimeError("A convolutional layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         try:  # try to iterate through filter_dimension, checking it has 4 ints
             for idx, dim in enumerate(filter_dimension):
-                if not (isinstance(dim, int) or isinstance(dim, np.int64)): # np.int64 numpy default int
+                if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
                     raise TypeError()
             if idx != 3:
                 raise TypeError()
@@ -2452,8 +2463,8 @@ class DPPModel(object):
             raise TypeError("activation_function must be a str")
         activation_function = activation_function.lower()
         if not activation_function in self.__supported_activation_functions:
-            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
-                             " Choose one of: "+
+            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions." +
+                             " Choose one of: " +
                              " ".join("'"+x+"'" for x in self.__supported_activation_functions))
 
         self.__num_layers_conv += 1
@@ -2525,7 +2536,7 @@ class DPPModel(object):
         :param pooling_type: optional, the type of pooling operation
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A pooling layer cannot be the first layer added to the model. "+
+            raise RuntimeError("A pooling layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         if not isinstance(kernel_size, int):
             raise TypeError("kernel_size must be an int")
@@ -2539,8 +2550,8 @@ class DPPModel(object):
             raise TypeError("pooling_type must be a str")
         pooling_type = pooling_type.lower()
         if not pooling_type in self.__supported_pooling_types:
-            raise ValueError("'"+pooling_type+"' is not one of the currently supported pooling types."+
-                             " Choose one of: "+
+            raise ValueError("'"+pooling_type+"' is not one of the currently supported pooling types." +
+                             " Choose one of: " +
                              " ".join("'"+x+"'" for x in self.__supported_pooling_types))
 
         self.__num_layers_pool += 1
@@ -2548,7 +2559,8 @@ class DPPModel(object):
         self.__log('Adding pooling layer %s...' % layer_name)
 
         with self.__graph.as_default():
-            layer = layers.poolingLayer(copy.deepcopy(self.__last_layer().output_size), kernel_size, stride_length, pooling_type)
+            layer = layers.poolingLayer(copy.deepcopy(
+                self.__last_layer().output_size), kernel_size, stride_length, pooling_type)
 
         self.__log('Outputs: %s' % layer.output_size)
 
@@ -2557,7 +2569,7 @@ class DPPModel(object):
     def add_normalization_layer(self):
         """Add a local response normalization layer to the model"""
         if len(self.__layers) < 1:
-            raise RuntimeError("A normalization layer cannot be the first layer added to the model. "+
+            raise RuntimeError("A normalization layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
 
         self.__num_layers_norm += 1
@@ -2576,7 +2588,7 @@ class DPPModel(object):
         :param p: the keep-probability parameter for the DropOut operation
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A dropout layer cannot be the first layer added to the model. "+
+            raise RuntimeError("A dropout layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         if not isinstance(p, float):
             raise TypeError("p must be a float")
@@ -2616,7 +2628,7 @@ class DPPModel(object):
          set by set_regularization_coefficient)
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("A fully connected layer cannot be the first layer added to the model. "+
+            raise RuntimeError("A fully connected layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         if not isinstance(output_size, int):
             raise TypeError("output_size must be an int")
@@ -2626,8 +2638,8 @@ class DPPModel(object):
             raise TypeError("activation_function must be a str")
         activation_function = activation_function.lower()
         if not activation_function in self.__supported_activation_functions:
-            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions."+
-                             " Choose one of: "+
+            raise ValueError("'"+activation_function+"' is not one of the currently supported activation functions." +
+                             " Choose one of: " +
                              " ".join("'"+x+"'" for x in self.__supported_activation_functions))
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
@@ -2670,7 +2682,7 @@ class DPPModel(object):
         use cases such as creating the output layer before loading data.
         """
         if len(self.__layers) < 1:
-            raise RuntimeError("An output layer cannot be the first layer added to the model. "+
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
@@ -3073,7 +3085,7 @@ class DPPModel(object):
         self.__raw_image_files = images
         self.__raw_labels = self.__all_labels
 
-        ### visual image check/debug, printing image and bounding boxes ###
+        # visual image check/debug, printing image and bounding boxes #
         # img = cv2.imread(self.__raw_image_files[0], 1)
         # boxes = self.__raw_labels[0]
         # height, width, depth = img.shape
@@ -3113,7 +3125,7 @@ class DPPModel(object):
         # labels must be lists
         labels = [[label] for label in labels]
 
-        image_files = [os.path.join(dirname, id + '_rgb.png') for id in ids]
+        image_files = [os.path.join(dirname, im_id + '_rgb.png') for im_id in ids]
 
         self.__total_raw_samples = len(image_files)
 
@@ -3132,7 +3144,7 @@ class DPPModel(object):
         labels.pop(0)
         ids.pop(0)
 
-        image_files = [os.path.join(dirname, id) for id in ids]
+        image_files = [os.path.join(dirname, im_id) for im_id in ids]
 
         self.__total_raw_samples = len(image_files)
         self.__total_classes = len(set(labels))
@@ -3308,7 +3320,7 @@ class DPPModel(object):
             self.__raw_image_files = images
             self.__images_only = True
 
-        ### visual image check, printing image and bounding boxes ###
+        # visual image check, printing image and bounding boxes #
         # img = cv2.imread(self.__raw_image_files[4], 1)
         # boxes = self.__raw_labels[4]
         # height, width, depth = img.shape
@@ -3494,7 +3506,7 @@ class DPPModel(object):
                 max_height = img.shape[0] - (self.__patch_height // 2)
                 min_height = (self.__patch_height // 2)
                 found_one = False
-                while (found_one is False):
+                while found_one is False:
                     rand_x = np.random.randint(min_width, max_width + 1)
                     rand_y = np.random.randint(min_height, max_height + 1)
                     # determine patch location and slice into mask and img to create patch
@@ -3581,7 +3593,7 @@ class DPPModel(object):
                     img_name_idx += 1
                 elif aug == 2:
                     # brightness
-                    value = np.random.randint(40, 76) # just a 'nice amount' of brightness change, could be adjusted
+                    value = np.random.randint(40, 76)  # just a 'nice amount' of brightness change, could be adjusted
                     k = np.random.random()
                     if k < 0.5:  # brighter
                         bright_img_patch = np.where((255 - img_patch) < value, 255, img_patch + value)
@@ -3740,7 +3752,7 @@ class DPPModel(object):
 
             # verbose
             random_imgs += 1
-            self.__log(str(random_imgs) + '/' +str(len(self.__raw_image_files)))
+            self.__log(str(random_imgs) + '/' + str(len(self.__raw_image_files)))
 
         # save into json
         # with open('/home/nico/yolo_data/yolo_test_imgs/blanche/test_patches_out.json', 'w') as outfile:
@@ -3748,9 +3760,7 @@ class DPPModel(object):
         with open(json_dir_out + 'train_patches.json', 'w') as outfile:
             json.dump(img_dict, outfile)
 
-
         return new_raw_image_files, new_raw_labels
-
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
         """
@@ -3896,7 +3906,7 @@ class DPPModel(object):
 
     def load_json_labels_from_file(self, filename):
         """Loads bounding boxes for multiple images from a single json file."""
-        ### these are for jsons in the structure that I got from Blanche's data ###
+        # these are for jsons in the structure that I got from Blanche's data #
 
         self.__all_ids = []
         self.__all_labels = []
@@ -3904,7 +3914,7 @@ class DPPModel(object):
         with open(filename, 'r') as f:
             box_data = json.load(f)
         for box in sorted(box_data.items()):
-            self.__all_ids.append(box[0]) # Name of corresponding image
+            self.__all_ids.append(box[0])  # Name of corresponding image
             w_original = box[1]['width']
             h_original = box[1]['height']
             boxes = []
@@ -3984,7 +3994,7 @@ class DPPModel(object):
                 # the % (self.__grid_h*self.__grid_w) is to handle the rare case we are right on the edge and
                 # we want the last 0-indexed grid position (off by 1 error, get 49 for 7x7 grid when should have 48)
 
-                ### 1 for obj then 1 since only one class <- needs to be made more general for multiple classes ###
+                # 1 for obj then 1 since only one class <- needs to be made more general for multiple classes #
                 # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
                 # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
                 # x,y,w,h then use the in this next line below
