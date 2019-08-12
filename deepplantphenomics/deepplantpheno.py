@@ -3321,10 +3321,53 @@ class DPPModel(object):
             self.__raw_image_files = images
             self.__raw_labels = labels
 
+    def load_yolo_dataset_from_directory(self, data_dir, label_file=None, image_dir=None):
+        """
+        Loads in labels and images for object detection tasks, converting the labels to YOLO format and automatically
+        patching the images if necessary.
+
+        :param data_dir: String, The directory where the labels and images are stored in
+        :param label_file: String, The filename for the JSON file with the labels. Optional if using automatic patching
+        which has been done already
+        :param image_dir: String, The directory with the images. Optional if using automatic patching which has been
+        done already
+        """
+        if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
+            raise RuntimeError("YOLO datasets can only be loaded object detection problems")
+
+        load_patched_data = self.__with_patching and 'tmp_train' in os.listdir(data_dir)
+
+        # Construct the paths to the labels and images
+        if load_patched_data:
+            label_path = os.path.join(data_dir, 'tmp_train/json/train_patches.json')
+            image_path = os.path.join(data_dir, 'tmp_train/image_patches', '')
+        else:
+            label_path = os.path.join(data_dir, label_file)
+            image_path = os.path.join(data_dir, image_dir, '')
+
+        # Load the labels and images
+        if load_patched_data:
+            # Hack to make the label reader convert the labels to YOLO format when re-reading image patches
+            self.__with_patching = False
+        self.load_json_labels_from_file(label_path)
+        images_list = [image_path + filename for filename in sorted(os.listdir(image_path))
+                       if filename.endswith('.png')]
+        self.load_images_from_list(images_list)
+        if load_patched_data:
+            # Remove the hack
+            self.__with_patching = True
+
+        # Perform automatic image patching if necessary
+        if self.__with_patching and 'tmp_train' not in os.listdir(data_dir):
+            self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
+            self.__convert_labels_to_yolo_format()
+            self.__raw_labels = self.__all_labels
+            self.__total_raw_samples = len(self.__raw_image_files)
+            self.__log('Total raw patch examples is %d' % self.__total_raw_samples)
+
     def load_images_from_list(self, image_files):
         """
-        Loads images from a list of file names (strings). Unless you only want to do preprocessing,
-        regression or classification labels MUST be loaded first.
+        Loads images from a list of file names (strings). Regression or classification labels MUST be loaded first.
         """
 
         self.__total_raw_samples = len(image_files)
@@ -3334,21 +3377,10 @@ class DPPModel(object):
 
         images = image_files
 
-        # prepare images for training (if there are any labels loaded)
+        self.__raw_image_files = images
         if self.__all_labels is not None:
-            self.__raw_image_files = images
-            if not self.__with_patching:
-                self.__raw_labels = self.__all_labels
-            else:  # some problems need to generate special patched data from loaded images
-                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    if self.__loss_fn == 'yolo':
-                        self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
-                        self.__convert_labels_to_yolo_format()
-                        self.__raw_labels = self.__all_labels
-                        self.__total_raw_samples = len(self.__raw_image_files)
-                        self.__log('Total raw patch examples is %d' % self.__total_raw_samples)
+            self.__raw_labels = self.__all_labels
         else:
-            self.__raw_image_files = images
             self.__images_only = True
 
         ### visual image check, printing image and bounding boxes ###

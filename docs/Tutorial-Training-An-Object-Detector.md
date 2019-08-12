@@ -43,7 +43,7 @@ Loaders with automatic conversion to YOLO labels include:
 
 - `load_ippn_tray_dataset_from_directory(dirname)`: Load IPPN tray images and labels and convert labels to YOLO format.
 - `load_pascal_voc_labels_from_directory(dirname)`: Load Pascal VOC labels from a directory of XML files and convert them to YOLO format, then load in images with `load_images_with_id_from_directory(dirname)`.
-- `load_json_labels_from_file(filename)`: Load labels from a custom JSON format file and convert them to YOLO format. The expectecd JSON format for the labels is as follows:
+- `load_yolo_dataset_from_directory(dirname, label_file, image_dir)` and `load_json_labels_from_file(filename)`: Load labels from a custom JSON format file ,then load in images with `load_images_from_list(files)`. The expectecd JSON format for the labels is as follows:
 
 ```json
 {
@@ -61,20 +61,19 @@ Loaders with automatic conversion to YOLO labels include:
 
 ## Automatic Patching of Large Images
 
-Object detection also has special support for automatically splitting large input images into smaller patches of the right size when they're loaded with `load_images_from_list`. This requires extra settings in the model for turning off image resizing and setting the size of the image patches.
+Object detection also has special support for automatically splitting large input images into smaller patches of the right size when they're loaded with `load_yolo_dataset_from_directory`. This requires extra settings in the model for turning off image resizing and setting the size of the image patches.
 
 ```python
 model.set_resize_images(False)
 model.set_patch_size(448, 448)
 ```
 
-With those settings, the labels should then be in a JSON file compatible with `load_json_labels_from_file` and loaded with that method. YOLO label conversion will then be delayed until the images are  loaded with `load_images_from_list`, which will then automatically patch the input images and convert the labels to YOLO labels for the patches. The image patches and a JSON file of their labels will be saved in a folder `tmp_train` in the local directory so that this can be done only once.
+With those settings, the labels should then be in a JSON file compatible with `load_json_labels_from_file`. The method then delays YOLO label conversion until after loading in the labels and images. It will then automatically patch the input images and convert the labels to YOLO labels for each patch. The image patches and a JSON file of their labels will be saved in a folder (`tmp_train`) in the local directory so that this process is only done once on a given dataset.
 
 ## Full Example
 
 ```python
 import deepplantphenomics as dpp
-import os
 
 # model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, report_rate=20,
 #                      tensorboard_dir='./tensor_logs')
@@ -96,21 +95,7 @@ model.set_learning_rate(0.000001)
 model.set_weight_initializer('xavier')
 model.set_maximum_training_epochs(100)
 
-if 'tmp_train' not in os.listdir('.'):
-    model.set_patch_size(448, 448)
-    model.load_json_labels_from_file('./labels.json')
-    images_directory = "./images/"
-    images_list = [images_directory + filename for filename in sorted(os.listdir(images_directory))
-                   if filename.endswith('.png')]
-    model.load_images_from_list(images_list)
-else:
-    model.load_json_labels_from_file('./tmp_train/json/train_patches.json')
-    images_directory = "./tmp_train/image_patches/"
-    images_list = [images_directory + filename for filename in sorted(os.listdir(images_directory))
-                   if filename.endswith('.png')]
-    model.load_images_from_list(images_list)
-    model.set_patch_size(448, 448)
-
+model.load_yolo_dataset_from_directory('./yolo_data', 'labels.json', 'images')
 
 # Define the YOLOv2 model architecture
 model.use_predefined_model('yolov2')
