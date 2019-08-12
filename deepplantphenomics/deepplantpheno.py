@@ -72,7 +72,7 @@ class DPPModel(object):
         self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']                # ... regression
         self.__supported_loss_fns_ss = ['sigmoid cross entropy']                             # ... semantic segmentation
         self.__supported_loss_fns_od = ['yolo']                                              # ... object detection
-        self.__supported_predefined_models = ['vgg-16', 'alexnet', 'xsmall', 'small', 'medium', 'large', 'yolov2']
+        self.__supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
 
         # Augmentation options
         self.__augmentation_flip_horizontal = False
@@ -2718,6 +2718,10 @@ class DPPModel(object):
         self.__layers.append(layer)
 
     def use_predefined_model(self, model_name):
+        """
+        Add network layers to build a predefined network model
+        :param model_name: The predefined model name
+        """
         if model_name not in self.__supported_predefined_models:
             raise ValueError("'" + model_name + "' is not one of the currently supported predefined models." +
                              " Make sure you have the correct problem type set with DPPModel.set_problem_type() " +

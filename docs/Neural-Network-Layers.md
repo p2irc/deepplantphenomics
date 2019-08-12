@@ -93,3 +93,21 @@ model.add_output_layer()
 The number of units in this layer corresponds to the number of outputs - for example, the number of regression values, or the number of classes in the classification task. If the task being performed is semantic segmentation, then the output size is the same width and height as the input.
 
 The `output_size` parameter is optional and only used in rare cases where you want to override the calculated output size - for example, when the number of classes is not known because the dataset has not been loaded yet.
+
+## Predefined Model Layers
+
+The individual layers above can be used to create any custom model. There are some common architectures, however, that don't have to be made from scratch and are predefined in DPP.
+
+```python
+model.use_predefined_model(model_name)
+```
+
+`model_name` defines the name of the predefined network. Currently supported networks include:
+
+- `vgg-16`
+- `alexnet`
+- `yolov2`
+- `xsmall`
+- `small`
+- `medium`
+- `large`

@@ -2,6 +2,14 @@ Among the kinds of tasks DPP can train models for, it can be used to train a sin
 
 The overall structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](/Tutorial-Training-The-Leaf-Counter/) for a detailed description of this). This tutorial largely covers the differences in model setup and data/label loading specific to training YOLO object detectors in DPP.
 
+## YOLO v2 Network Layers
+
+Rather than having to create the layers yourself, the YOLO v2 network is available as a predifined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
+
+```python
+model.use_predefined_model('yolov2')
+```
+
 ## YOLO Object Detector Settings
 
 When training a YOLO object detector, the settings and hyperparameters will typically look like this: 
@@ -61,3 +69,52 @@ model.set_patch_size(448, 448)
 ```
 
 With those settings, the labels should then be in a JSON file compatible with `load_json_labels_from_file` and loaded with that method. YOLO label conversion will then be delayed until the images are  loaded with `load_images_from_list`, which will then automatically patch the input images and convert the labels to YOLO labels for the patches. The image patches and a JSON file of their labels will be saved in a folder `tmp_train` in the local directory so that this can be done only once.
+
+## Full Example
+
+```python
+import deepplantphenomics as dpp
+import os
+
+# model = dpp.DPPModel(debug=True, load_from_saved=False, save_checkpoints=False, report_rate=20,
+#                      tensorboard_dir='./tensor_logs')
+model = dpp.DPPModel(debug=True, load_from_saved='./saved_state')
+
+# 3 channels for colour, 1 channel for greyscale
+channels = 3
+
+# Setup and hyperparameters
+model.set_batch_size(1)
+model.set_number_of_threads(4)
+model.set_image_dimensions(448,448, channels)
+model.set_resize_images(False)
+
+model.set_problem_type('object_detection')
+model.set_test_split(0.1)
+model.set_validation_split(0)
+model.set_learning_rate(0.000001)
+model.set_weight_initializer('xavier')
+model.set_maximum_training_epochs(100)
+
+if 'tmp_train' not in os.listdir('.'):
+    model.set_patch_size(448, 448)
+    model.load_json_labels_from_file('./labels.json')
+    images_directory = "./images/"
+    images_list = [images_directory + filename for filename in sorted(os.listdir(images_directory))
+                   if filename.endswith('.png')]
+    model.load_images_from_list(images_list)
+else:
+    model.load_json_labels_from_file('./tmp_train/json/train_patches.json')
+    images_directory = "./tmp_train/image_patches/"
+    images_list = [images_directory + filename for filename in sorted(os.listdir(images_directory))
+                   if filename.endswith('.png')]
+    model.load_images_from_list(images_list)
+    model.set_patch_size(448, 448)
+
+
+# Define the YOLOv2 model architecture
+model.use_predefined_model('yolov2')
+
+# Begin training the YOLOv2 model
+model.begin_training()
+```
