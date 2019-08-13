@@ -43,7 +43,7 @@ Loaders with automatic conversion to YOLO labels include:
 
 - `load_ippn_tray_dataset_from_directory(dirname)`: Load IPPN tray images and labels and convert labels to YOLO format.
 - `load_pascal_voc_labels_from_directory(dirname)`: Load Pascal VOC labels from a directory of XML files and convert them to YOLO format, then load in images with `load_images_with_id_from_directory(dirname)`.
-- `load_yolo_dataset_from_directory(dirname, label_file, image_dir)` and `load_json_labels_from_file(filename)`: Load labels from a custom JSON format file ,then load in images with `load_images_from_list(files)`. The expectecd JSON format for the labels is as follows:
+- `load_yolo_dataset_from_directory(dirname, label_file, image_dir)` and `load_json_labels_from_file(filename)`: Load labels from a custom JSON format file, then load in images with `load_images_from_list(files)`. The expectecd JSON format for the labels is as follows:
 
 ```json
 {
@@ -68,7 +68,7 @@ model.set_resize_images(False)
 model.set_patch_size(448, 448)
 ```
 
-With those settings, the labels should then be in a JSON file compatible with `load_json_labels_from_file`. The method then delays YOLO label conversion until after loading in the labels and images. It will then automatically patch the input images and convert the labels to YOLO labels for each patch. The image patches and a JSON file of their labels will be saved in a folder (`tmp_train`) in the local directory so that this process is only done once on a given dataset.
+With those settings, the labels should then be in a JSON file compatible with `load_json_labels_from_file`. The method then delays YOLO label conversion until after loading in the labels and images. It will then automatically patch the input images and convert the labels to YOLO labels for each patch. The image patches and a JSON file of their labels will be saved in a folder (`tmp_train`) in the data directory given to `load_yolo_dataset_from_directory`; this allows it to reuse the patched images and perform this process only once on a given dataset.
 
 ## Full Example
 

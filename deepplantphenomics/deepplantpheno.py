@@ -3359,7 +3359,8 @@ class DPPModel(object):
 
         # Perform automatic image patching if necessary
         if self.__with_patching and 'tmp_train' not in os.listdir(data_dir):
-            self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
+            self.__raw_image_files, self.__all_labels = \
+                self.object_detection_patching_and_augmentation(patch_dir=data_dir)
             self.__convert_labels_to_yolo_format()
             self.__raw_labels = self.__all_labels
             self.__total_raw_samples = len(self.__raw_image_files)
@@ -3415,22 +3416,27 @@ class DPPModel(object):
         # cv2.imshow('image', crazy_size)
         # cv2.waitKey(0)
 
-    def object_detection_patching_and_augmentation(self):
+    def object_detection_patching_and_augmentation(self, patch_dir=None):
         # make the below a function
         # labels, images = function()
         img_dict = {}
         img_num = 0
         img_name_idx = 1
-        img_dir_out_base = './tmp_train/'  # could make this dir user-specifiable
-        if not os.path.exists(img_dir_out_base):
-            os.makedirs(img_dir_out_base)
+
+        if patch_dir:
+            patch_dir = os.path.join(patch_dir, 'tmp_train', '')
         else:
-            raise RuntimeError("Folder ./tmp_train/ detected. Either delete this folder and run again or " +
-                               "use data in ./tmp_train/ without patching.")
-        img_dir_out = img_dir_out_base + 'image_patches/'
+            patch_dir = os.path.join(os.path.curdir, 'tmp_train', '')
+        if not os.path.exists(patch_dir):
+            os.makedirs(patch_dir)
+        else:
+            raise RuntimeError("Patched images already exist in " + patch_dir + ". Either delete them and run again or "
+                               "use them directly (i.e. without patching).")
+
+        img_dir_out = patch_dir + 'image_patches/'
         if not os.path.exists(img_dir_out):
             os.makedirs(img_dir_out)
-        json_dir_out = img_dir_out_base + 'json/'
+        json_dir_out = patch_dir + 'json/'
         if not os.path.exists(json_dir_out):
             os.makedirs(json_dir_out)
         new_raw_image_files = []
@@ -3438,7 +3444,7 @@ class DPPModel(object):
 
         # first add images such that each grid cell has a plant in it
         # should add num_images*grid many images (e.g. 27(images)*49(7x7grid))
-        self.__log('Beginning creation of training patches. Images and json are being saved in ' + img_dir_out_base)
+        self.__log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
         for img_name, img_boxes in zip(self.__raw_image_files, self.__all_labels):
             img_num += 1
             img = np.array(Image.open(img_name))

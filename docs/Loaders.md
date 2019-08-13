@@ -118,7 +118,7 @@ load_cifar10_dataset_from_directory(dirname)
 
 ### Load YOLO Dataset From Directory
 
-Loads a dataset for object detection with a JSON file of labels and a sub-directory of images. If the images are going to be auto-patched when loaded in, then the label file and image directory parameters are optional.
+Loads a dataset for object detection with a JSON file of labels and a sub-directory of images. If the images are the same as in a previous run and have already been auto-patched, then the label file and image directory parameters are optional.
 
 ```python
 load_yolo_dataset_from_directory(dirname, label_file, image_dir)
