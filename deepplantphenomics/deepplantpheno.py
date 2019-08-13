@@ -843,7 +843,7 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'sigmoid cross entropy':
-                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y[:,:,:,0]))
+                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
                 # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
             elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
@@ -1030,11 +1030,13 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 if self.__testing:
                     self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test'][:, :, :, 0]), axis=2)
-                    self.__graph_ops['test_losses'] = tf.transpose(tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
+                    logits=self.__graph_ops['x_test_predicted'], labels=self.__graph_ops['y_test']), axis=2)
+                    self.__graph_ops['test_losses'] = tf.reshape(tf.reduce_mean(self.__graph_ops['test_losses'],
+                                                                                axis=1),
+                                                                 [self.__batch_size])
                 if self.__validation:
                     self.__graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                        logits=self.__graph_ops['x_val_predicted'], labels=self.__graph_ops['y_val'][:, :, :, 0]),
+                        logits=self.__graph_ops['x_val_predicted'], labels=self.__graph_ops['y_val']),
                         axis=2)
                     self.__graph_ops['val_losses'] = tf.transpose(
                         tf.reduce_mean(self.__graph_ops['val_losses'], axis=1))
@@ -1408,8 +1410,8 @@ class DPPModel(object):
                     all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
                     all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
                 elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    r_losses = self.__session.run([self.__graph_ops['test_losses']])
-                    all_losses = np.concatenate((all_losses, r_losses[0]), axis=0)
+                    r_losses = self.__session.run(self.__graph_ops['test_losses'])
+                    all_losses = np.concatenate((all_losses, r_losses), axis=0)
                 elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     r_y, r_predicted = self.__session.run([self.__graph_ops['y_test'],
                                                            self.__graph_ops['x_test_predicted']])
