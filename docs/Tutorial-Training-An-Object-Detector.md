@@ -2,6 +2,41 @@ Among the kinds of tasks DPP can train models for, it can be used to train a sin
 
 The overall structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](/Tutorial-Training-The-Leaf-Counter/) for a detailed description of this). This tutorial largely covers the differences in model setup and data/label loading specific to training YOLO object detectors in DPP.
 
+## Full Example
+
+Below is a working example of training an object detection model in DPP. This is a minimum model which uses all of the pre-set defaults included in the package.
+
+```python
+#
+# Demonstrates the process of training a YOLO-based object detector in DPP.
+#
+
+import deepplantphenomics as dpp
+
+model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=20)
+
+# Setup and hyperparameters
+model.set_batch_size(1)
+model.set_image_dimensions(448, 448, 3)
+model.set_resize_images(False)
+model.set_patch_size(448, 448)
+
+model.set_problem_type('object_detection')
+# model.set_yolo_parameters() is not called here because we are using all of the default values
+model.set_test_split(0.1)
+model.set_validation_split(0)
+model.set_learning_rate(0.000001)
+model.set_maximum_training_epochs(100)
+
+model.load_yolo_dataset_from_directory('./yolo_data', label_file='labels.json', image_dir='images')
+
+# Define the YOLOv2 model architecture
+model.use_predefined_model('yolov2')
+
+# Begin training the YOLOv2 model
+model.begin_training()
+```
+
 ## YOLO v2 Network Layers
 
 Rather than having to create the layers yourself, the YOLO v2 network is available as a predifined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
@@ -15,15 +50,6 @@ model.use_predefined_model('yolov2')
 When training a YOLO object detector, the settings and hyperparameters will typically look like this: 
 
 ```python
-# 3 channels for colour, 1 channel for greyscale
-channels = 3
-
-# Setup and hyperparameters
-model.set_batch_size(1)
-model.set_number_of_threads(4)
-model.set_image_dimensions(448, 448, channels)
-model.set_resize_images(True)
-
 # YOLO-specific setup
 model.set_problem_type('object_detection')
 prior_boxes = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
@@ -69,7 +95,3 @@ model.set_patch_size(448, 448)
 ```
 
 With those settings, the labels should then be in a JSON file compatible with `load_json_labels_from_file`. The method then delays YOLO label conversion until after loading in the labels and images. It will then automatically patch the input images and convert the labels to YOLO labels for each patch. The image patches and a JSON file of their labels will be saved in a folder (`tmp_train`) in the data directory given to `load_yolo_dataset_from_directory`; this allows it to reuse the patched images and perform this process only once on a given dataset.
-
-## Full Example
-
-An example of all the code needed to train a YOLO-based object detector is available in the `examples` folder of DPP as `yolo_object_detector.py`. 
