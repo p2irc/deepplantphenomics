@@ -94,20 +94,3 @@ The number of units in this layer corresponds to the number of outputs - for exa
 
 The `output_size` parameter is optional and only used in rare cases where you want to override the calculated output size - for example, when the number of classes is not known because the dataset has not been loaded yet.
 
-## Predefined Model Layers
-
-The individual layers above can be used to create any custom model. There are some common architectures, however, that don't have to be made from scratch and are predefined in DPP.
-
-```python
-model.use_predefined_model(model_name)
-```
-
-`model_name` defines the name of the predefined network. Currently supported networks include:
-
-- `vgg-16`
-- `alexnet`
-- `yolov2`
-- `xsmall`
-- `small`
-- `medium`
-- `large`
