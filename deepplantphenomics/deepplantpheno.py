@@ -73,7 +73,7 @@ class DPPModel(object):
         self.__supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']               # ... regression
         self.__supported_loss_fns_ss = ['sigmoid cross entropy']                            # ... semantic segmentation
         self.__supported_loss_fns_od = ['yolo']                                             # ... object detection
-        self.__supported_predefined_models = ['vgg-16', 'alexnet', 'xsmall', 'small', 'medium', 'large']
+        self.__supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
 
         # Augmentation options
         self.__augmentation_flip_horizontal = False
@@ -865,8 +865,7 @@ class DPPModel(object):
             elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
                 # define cost function based on which one was selected via set_loss_function
                 if self.__loss_fn == 'sigmoid cross entropy':
-                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                        logits=xx, labels=y[:, :, :, 0]))
+                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
                 # define the cost
                 self.__graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
             elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
@@ -1058,13 +1057,14 @@ class DPPModel(object):
                 if self.__testing:
                     self.__graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=self.__graph_ops['x_test_predicted'],
-                        labels=self.__graph_ops['y_test'][:, :, :, 0]),
+                        labels=self.__graph_ops['y_test']),
                         axis=2)
-                    self.__graph_ops['test_losses'] = tf.transpose(
-                        tf.reduce_mean(self.__graph_ops['test_losses'], axis=1))
+                    self.__graph_ops['test_losses'] = tf.reshape(tf.reduce_mean(self.__graph_ops['test_losses'],
+                                                                                axis=1),
+                                                                 [self.__batch_size])
                 if self.__validation:
                     self.__graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                        logits=self.__graph_ops['x_val_predicted'], labels=self.__graph_ops['y_val'][:, :, :, 0]),
+                        logits=self.__graph_ops['x_val_predicted'], labels=self.__graph_ops['y_val']),
                         axis=2)
                     self.__graph_ops['val_losses'] = tf.transpose(
                         tf.reduce_mean(self.__graph_ops['val_losses'], axis=1))
@@ -1400,19 +1400,28 @@ class DPPModel(object):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                loss_sum = 0.0
-            elif self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                all_losses = np.empty(shape=self.__num_regression_outputs)
-                all_y = np.empty(shape=self.__num_regression_outputs)
-                all_predictions = np.empty(shape=self.__num_regression_outputs)
-            else:
-                all_y = np.empty(shape=(self.__batch_size,
-                                        self.__grid_w*self.__grid_h,
+            use_losses = [definitions.ProblemType.REGRESSION, definitions.ProblemType.SEMANTIC_SEGMETNATION]
+            use_y = [definitions.ProblemType.REGRESSION, definitions.ProblemType.OBJECT_DETECTION]
+            use_predictions = [definitions.ProblemType.REGRESSION, definitions.ProblemType.OBJECT_DETECTION]
+
+            # Initialize storage for the retreived test variables
+            if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                # Object detection needs some special care given to its variable's shape
+                all_y = np.empty(shape=(1,
+                                        self.__grid_w * self.__grid_h,
                                         1 + self.__NUM_CLASSES + 4))
-                all_predictions = np.empty(shape=(self.__batch_size,
-                                                  self.__grid_w*self.__grid_h,
-                                                  5*self.__NUM_BOXES + self.__NUM_CLASSES))
+                all_predictions = np.empty(shape=(1,
+                                                  self.__grid_w * self.__grid_h,
+                                                  5 * self.__NUM_BOXES + self.__NUM_CLASSES))
+            else:
+                if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                    loss_sum = 0.0
+                if self.__problem_type in use_losses:
+                    all_losses = np.empty(shape=1)
+                if self.__problem_type in use_y:
+                    all_y = np.empty(shape=1)
+                if self.__problem_type in use_predictions:
+                    all_predictions = np.empty(shape=1)
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
@@ -1427,34 +1436,41 @@ class DPPModel(object):
                     all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
                     all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
                 elif self.__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    r_losses = self.__session.run([self.__graph_ops['test_losses']])
-                    all_losses = np.concatenate((all_losses, r_losses[0]), axis=0)
+                    r_losses = self.__session.run(self.__graph_ops['test_losses'])
+                    all_losses = np.concatenate((all_losses, r_losses), axis=0)
                 elif self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     r_y, r_predicted = self.__session.run([self.__graph_ops['y_test'],
                                                            self.__graph_ops['x_test_predicted']])
                     all_y = np.concatenate((all_y, r_y), axis=0)
                     all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
 
-            # Delete the weird first entries in losses, y values, and predictions
             if self.__problem_type != definitions.ProblemType.CLASSIFICATION:
-                all_losses = np.delete(all_losses, 0)
-                if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                    all_y = np.delete(all_y, 0)
-                    all_predictions = np.delete(all_predictions, 0)
-                else:
+                # Delete the weird first entries in losses, y values, and predictions (because creating empty arrays
+                # isn't a thing)
+                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                    # These are multi-dimensional for object detection, so first entry = first slice
                     all_y = np.delete(all_y, 0, axis=0)
                     all_predictions = np.delete(all_predictions, 0, axis=0)
+                else:
+                    if self.__problem_type in use_losses:
+                        all_losses = np.delete(all_losses, 0)
+                    if self.__problem_type in use_y:
+                        all_y = np.delete(all_y, 0)
+                    if self.__problem_type in use_predictions:
+                        all_predictions = np.delete(all_predictions, 0)
 
-            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
-            # we want to get rid of)
-            if self.__problem_type != definitions.ProblemType.CLASSIFICATION:
+                # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+                # we want to get rid of)
                 extra = self.__batch_size - (self.__total_testing_samples % self.__batch_size)
                 if extra != self.__batch_size:
                     mask_extra = np.ones(self.__batch_size * num_batches, dtype=bool)
                     mask_extra[range(self.__batch_size * num_batches - extra, self.__batch_size * num_batches)] = False
-                    all_losses = all_losses[mask_extra, ...]
-                    all_y = all_y[mask_extra, ...]
-                    all_predictions = all_predictions[mask_extra, ...]
+                    if self.__problem_type in use_losses:
+                        all_losses = all_losses[mask_extra, ...]
+                    if self.__problem_type in use_y:
+                        all_y = all_y[mask_extra, ...]
+                    if self.__problem_type in use_predictions:
+                        all_predictions = all_predictions[mask_extra, ...]
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
@@ -1487,7 +1503,7 @@ class DPPModel(object):
                 self.__log('Max error: {}'.format(loss_max))
                 self.__log('MSE: {}'.format(mse))
 
-                if len(all_y) > 0:
+                if self.__problem_type == definitions.ProblemType.REGRESSION:
                     all_y_mean = np.mean(all_y)
                     total_error = np.sum(np.square(all_y - all_y_mean))
                     unexplained_error = np.sum(np.square(all_losses))
@@ -1501,7 +1517,6 @@ class DPPModel(object):
                     self.__log('All test labels:')
                     self.__log(all_y)
 
-                if len(all_predictions) > 0:
                     self.__log('All predictions:')
                     self.__log(all_predictions)
 
@@ -2754,15 +2769,21 @@ class DPPModel(object):
         self.__layers.append(layer)
 
     def use_predefined_model(self, model_name):
+        """
+        Add network layers to build a predefined network model
+        :param model_name: The predefined model name
+        """
         if model_name not in self.__supported_predefined_models:
             raise ValueError("'" + model_name + "' is not one of the currently supported predefined models." +
-                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() first," +
-                             " or choose one of " + " ".join("'" + x + "'" for x in self.__supported_predefined_models))
+                             " Make sure you have the correct problem type set with DPPModel.set_problem_type() " +
+                             "first, or choose one of " +
+                             " ".join("'" + x + "'" for x in self.__supported_predefined_models))
 
         if model_name == 'vgg-16':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64],
+                                         stride_length=1, activation_function='relu')
             self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
 
@@ -2794,7 +2815,8 @@ class DPPModel(object):
         if model_name == 'alexnet':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[11, 11, self.__image_depth, 48], stride_length=4, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[11, 11, self.__image_depth, 48],
+                                         stride_length=4, activation_function='relu')
             self.add_normalization_layer()
             self.add_pooling_layer(kernel_size=3, stride_length=2)
 
@@ -2817,7 +2839,8 @@ class DPPModel(object):
         if model_name == 'xsmall':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 16], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 16],
+                                         stride_length=1, activation_function='relu')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
 
             self.add_convolutional_layer(filter_dimension=[3, 3, 16, 32], stride_length=1, activation_function='relu')
@@ -2833,7 +2856,8 @@ class DPPModel(object):
         if model_name == 'small':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64],
+                                         stride_length=1, activation_function='relu')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
             self.add_batch_norm_layer()
 
@@ -2854,7 +2878,8 @@ class DPPModel(object):
         if model_name == 'medium':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64],
+                                         stride_length=1, activation_function='relu')
             self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
             self.add_batch_norm_layer()
@@ -2888,7 +2913,8 @@ class DPPModel(object):
         if model_name == 'large':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 64],
+                                         stride_length=1, activation_function='relu')
             self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
             self.add_batch_norm_layer()
@@ -2917,6 +2943,62 @@ class DPPModel(object):
 
             self.add_fully_connected_layer(output_size=512, activation_function='relu')
             self.add_fully_connected_layer(output_size=384, activation_function='relu')
+
+            self.add_output_layer()
+
+        if model_name == 'yolov2':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self.__image_depth, 32],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 32, 64], stride_length=1, activation_function='lrelu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[1, 1, 128, 64], stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='lrelu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[1, 1, 256, 128],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[1, 1, 512, 256],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[1, 1, 512, 256],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 1024],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[1, 1, 1024, 512],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 1024],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[1, 1, 1024, 512],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 1024],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 1024],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 1024],
+                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 1024],
+                                         stride_length=1, activation_function='lrelu')
 
             self.add_output_layer()
 
@@ -3290,10 +3372,54 @@ class DPPModel(object):
             self.__raw_image_files = images
             self.__raw_labels = labels
 
+    def load_yolo_dataset_from_directory(self, data_dir, label_file=None, image_dir=None):
+        """
+        Loads in labels and images for object detection tasks, converting the labels to YOLO format and automatically
+        patching the images if necessary.
+
+        :param data_dir: String, The directory where the labels and images are stored in
+        :param label_file: String, The filename for the JSON file with the labels. Optional if using automatic patching
+        which has been done already
+        :param image_dir: String, The directory with the images. Optional if using automatic patching which has been
+        done already
+        """
+        if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
+            raise RuntimeError("YOLO datasets can only be loaded object detection problems")
+
+        load_patched_data = self.__with_patching and 'tmp_train' in os.listdir(data_dir)
+
+        # Construct the paths to the labels and images
+        if load_patched_data:
+            label_path = os.path.join(data_dir, 'tmp_train/json/train_patches.json')
+            image_path = os.path.join(data_dir, 'tmp_train/image_patches', '')
+        else:
+            label_path = os.path.join(data_dir, label_file)
+            image_path = os.path.join(data_dir, image_dir, '')
+
+        # Load the labels and images
+        if load_patched_data:
+            # Hack to make the label reader convert the labels to YOLO format when re-reading image patches
+            self.__with_patching = False
+        self.load_json_labels_from_file(label_path)
+        images_list = [image_path + filename for filename in sorted(os.listdir(image_path))
+                       if filename.endswith('.png')]
+        self.load_images_from_list(images_list)
+        if load_patched_data:
+            # Remove the hack
+            self.__with_patching = True
+
+        # Perform automatic image patching if necessary
+        if self.__with_patching and 'tmp_train' not in os.listdir(data_dir):
+            self.__raw_image_files, self.__all_labels = \
+                self.object_detection_patching_and_augmentation(patch_dir=data_dir)
+            self.__convert_labels_to_yolo_format()
+            self.__raw_labels = self.__all_labels
+            self.__total_raw_samples = len(self.__raw_image_files)
+            self.__log('Total raw patch examples is %d' % self.__total_raw_samples)
+
     def load_images_from_list(self, image_files):
         """
-        Loads images from a list of file names (strings). Unless you only want to do preprocessing,
-        regression or classification labels MUST be loaded first.
+        Loads images from a list of file names (strings). Regression or classification labels MUST be loaded first.
         """
 
         self.__total_raw_samples = len(image_files)
@@ -3303,21 +3429,10 @@ class DPPModel(object):
 
         images = image_files
 
-        # prepare images for training (if there are any labels loaded)
+        self.__raw_image_files = images
         if self.__all_labels is not None:
-            self.__raw_image_files = images
-            if not self.__with_patching:
-                self.__raw_labels = self.__all_labels
-            else:  # some problems need to generate special patched data from loaded images
-                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    if self.__loss_fn == 'yolo':
-                        self.__raw_image_files, self.__all_labels = self.object_detection_patching_and_augmentation()
-                        self.__convert_labels_to_yolo_format()
-                        self.__raw_labels = self.__all_labels
-                        self.__total_raw_samples = len(self.__raw_image_files)
-                        self.__log('Total raw patch examples is %d' % self.__total_raw_samples)
+            self.__raw_labels = self.__all_labels
         else:
-            self.__raw_image_files = images
             self.__images_only = True
 
         # visual image check, printing image and bounding boxes #
@@ -3352,22 +3467,27 @@ class DPPModel(object):
         # cv2.imshow('image', crazy_size)
         # cv2.waitKey(0)
 
-    def object_detection_patching_and_augmentation(self):
+    def object_detection_patching_and_augmentation(self, patch_dir=None):
         # make the below a function
         # labels, images = function()
         img_dict = {}
         img_num = 0
         img_name_idx = 1
-        img_dir_out_base = './tmp_train/'  # could make this dir user-specifiable
-        if not os.path.exists(img_dir_out_base):
-            os.makedirs(img_dir_out_base)
+
+        if patch_dir:
+            patch_dir = os.path.join(patch_dir, 'tmp_train', '')
         else:
-            raise RuntimeError("Folder ./tmp_train/ detected. Either delete this folder and run again or " +
-                               "use data in ./tmp_train/ without patching.")
-        img_dir_out = img_dir_out_base + 'image_patches/'
+            patch_dir = os.path.join(os.path.curdir, 'tmp_train', '')
+        if not os.path.exists(patch_dir):
+            os.makedirs(patch_dir)
+        else:
+            raise RuntimeError("Patched images already exist in " + patch_dir + ". Either delete them and run again or "
+                               "use them directly (i.e. without patching).")
+
+        img_dir_out = patch_dir + 'image_patches/'
         if not os.path.exists(img_dir_out):
             os.makedirs(img_dir_out)
-        json_dir_out = img_dir_out_base + 'json/'
+        json_dir_out = patch_dir + 'json/'
         if not os.path.exists(json_dir_out):
             os.makedirs(json_dir_out)
         new_raw_image_files = []
@@ -3375,7 +3495,7 @@ class DPPModel(object):
 
         # first add images such that each grid cell has a plant in it
         # should add num_images*grid many images (e.g. 27(images)*49(7x7grid))
-        self.__log('Beginning creation of training patches. Images and json are being saved in ' + img_dir_out_base)
+        self.__log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
         for img_name, img_boxes in zip(self.__raw_image_files, self.__all_labels):
             img_num += 1
             img = np.array(Image.open(img_name))
