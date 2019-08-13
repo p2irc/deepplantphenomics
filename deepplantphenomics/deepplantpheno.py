@@ -1372,19 +1372,28 @@ class DPPModel(object):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
-                loss_sum = 0.0
-            elif self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                all_losses = np.empty(shape=self.__num_regression_outputs)
-                all_y = np.empty(shape=self.__num_regression_outputs)
-                all_predictions = np.empty(shape=self.__num_regression_outputs)
-            else:
-                all_y = np.empty(shape=(self.__batch_size,
-                                        self.__grid_w*self.__grid_h,
+            use_losses = [definitions.ProblemType.REGRESSION, definitions.ProblemType.SEMANTIC_SEGMETNATION]
+            use_y = [definitions.ProblemType.REGRESSION, definitions.ProblemType.OBJECT_DETECTION]
+            use_predictions = [definitions.ProblemType.REGRESSION, definitions.ProblemType.OBJECT_DETECTION]
+
+            # Initialize storage for the retreived test variables
+            if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                # Object detection needs some special care given to its variable's shape
+                all_y = np.empty(shape=(1,
+                                        self.__grid_w * self.__grid_h,
                                         1 + self.__NUM_CLASSES + 4))
-                all_predictions = np.empty(shape=(self.__batch_size,
-                                                  self.__grid_w*self.__grid_h,
-                                                  5*self.__NUM_BOXES + self.__NUM_CLASSES))
+                all_predictions = np.empty(shape=(1,
+                                                  self.__grid_w * self.__grid_h,
+                                                  5 * self.__NUM_BOXES + self.__NUM_CLASSES))
+            else:
+                if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
+                    loss_sum = 0.0
+                if self.__problem_type in use_losses:
+                    all_losses = np.empty(shape=1)
+                if self.__problem_type in use_y:
+                    all_y = np.empty(shape=1)
+                if self.__problem_type in use_predictions:
+                    all_predictions = np.empty(shape=1)
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
@@ -1407,26 +1416,33 @@ class DPPModel(object):
                     all_y = np.concatenate((all_y, r_y), axis=0)
                     all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
 
-            # Delete the weird first entries in losses, y values, and predictions
             if self.__problem_type != definitions.ProblemType.CLASSIFICATION:
-                all_losses = np.delete(all_losses, 0)
-                if self.__problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                    all_y = np.delete(all_y, 0)
-                    all_predictions = np.delete(all_predictions, 0)
-                else:
+                # Delete the weird first entries in losses, y values, and predictions (because creating empty arrays
+                # isn't a thing)
+                if self.__problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                    # These are multi-dimensional for object detection, so first entry = first slice
                     all_y = np.delete(all_y, 0, axis=0)
                     all_predictions = np.delete(all_predictions, 0, axis=0)
+                else:
+                    if self.__problem_type in use_losses:
+                        all_losses = np.delete(all_losses, 0)
+                    if self.__problem_type in use_y:
+                        all_y = np.delete(all_y, 0)
+                    if self.__problem_type in use_predictions:
+                        all_predictions = np.delete(all_predictions, 0)
 
-            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
-            # we want to get rid of)
-            if self.__problem_type != definitions.ProblemType.CLASSIFICATION:
+                # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+                # we want to get rid of)
                 extra = self.__batch_size - (self.__total_testing_samples % self.__batch_size)
                 if extra != self.__batch_size:
                     mask_extra = np.ones(self.__batch_size * num_batches, dtype=bool)
                     mask_extra[range(self.__batch_size * num_batches - extra, self.__batch_size * num_batches)] = False
-                    all_losses = all_losses[mask_extra, ...]
-                    all_y = all_y[mask_extra, ...]
-                    all_predictions = all_predictions[mask_extra, ...]
+                    if self.__problem_type in use_losses:
+                        all_losses = all_losses[mask_extra, ...]
+                    if self.__problem_type in use_y:
+                        all_y = all_y[mask_extra, ...]
+                    if self.__problem_type in use_predictions:
+                        all_predictions = all_predictions[mask_extra, ...]
 
             if self.__problem_type == definitions.ProblemType.CLASSIFICATION:
                 # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
@@ -1459,7 +1475,7 @@ class DPPModel(object):
                 self.__log('Max error: {}'.format(loss_max))
                 self.__log('MSE: {}'.format(mse))
 
-                if len(all_y) > 0:
+                if self.__problem_type == definitions.ProblemType.REGRESSION:
                     all_y_mean = np.mean(all_y)
                     total_error = np.sum(np.square(all_y - all_y_mean))
                     unexplained_error = np.sum(np.square(all_losses))
@@ -1473,7 +1489,6 @@ class DPPModel(object):
                     self.__log('All test labels:')
                     self.__log(all_y)
 
-                if len(all_predictions) > 0:
                     self.__log('All predictions:')
                     self.__log(all_predictions)
 
