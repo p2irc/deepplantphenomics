@@ -4383,7 +4383,359 @@ class ClassificationModel(DPPModel):
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
-    ...
+    def __assemble_graph(self):
+        with self._graph.as_default():
+
+            self.__log('Parsing dataset...')
+
+            if self._raw_test_labels is not None:
+                # currently think of moderation features as None so they are passed in hard-coded
+                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                     self._raw_test_image_files, self._raw_test_labels, None,
+                                     self._raw_val_image_files, self._raw_val_labels, None)
+            elif self._images_only:
+                self.__parse_images(self._raw_image_files)
+            else:
+                # split the data into train/val/test sets, if there is no validation set or no moderation features
+                # being used they will be returned as 0 (val) or None (moderation features)
+                train_images, train_labels, train_mf, \
+                test_images, test_labels, test_mf, \
+                val_images, val_labels, val_mf, = \
+                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                           self._validation_split, self._all_moderation_features,
+                                           self._training_augmentation_images, self._training_augmentation_labels,
+                                           self._split_labels)
+                # parse the images and set the appropriate environment variables
+                self.__parse_dataset(train_images, train_labels, train_mf,
+                                     test_images, test_labels, test_mf,
+                                     val_images, val_labels, val_mf)
+
+            self.__log('Creating layer parameters...')
+
+            self.__add_layers_to_graph()
+
+            self.__log('Assembling graph...')
+
+            # Define batches
+            if self._has_moderation:
+                x, y, mod_w = tf.train.shuffle_batch(
+                    [self._train_images, self._train_labels, self._train_moderation_features],
+                    batch_size=self._batch_size,
+                    num_threads=self._num_threads,
+                    capacity=self._queue_capacity,
+                    min_after_dequeue=self._batch_size)
+            else:
+                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                              batch_size=self._batch_size,
+                                              num_threads=self._num_threads,
+                                              capacity=self._queue_capacity,
+                                              min_after_dequeue=self._batch_size)
+
+            # Reshape input to the expected image dimensions
+            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            # if using patching we extract a patch of image here
+            if self._with_patching:
+                # Take a slice
+                patch_width = self._patch_width
+                patch_height = self._patch_height
+                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
+                                             self._batch_size)
+                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
+                                             self._batch_size)
+                offsets = [x for x in zip(offset_h, offset_w)]
+                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
+                                             normalized=False, centered=False)
+
+            # Run the network operations
+            if self._has_moderation:
+                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+            else:
+                xx = self.forward_pass(x, deterministic=False)
+
+            # Define regularization cost
+            if self._reg_coeff is not None:
+                l2_cost = tf.squeeze(tf.reduce_sum(
+                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                     if isinstance(layer, layers.fullyConnectedLayer)]))
+            else:
+                l2_cost = 0.0
+
+            # Define cost function based on which one was selected via set_loss_function
+            if self._loss_fn == 'softmax cross entropy':
+                sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+            self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
+
+            # Identify which optimizer we are using
+            if self._optimizer == 'adagrad':
+                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
+                self.__log('Using Adagrad optimizer')
+            elif self._optimizer == 'adadelta':
+                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
+                self.__log('Using adadelta optimizer')
+            elif self._optimizer == 'sgd':
+                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
+                self.__log('Using SGD optimizer')
+            elif self._optimizer == 'adam':
+                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
+                self.__log('Using Adam optimizer')
+            elif self._optimizer == 'sgd_momentum':
+                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
+                self.__log('Using SGD with momentum optimizer')
+            else:
+                warnings.warn('Unrecognized optimizer requested')
+                exit()
+
+            # Compute gradients, clip them, the apply the clipped gradients
+            # This is broken up so that we can add gradients to tensorboard
+            # need to make the 5.0 an adjustable hyperparameter
+            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
+            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+
+            # for classification problems we will compute the training accuracy, this is also used for tensorboard
+            class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
+            correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
+            self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
+
+            # Calculate test accuracy
+            if self._has_moderation:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
+                        [self._test_images, self._test_labels, self._test_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
+                        [self._val_images, self._val_labels, self._val_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+            else:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
+                                                                       batch_size=self._batch_size,
+                                                                       num_threads=self._num_threads,
+                                                                       capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
+                                                                     batch_size=self._batch_size,
+                                                                     num_threads=self._num_threads,
+                                                                     capacity=self._queue_capacity)
+            if self._testing:
+                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            if self._validation:
+                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            # if using patching we need to properly pull patches from the images (object detection patching is different
+            # and is done when data is loaded)
+            if self._with_patching:
+                # Take a slice of image. Same size and location (offsets) as the slice from training.
+                patch_width = self._patch_width
+                patch_height = self._patch_height
+                if self._testing:
+                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
+                                                      normalized=False, centered=False)
+                if self._validation:
+                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
+                                                     normalized=False, centered=False)
+
+            if self._has_moderation:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
+                                                                            moderation_features=mod_w_test)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                           moderation_features=mod_w_val)
+            else:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
+            # compute the loss and accuracy
+            if self._testing:
+                test_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_test_predicted']), 1)
+                test_correct_predictions = tf.equal(test_class_predictions,
+                                                    tf.argmax(self._graph_ops['y_test'], 1))
+                self._graph_ops['test_losses'] = test_correct_predictions
+                self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+            if self._validation:
+                val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
+                val_correct_predictions = tf.equal(val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
+                self._graph_ops['val_losses'] = val_correct_predictions
+                self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
+
+            # Epoch summaries for Tensorboard
+            if self._tb_dir is not None:
+                self.__log('Creating Tensorboard summaries...')
+
+                # Summaries for any problem type
+                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
+                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+
+                # Summaries specific to classification problems
+                tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
+                tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
+                if self._validation:
+                    tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
+                                      collections=['custom_summaries'])
+                    tf.summary.histogram('validation/class_predictions', val_class_predictions,
+                                         collections=['custom_summaries'])
+
+                # Summaries for each layer
+                for layer in self._layers:
+                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+
+                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                        # and it was found that if you commented the below line then the code wouldn't hang. Never
+                        # fully understood why, as it only happened if you tried running with train/test and no
+                        # validation. But after adding more features and just randomly trying to uncomment the below
+                        # line to see if it would work, it appears to now be working, but still don't know why...
+                        tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                             collections=['custom_summaries'])
+
+                # Summaries for gradients
+                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+                # the name and tensorboard does not like this so we remove it with the [:-2]
+                # We also currently seem to get None's for gradients when performing a hyperparameter search
+                # and as such it is simply left out for hyper-param searches, needs to be fixed
+                if not self._hyper_param_search:
+                    for index, grad in enumerate(gradients):
+                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                             collections=['custom_summaries'])
+
+                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+
+                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+
+    def begin_training(self, return_test_loss=False):
+        """
+        Initialize the network and either run training to the specified max epoch, or load trainable variables.
+        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
+        the session is shut down.
+        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        """
+        # if None in [self._train_images, self._test_images,
+        #             self._train_labels, self._test_labels]:
+        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
+        #                        "Try first using one of the methods starting with 'load_...' such as " +
+        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        # if (len(self._layers) < 1):
+        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
+        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
+        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
+        #                        layers.")
+
+        with self._graph.as_default():
+            self.__assemble_graph()
+            print('assembled the graph')
+
+            # Either load the network parameters from a checkpoint file or start training
+            if self._load_from_saved is not False:
+                self.load_state()
+
+                self.__initialize_queue_runners()
+
+                self.compute_full_test_accuracy()
+
+                self.shut_down()
+            else:
+                if self._tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
+
+                self.__log('Initializing parameters...')
+                init_op = tf.global_variables_initializer()
+                self._session.run(init_op)
+
+                self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
+
+                self.__set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                # for i in range(self._maximum_training_batches):
+                tqdm_range = tqdm(range(self._maximum_training_batches))
+                for i in tqdm_range:
+                    start_time = time.time()
+
+                    self._global_epoch = i
+                    self._session.run(self._graph_ops['optimizer'])
+                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
+                        elapsed = time.time() - start_time
+
+                        if self._tb_dir is not None:
+                            summary = self._session.run(self._graph_ops['merged'])
+                            train_writer.add_summary(summary, i)
+                        if self._validation:
+                            loss, epoch_accuracy, epoch_val_accuracy = self._session.run(
+                                [self._graph_ops['cost'],
+                                 self._graph_ops['accuracy'],
+                                 self._graph_ops['val_accuracy']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                epoch_accuracy,
+                                                samples_per_sec))
+
+                        else:
+                            loss, epoch_accuracy = self._session.run(
+                                [self._graph_ops['cost'],
+                                 self._graph_ops['accuracy']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                epoch_accuracy,
+                                                samples_per_sec))
+
+                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
+                            self.save_state(self._save_dir)
+                    else:
+                        loss = self._session.run([self._graph_ops['cost']])
+
+                    if loss == 0.0:
+                        self.__log('Stopping due to zero loss')
+                        break
+
+                    if i == self._maximum_training_batches - 1:
+                        self.__log('Stopping due to maximum epochs')
+
+                self.save_state(self._save_dir)
+
+                final_test_loss = None
+                if self._testing:
+                    final_test_loss = self.compute_full_test_accuracy()
+
+                self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
 
 
 class RegressionModel(DPPModel):
@@ -4405,7 +4757,376 @@ class RegressionModel(DPPModel):
 
         self._num_regression_outputs = num
 
-    ...
+    def __assemble_graph(self):
+        with self._graph.as_default():
+
+            self.__log('Parsing dataset...')
+
+            if self._raw_test_labels is not None:
+                # currently think of moderation features as None so they are passed in hard-coded
+                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                     self._raw_test_image_files, self._raw_test_labels, None,
+                                     self._raw_val_image_files, self._raw_val_labels, None)
+            elif self._images_only:
+                self.__parse_images(self._raw_image_files)
+            else:
+                # split the data into train/val/test sets, if there is no validation set or no moderation features
+                # being used they will be returned as 0 (val) or None (moderation features)
+                train_images, train_labels, train_mf, \
+                test_images, test_labels, test_mf, \
+                val_images, val_labels, val_mf, = \
+                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                           self._validation_split, self._all_moderation_features,
+                                           self._training_augmentation_images, self._training_augmentation_labels,
+                                           self._split_labels)
+                # parse the images and set the appropriate environment variables
+                self.__parse_dataset(train_images, train_labels, train_mf,
+                                     test_images, test_labels, test_mf,
+                                     val_images, val_labels, val_mf)
+
+            self.__log('Creating layer parameters...')
+
+            self.__add_layers_to_graph()
+
+            self.__log('Assembling graph...')
+
+            # Define batches
+            if self._has_moderation:
+                x, y, mod_w = tf.train.shuffle_batch(
+                    [self._train_images, self._train_labels, self._train_moderation_features],
+                    batch_size=self._batch_size,
+                    num_threads=self._num_threads,
+                    capacity=self._queue_capacity,
+                    min_after_dequeue=self._batch_size)
+            else:
+                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                              batch_size=self._batch_size,
+                                              num_threads=self._num_threads,
+                                              capacity=self._queue_capacity,
+                                              min_after_dequeue=self._batch_size)
+
+            # Reshape input to the expected image dimensions
+            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            # This is a regression problem, so we should deserialize the label
+            y = loaders.label_string_to_tensor(y, self._batch_size, self._num_regression_outputs)
+
+            # if using patching we extract a patch of image here
+            if self._with_patching:
+                # Take a slice
+                patch_width = self._patch_width
+                patch_height = self._patch_height
+                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
+                                             self._batch_size)
+                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
+                                             self._batch_size)
+                offsets = [x for x in zip(offset_h, offset_w)]
+                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
+                                             normalized=False, centered=False)
+
+            # Run the network operations
+            if self._has_moderation:
+                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+            else:
+                xx = self.forward_pass(x, deterministic=False)
+
+            # Define regularization cost
+            if self._reg_coeff is not None:
+                l2_cost = tf.squeeze(tf.reduce_sum(
+                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                     if isinstance(layer, layers.fullyConnectedLayer)]))
+            else:
+                l2_cost = 0.0
+
+            # Define cost function based on which one was selected via set_loss_function
+            if self._loss_fn == 'l2':
+                regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
+            elif self._loss_fn == 'l1':
+                regression_loss = self.__batch_mean_l1_loss(tf.subtract(xx, y))
+            elif self._loss_fn == 'smooth l1':
+                regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
+            elif self._loss_fn == 'log loss':
+                regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
+            self._graph_ops['cost'] = tf.add(regression_loss, l2_cost)
+
+            # Identify which optimizer we are using
+            if self._optimizer == 'adagrad':
+                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
+                self.__log('Using Adagrad optimizer')
+            elif self._optimizer == 'adadelta':
+                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
+                self.__log('Using adadelta optimizer')
+            elif self._optimizer == 'sgd':
+                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
+                self.__log('Using SGD optimizer')
+            elif self._optimizer == 'adam':
+                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
+                self.__log('Using Adam optimizer')
+            elif self._optimizer == 'sgd_momentum':
+                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
+                self.__log('Using SGD with momentum optimizer')
+            else:
+                warnings.warn('Unrecognized optimizer requested')
+                exit()
+
+            # Compute gradients, clip them, the apply the clipped gradients
+            # This is broken up so that we can add gradients to tensorboard
+            # need to make the 5.0 an adjustable hyperparameter
+            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
+            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+
+            # Calculate test accuracy
+            if self._has_moderation:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
+                        [self._test_images, self._test_labels, self._test_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
+                        [self._val_images, self._val_labels, self._val_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+            else:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
+                                                                       batch_size=self._batch_size,
+                                                                       num_threads=self._num_threads,
+                                                                       capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
+                                                                     batch_size=self._batch_size,
+                                                                     num_threads=self._num_threads,
+                                                                     capacity=self._queue_capacity)
+            if self._testing:
+                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            if self._validation:
+                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            if self._testing:
+                self._graph_ops['y_test'] = loaders.label_string_to_tensor(self._graph_ops['y_test'],
+                                                                           self._batch_size,
+                                                                           self._num_regression_outputs)
+            if self._validation:
+                self._graph_ops['y_val'] = loaders.label_string_to_tensor(self._graph_ops['y_val'],
+                                                                          self._batch_size,
+                                                                          self._num_regression_outputs)
+
+            # if using patching we need to properly pull patches from the images
+            if self._with_patching:
+                # Take a slice of image. Same size and location (offsets) as the slice from training.
+                patch_width = self._patch_width
+                patch_height = self._patch_height
+                if self._testing:
+                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
+                                                      normalized=False, centered=False)
+                if self._validation:
+                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
+                                                     normalized=False, centered=False)
+                if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
+                    if self._testing:
+                        self._graph_ops['y_test'] = tf.image.extract_glimpse(self._graph_ops['y_test'],
+                                                                             [patch_height, patch_width], offsets,
+                                                                             normalized=False, centered=False)
+                    if self._validation:
+                        self._graph_ops['y_val'] = tf.image.extract_glimpse(self._graph_ops['y_val'],
+                                                                            [patch_height, patch_width], offsets,
+                                                                            normalized=False, centered=False)
+
+            if self._has_moderation:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
+                                                                            moderation_features=mod_w_test)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                           moderation_features=mod_w_val)
+            else:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
+            # compute the loss and accuracy based on problem type
+            if self._testing:
+                if self._num_regression_outputs == 1:
+                    self._graph_ops['test_losses'] = tf.squeeze(tf.stack(
+                        tf.subtract(self._graph_ops['x_test_predicted'], self._graph_ops['y_test'])))
+                else:
+                    self._graph_ops['test_losses'] = self.__l2_norm(
+                        tf.subtract(self._graph_ops['x_test_predicted'], self._graph_ops['y_test']))
+            if self._validation:
+                if self._num_regression_outputs == 1:
+                    self._graph_ops['val_losses'] = tf.squeeze(
+                        tf.stack(tf.subtract(self._graph_ops['x_val_predicted'], self._graph_ops['y_val'])))
+                else:
+                    self._graph_ops['val_losses'] = self.__l2_norm(
+                        tf.subtract(self._graph_ops['x_val_predicted'], self._graph_ops['y_val']))
+                self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
+
+            # Epoch summaries for Tensorboard
+            if self._tb_dir is not None:
+                self.__log('Creating Tensorboard summaries...')
+
+                # Summaries for any problem type
+                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
+                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+
+                # Summaries specific to regression problems
+                if self._num_regression_outputs == 1:
+                    tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
+                    if self._validation:
+                        tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
+                                          collections=['custom_summaries'])
+                        tf.summary.histogram('validation/batch_losses', self._graph_ops['val_losses'],
+                                             collections=['custom_summaries'])
+
+                # Summaries for each layer
+                for layer in self._layers:
+                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+
+                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                        # and it was found that if you commented the below line then the code wouldn't hang. Never
+                        # fully understood why, as it only happened if you tried running with train/test and no
+                        # validation. But after adding more features and just randomly trying to uncomment the below
+                        # line to see if it would work, it appears to now be working, but still don't know why...
+                        tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                             collections=['custom_summaries'])
+
+                # Summaries for gradients
+                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+                # the name and tensorboard does not like this so we remove it with the [:-2]
+                # We also currently seem to get None's for gradients when performing a hyperparameter search
+                # and as such it is simply left out for hyper-param searches, needs to be fixed
+                if not self._hyper_param_search:
+                    for index, grad in enumerate(gradients):
+                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                             collections=['custom_summaries'])
+
+                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+
+                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+
+    def begin_training(self, return_test_loss=False):
+        """
+        Initialize the network and either run training to the specified max epoch, or load trainable variables.
+        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
+        the session is shut down.
+        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        """
+        # if None in [self._train_images, self._test_images,
+        #             self._train_labels, self._test_labels]:
+        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
+        #                        "Try first using one of the methods starting with 'load_...' such as " +
+        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        # if (len(self._layers) < 1):
+        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
+        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
+        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
+        #                        layers.")
+
+        with self._graph.as_default():
+            self.__assemble_graph()
+            print('assembled the graph')
+
+            # Either load the network parameters from a checkpoint file or start training
+            if self._load_from_saved is not False:
+                self.load_state()
+
+                self.__initialize_queue_runners()
+
+                self.compute_full_test_accuracy()
+
+                self.shut_down()
+            else:
+                if self._tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
+
+                self.__log('Initializing parameters...')
+                init_op = tf.global_variables_initializer()
+                self._session.run(init_op)
+
+                self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
+
+                self.__set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                # for i in range(self._maximum_training_batches):
+                tqdm_range = tqdm(range(self._maximum_training_batches))
+                for i in tqdm_range:
+                    start_time = time.time()
+
+                    self._global_epoch = i
+                    self._session.run(self._graph_ops['optimizer'])
+                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
+                        elapsed = time.time() - start_time
+
+                        if self._tb_dir is not None:
+                            summary = self._session.run(self._graph_ops['merged'])
+                            train_writer.add_summary(summary, i)
+                        if self._validation:
+                            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
+                                                                       self._graph_ops['val_cost']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                        else:
+                            loss = self._session.run([self._graph_ops['cost']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
+                            self.save_state(self._save_dir)
+                    else:
+                        loss = self._session.run([self._graph_ops['cost']])
+
+                    if loss == 0.0:
+                        self.__log('Stopping due to zero loss')
+                        break
+
+                    if i == self._maximum_training_batches - 1:
+                        self.__log('Stopping due to maximum epochs')
+
+                self.save_state(self._save_dir)
+
+                final_test_loss = None
+                if self._testing:
+                    final_test_loss = self.compute_full_test_accuracy()
+
+                self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
 
 
 class SemanticSegmentationModel(DPPModel):
@@ -4417,7 +5138,368 @@ class SemanticSegmentationModel(DPPModel):
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
-    ...
+    def __assemble_graph(self):
+        with self._graph.as_default():
+
+            self.__log('Parsing dataset...')
+
+            if self._raw_test_labels is not None:
+                # currently think of moderation features as None so they are passed in hard-coded
+                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                     self._raw_test_image_files, self._raw_test_labels, None,
+                                     self._raw_val_image_files, self._raw_val_labels, None)
+            elif self._images_only:
+                self.__parse_images(self._raw_image_files)
+            else:
+                # split the data into train/val/test sets, if there is no validation set or no moderation features
+                # being used they will be returned as 0 (val) or None (moderation features)
+                train_images, train_labels, train_mf, \
+                test_images, test_labels, test_mf, \
+                val_images, val_labels, val_mf, = \
+                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                           self._validation_split, self._all_moderation_features,
+                                           self._training_augmentation_images, self._training_augmentation_labels,
+                                           self._split_labels)
+                # parse the images and set the appropriate environment variables
+                self.__parse_dataset(train_images, train_labels, train_mf,
+                                     test_images, test_labels, test_mf,
+                                     val_images, val_labels, val_mf)
+
+            self.__log('Creating layer parameters...')
+
+            self.__add_layers_to_graph()
+
+            self.__log('Assembling graph...')
+
+            # Define batches
+            if self._has_moderation:
+                x, y, mod_w = tf.train.shuffle_batch(
+                    [self._train_images, self._train_labels, self._train_moderation_features],
+                    batch_size=self._batch_size,
+                    num_threads=self._num_threads,
+                    capacity=self._queue_capacity,
+                    min_after_dequeue=self._batch_size)
+            else:
+                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                              batch_size=self._batch_size,
+                                              num_threads=self._num_threads,
+                                              capacity=self._queue_capacity,
+                                              min_after_dequeue=self._batch_size)
+
+            # Reshape input and labels to the expected image dimensions
+            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
+
+            # if using patching we extract a patch of image and its label here
+            if self._with_patching:
+                # Take a slice
+                patch_width = self._patch_width
+                patch_height = self._patch_height
+                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
+                                             self._batch_size)
+                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
+                                             self._batch_size)
+                offsets = [x for x in zip(offset_h, offset_w)]
+                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
+                                             normalized=False, centered=False)
+                y = tf.image.extract_glimpse(y, [patch_height, patch_width], offsets,
+                                             normalized=False, centered=False)
+
+            # Run the network operations
+            if self._has_moderation:
+                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+            else:
+                xx = self.forward_pass(x, deterministic=False)
+
+            # Define regularization cost
+            if self._reg_coeff is not None:
+                l2_cost = tf.squeeze(tf.reduce_sum(
+                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                     if isinstance(layer, layers.fullyConnectedLayer)]))
+            else:
+                l2_cost = 0.0
+
+            # Define cost function  based on which one was selected via set_loss_function
+            if self._loss_fn == 'sigmoid cross entropy':
+                pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
+            self._graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
+
+            # Identify which optimizer we are using
+            if self._optimizer == 'adagrad':
+                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
+                self.__log('Using Adagrad optimizer')
+            elif self._optimizer == 'adadelta':
+                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
+                self.__log('Using adadelta optimizer')
+            elif self._optimizer == 'sgd':
+                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
+                self.__log('Using SGD optimizer')
+            elif self._optimizer == 'adam':
+                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
+                self.__log('Using Adam optimizer')
+            elif self._optimizer == 'sgd_momentum':
+                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
+                self.__log('Using SGD with momentum optimizer')
+            else:
+                warnings.warn('Unrecognized optimizer requested')
+                exit()
+
+            # Compute gradients, clip them, the apply the clipped gradients
+            # This is broken up so that we can add gradients to tensorboard
+            # need to make the 5.0 an adjustable hyperparameter
+            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
+            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+
+            # Calculate test accuracy
+            if self._has_moderation:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
+                        [self._test_images, self._test_labels, self._test_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
+                        [self._val_images, self._val_labels, self._val_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+            else:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
+                                                                       batch_size=self._batch_size,
+                                                                       num_threads=self._num_threads,
+                                                                       capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
+                                                                     batch_size=self._batch_size,
+                                                                     num_threads=self._num_threads,
+                                                                     capacity=self._queue_capacity)
+            if self._testing:
+                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
+                                                       shape=[-1, self._image_height, self._image_width, 1])
+            if self._validation:
+                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
+                                                      shape=[-1, self._image_height, self._image_width, 1])
+
+            # if using patching we need to properly pull patches from the images and labels
+            if self._with_patching:
+                # Take a slice of image. Same size and location (offsets) as the slice from training.
+                patch_width = self._patch_width
+                patch_height = self._patch_height
+                if self._testing:
+                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
+                                                      normalized=False, centered=False)
+                    self._graph_ops['y_test'] = tf.image.extract_glimpse(self._graph_ops['y_test'],
+                                                                         [patch_height, patch_width], offsets,
+                                                                         normalized=False, centered=False)
+                if self._validation:
+                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
+                                                     normalized=False, centered=False)
+                    self._graph_ops['y_val'] = tf.image.extract_glimpse(self._graph_ops['y_val'],
+                                                                        [patch_height, patch_width], offsets,
+                                                                        normalized=False, centered=False)
+
+            if self._has_moderation:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
+                                                                            moderation_features=mod_w_test)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                           moderation_features=mod_w_val)
+            else:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
+            # compute the loss and accuracy based on problem type
+            if self._testing:
+                self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                    logits=self._graph_ops['x_test_predicted'],
+                    labels=self._graph_ops['y_test']),
+                    axis=2)
+                self._graph_ops['test_losses'] = tf.reshape(tf.reduce_mean(self._graph_ops['test_losses'],
+                                                                           axis=1),
+                                                            [self._batch_size])
+            if self._validation:
+                self._graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                    logits=self._graph_ops['x_val_predicted'], labels=self._graph_ops['y_val']),
+                    axis=2)
+                self._graph_ops['val_losses'] = tf.transpose(
+                    tf.reduce_mean(self._graph_ops['val_losses'], axis=1))
+                self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
+
+            # Epoch summaries for Tensorboard
+            if self._tb_dir is not None:
+                self.__log('Creating Tensorboard summaries...')
+
+                # Summaries for any problem type
+                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
+                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+
+                # Summaries specific to semantic segmentation
+                # we send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
+                # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
+                train_images_summary = self.__get_weights_as_image(
+                    tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)),
+                    self._layers[-1].output_size)
+                tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
+                if self._validation:
+                    tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
+                                      collections=['custom_summaries'])
+                    val_images_summary = self.__get_weights_as_image(
+                        tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
+                        self._layers[-1].output_size)
+                    tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
+
+                # Summaries for each layer
+                for layer in self._layers:
+                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+
+                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                        # and it was found that if you commented the below line then the code wouldn't hang. Never
+                        # fully understood why, as it only happened if you tried running with train/test and no
+                        # validation. But after adding more features and just randomly trying to uncomment the below
+                        # line to see if it would work, it appears to now be working, but still don't know why...
+                        tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                             collections=['custom_summaries'])
+
+                # Summaries for gradients
+                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+                # the name and tensorboard does not like this so we remove it with the [:-2]
+                # We also currently seem to get None's for gradients when performing a hyperparameter search
+                # and as such it is simply left out for hyper-param searches, needs to be fixed
+                if not self._hyper_param_search:
+                    for index, grad in enumerate(gradients):
+                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                             collections=['custom_summaries'])
+
+                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+
+                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+
+    def begin_training(self, return_test_loss=False):
+        """
+        Initialize the network and either run training to the specified max epoch, or load trainable variables.
+        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
+        the session is shut down.
+        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        """
+        # if None in [self._train_images, self._test_images,
+        #             self._train_labels, self._test_labels]:
+        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
+        #                        "Try first using one of the methods starting with 'load_...' such as " +
+        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        # if (len(self._layers) < 1):
+        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
+        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
+        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
+        #                        layers.")
+
+        with self._graph.as_default():
+            self.__assemble_graph()
+            print('assembled the graph')
+
+            # Either load the network parameters from a checkpoint file or start training
+            if self._load_from_saved is not False:
+                self.load_state()
+
+                self.__initialize_queue_runners()
+
+                self.compute_full_test_accuracy()
+
+                self.shut_down()
+            else:
+                if self._tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
+
+                self.__log('Initializing parameters...')
+                init_op = tf.global_variables_initializer()
+                self._session.run(init_op)
+
+                self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
+
+                self.__set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                # for i in range(self._maximum_training_batches):
+                tqdm_range = tqdm(range(self._maximum_training_batches))
+                for i in tqdm_range:
+                    start_time = time.time()
+
+                    self._global_epoch = i
+                    self._session.run(self._graph_ops['optimizer'])
+                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
+                        elapsed = time.time() - start_time
+
+                        if self._tb_dir is not None:
+                            summary = self._session.run(self._graph_ops['merged'])
+                            train_writer.add_summary(summary, i)
+                        if self._validation:
+                            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
+                                                                       self._graph_ops['val_cost']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                        else:
+                            loss = self._session.run([self._graph_ops['cost']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
+                            self.save_state(self._save_dir)
+                    else:
+                        loss = self._session.run([self._graph_ops['cost']])
+
+                    if loss == 0.0:
+                        self.__log('Stopping due to zero loss')
+                        break
+
+                    if i == self._maximum_training_batches - 1:
+                        self.__log('Stopping due to maximum epochs')
+
+                self.save_state(self._save_dir)
+
+                final_test_loss = None
+                if self._testing:
+                    final_test_loss = self.compute_full_test_accuracy()
+
+                self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
 
 
 class ObjectDetectionModel(DPPModel):
@@ -4636,3 +5718,346 @@ class ObjectDetectionModel(DPPModel):
         # print(self._session.run([coord_loss, conf_loss, class_loss]))
 
         return total_loss
+
+    def __assemble_graph(self):
+        with self._graph.as_default():
+
+            self.__log('Parsing dataset...')
+
+            if self._raw_test_labels is not None:
+                # currently think of moderation features as None so they are passed in hard-coded
+                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                     self._raw_test_image_files, self._raw_test_labels, None,
+                                     self._raw_val_image_files, self._raw_val_labels, None)
+            elif self._images_only:
+                self.__parse_images(self._raw_image_files)
+            else:
+                # split the data into train/val/test sets, if there is no validation set or no moderation features
+                # being used they will be returned as 0 (val) or None (moderation features)
+                train_images, train_labels, train_mf, \
+                test_images, test_labels, test_mf, \
+                val_images, val_labels, val_mf, = \
+                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                           self._validation_split, self._all_moderation_features,
+                                           self._training_augmentation_images, self._training_augmentation_labels,
+                                           self._split_labels)
+                # parse the images and set the appropriate environment variables
+                self.__parse_dataset(train_images, train_labels, train_mf,
+                                     test_images, test_labels, test_mf,
+                                     val_images, val_labels, val_mf)
+
+            self.__log('Creating layer parameters...')
+
+            self.__add_layers_to_graph()
+
+            self.__log('Assembling graph...')
+
+            # Define batches
+            if self._has_moderation:
+                x, y, mod_w = tf.train.shuffle_batch(
+                    [self._train_images, self._train_labels, self._train_moderation_features],
+                    batch_size=self._batch_size,
+                    num_threads=self._num_threads,
+                    capacity=self._queue_capacity,
+                    min_after_dequeue=self._batch_size)
+            else:
+                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                              batch_size=self._batch_size,
+                                              num_threads=self._num_threads,
+                                              capacity=self._queue_capacity,
+                                              min_after_dequeue=self._batch_size)
+
+            # Reshape input to the expected image dimensions
+            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            # Deserialize the label
+            y = loaders.label_string_to_tensor(y, self._batch_size)
+            vec_size = 1 + self._NUM_CLASSES + 4
+            y = tf.reshape(y, [self._batch_size, self._grid_w * self._grid_h, vec_size])
+
+            # Run the network operations
+            if self._has_moderation:
+                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+            else:
+                xx = self.forward_pass(x, deterministic=False)
+
+            # Define regularization cost
+            if self._reg_coeff is not None:
+                l2_cost = tf.squeeze(tf.reduce_sum(
+                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                     if isinstance(layer, layers.fullyConnectedLayer)]))
+            else:
+                l2_cost = 0.0
+
+            # Define cost function  based on which one was selected via set_loss_function
+            if self._loss_fn == 'yolo':
+                yolo_loss = self._yolo_loss_function(
+                    y, tf.reshape(xx, [self._batch_size,
+                                       self._grid_w * self._grid_h,
+                                       self._NUM_BOXES * 5 + self._NUM_CLASSES]))
+            self._graph_ops['cost'] = tf.squeeze(tf.add(yolo_loss, l2_cost))
+
+            # Identify which optimizer we are using
+            if self._optimizer == 'adagrad':
+                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
+                self.__log('Using Adagrad optimizer')
+            elif self._optimizer == 'adadelta':
+                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
+                self.__log('Using adadelta optimizer')
+            elif self._optimizer == 'sgd':
+                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
+                self.__log('Using SGD optimizer')
+            elif self._optimizer == 'adam':
+                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
+                self.__log('Using Adam optimizer')
+            elif self._optimizer == 'sgd_momentum':
+                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
+                self.__log('Using SGD with momentum optimizer')
+            else:
+                warnings.warn('Unrecognized optimizer requested')
+                exit()
+
+            # Compute gradients, clip them, the apply the clipped gradients
+            # This is broken up so that we can add gradients to tensorboard
+            # need to make the 5.0 an adjustable hyperparameter
+            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
+            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+
+            # Calculate test accuracy
+            if self._has_moderation:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
+                        [self._test_images, self._test_labels, self._test_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
+                        [self._val_images, self._val_labels, self._val_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity)
+            else:
+                if self._testing:
+                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
+                                                                       batch_size=self._batch_size,
+                                                                       num_threads=self._num_threads,
+                                                                       capacity=self._queue_capacity)
+                if self._validation:
+                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
+                                                                     batch_size=self._batch_size,
+                                                                     num_threads=self._num_threads,
+                                                                     capacity=self._queue_capacity)
+
+            vec_size = 1 + self._NUM_CLASSES + 4
+            if self._testing:
+                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                self._graph_ops['y_test'] = loaders.label_string_to_tensor(self._graph_ops['y_test'],
+                                                                           self._batch_size)
+                self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
+                                                       shape=[self._batch_size,
+                                                              self._grid_w * self._grid_h,
+                                                              vec_size])
+            if self._validation:
+                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                self._graph_ops['y_val'] = loaders.label_string_to_tensor(self._graph_ops['y_val'],
+                                                                          self._batch_size)
+                self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
+                                                      shape=[self._batch_size,
+                                                             self._grid_w * self._grid_h,
+                                                             vec_size])
+
+            if self._has_moderation:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
+                                                                            moderation_features=mod_w_test)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                           moderation_features=mod_w_val)
+            else:
+                if self._testing:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+                if self._validation:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
+            # For object detection, the network outputs need to be reshaped to match y_test and y_val
+            if self._testing:
+                self._graph_ops['x_test_predicted'] = tf.reshape(self._graph_ops['x_test_predicted'],
+                                                                 [self._batch_size,
+                                                                  self._grid_w * self._grid_h,
+                                                                  self._NUM_BOXES * 5 + self._NUM_CLASSES])
+            if self._validation:
+                self._graph_ops['x_val_predicted'] = tf.reshape(self._graph_ops['x_val_predicted'],
+                                                                [self._batch_size,
+                                                                 self._grid_w * self._grid_h,
+                                                                 self._NUM_BOXES * 5 + self._NUM_CLASSES])
+
+            # compute the loss and accuracy based on problem type
+            if self._testing:
+                if self._loss_fn == 'yolo':
+                    self._graph_ops['test_losses'] = self._yolo_loss_function(self._graph_ops['y_test'],
+                                                                              self._graph_ops['x_test_predicted'])
+            if self._validation:
+                if self._loss_fn == 'yolo':
+                    self._graph_ops['val_losses'] = self._yolo_loss_function(self._graph_ops['y_val'],
+                                                                             self._graph_ops['x_val_predicted'])
+
+            # Epoch summaries for Tensorboard
+            if self._tb_dir is not None:
+                self.__log('Creating Tensorboard summaries...')
+
+                # Summaries for any problem type
+                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
+                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+
+                # Summaries specific to object detection
+                tf.summary.scalar('train/yolo_loss', yolo_loss, collections=['custom_summaries'])
+                if self._validation:
+                    tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
+                                      collections=['custom_sumamries'])
+
+                # Summaries for each layer
+                for layer in self._layers:
+                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+
+                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                        # and it was found that if you commented the below line then the code wouldn't hang. Never
+                        # fully understood why, as it only happened if you tried running with train/test and no
+                        # validation. But after adding more features and just randomly trying to uncomment the below
+                        # line to see if it would work, it appears to now be working, but still don't know why...
+                        tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                             collections=['custom_summaries'])
+
+                # Summaries for gradients
+                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+                # the name and tensorboard does not like this so we remove it with the [:-2]
+                # We also currently seem to get None's for gradients when performing a hyperparameter search
+                # and as such it is simply left out for hyper-param searches, needs to be fixed
+                if not self._hyper_param_search:
+                    for index, grad in enumerate(gradients):
+                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                             collections=['custom_summaries'])
+
+                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+
+                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+
+    def begin_training(self, return_test_loss=False):
+        """
+        Initialize the network and either run training to the specified max epoch, or load trainable variables.
+        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
+        the session is shut down.
+        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        """
+        # if None in [self._train_images, self._test_images,
+        #             self._train_labels, self._test_labels]:
+        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
+        #                        "Try first using one of the methods starting with 'load_...' such as " +
+        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
+        # if (len(self._layers) < 1):
+        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
+        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
+        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
+        #                        layers.")
+
+        with self._graph.as_default():
+            self.__assemble_graph()
+            print('assembled the graph')
+
+            # Either load the network parameters from a checkpoint file or start training
+            if self._load_from_saved is not False:
+                self.load_state()
+
+                self.__initialize_queue_runners()
+
+                self.compute_full_test_accuracy()
+
+                self.shut_down()
+            else:
+                if self._tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
+
+                self.__log('Initializing parameters...')
+                init_op = tf.global_variables_initializer()
+                self._session.run(init_op)
+
+                self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
+
+                self.__set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                # for i in range(self._maximum_training_batches):
+                tqdm_range = tqdm(range(self._maximum_training_batches))
+                for i in tqdm_range:
+                    start_time = time.time()
+
+                    self._global_epoch = i
+                    self._session.run(self._graph_ops['optimizer'])
+                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
+                        elapsed = time.time() - start_time
+
+                        if self._tb_dir is not None:
+                            summary = self._session.run(self._graph_ops['merged'])
+                            train_writer.add_summary(summary, i)
+                        if self._validation:
+                            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
+                                                                       self._graph_ops['val_cost']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                        else:
+                            loss = self._session.run([self._graph_ops['cost']])
+
+                            samples_per_sec = self._batch_size / elapsed
+
+                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+                            tqdm_range.set_description(
+                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                i,
+                                                i / (self._total_training_samples / self._batch_size),
+                                                loss,
+                                                samples_per_sec))
+
+                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
+                            self.save_state(self._save_dir)
+                    else:
+                        loss = self._session.run([self._graph_ops['cost']])
+
+                    if loss == 0.0:
+                        self.__log('Stopping due to zero loss')
+                        break
+
+                    if i == self._maximum_training_batches - 1:
+                        self.__log('Stopping due to maximum epochs')
+
+                self.save_state(self._save_dir)
+
+                final_test_loss = None
+                if self._testing:
+                    final_test_loss = self.compute_full_test_accuracy()
+
+                self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
