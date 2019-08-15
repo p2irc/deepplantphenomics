@@ -73,6 +73,11 @@ class DPPModel(object):
     _augmentation_contrast = False
     _augmentation_rotate = False
     _rotate_crop_borders = False
+    _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
+                            definitions.AugmentationType.FLIP_VER,
+                            definitions.AugmentationType.CROP,
+                            definitions.AugmentationType.CONTRAST_BRIGHT,
+                            definitions.AugmentationType.ROTATE]
 
     # Dataset storage
     _all_ids = None
@@ -337,8 +342,7 @@ class DPPModel(object):
         """Randomly flip training images horizontally"""
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
-        if self._problem_type not in [definitions.ProblemType.CLASSIFICATION,
-                                      definitions.ProblemType.REGRESSION]:
+        if definitions.AugmentationType.FLIP_HOR not in self._valid_augmentations:
             raise RuntimeError("Flip augmentations are incompatible with the current problem type")
 
         self._augmentation_flip_horizontal = flip
@@ -347,8 +351,7 @@ class DPPModel(object):
         """Randomly flip training images vertically"""
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
-        if self._problem_type not in [definitions.ProblemType.CLASSIFICATION,
-                                      definitions.ProblemType.REGRESSION]:
+        if definitions.AugmentationType.FLIP_VER not in self._valid_augmentations:
             raise RuntimeError("Flip augmentations are incompatible with the current problem type")
 
         self._augmentation_flip_vertical = flip
@@ -361,8 +364,7 @@ class DPPModel(object):
             raise TypeError("crop_ratio must be a float")
         if crop_ratio <= 0 or crop_ratio > 1:
             raise ValueError("crop_ratio must be in (0, 1]")
-        if self._problem_type not in [definitions.ProblemType.CLASSIFICATION,
-                                      definitions.ProblemType.REGRESSION]:
+        if definitions.AugmentationType.CROP not in self._valid_augmentations:
             raise RuntimeError("Crop augmentations are incompatible with the current problem type")
 
         self._augmentation_crop = resize
@@ -372,6 +374,8 @@ class DPPModel(object):
         """Randomly adjust contrast and/or brightness on training images"""
         if not isinstance(contr, bool):
             raise TypeError("contr must be a bool")
+        if definitions.AugmentationType.CONTRAST_BRIGHT not in self._valid_augmentations:
+            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current problem type")
 
         self._augmentation_contrast = contr
 
@@ -381,8 +385,7 @@ class DPPModel(object):
             raise TypeError("rot must be a bool")
         if not isinstance(crop_borders, bool):
             raise TypeError("crop_borders must be a bool")
-        if self._problem_type not in [definitions.ProblemType.CLASSIFICATION,
-                                      definitions.ProblemType.REGRESSION]:
+        if definitions.AugmentationType.ROTATE not in self._valid_augmentations:
             raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
 
         self._augmentation_rotate = rot
@@ -3646,6 +3649,11 @@ class ClassificationModel(DPPModel):
     _problem_type = definitions.ProblemType.CLASSIFICATION
     _loss_fn = 'softmax cross entropy'
     _supported_loss_fns_cls = ['softmax cross entropy']
+    _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
+                            definitions.AugmentationType.FLIP_VER,
+                            definitions.AugmentationType.CROP,
+                            definitions.AugmentationType.CONTRAST_BRIGHT,
+                            definitions.AugmentationType.ROTATE]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -4179,6 +4187,11 @@ class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
     _loss_fn = 'l2'
     _supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']
+    _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
+                            definitions.AugmentationType.FLIP_VER,
+                            definitions.AugmentationType.CROP,
+                            definitions.AugmentationType.CONTRAST_BRIGHT,
+                            definitions.AugmentationType.ROTATE]
     _num_regression_outputs = 1
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
@@ -4847,6 +4860,7 @@ class SemanticSegmentationModel(DPPModel):
     _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
     _loss_fn = 'sigmoid cross entropy'
     _supported_loss_fns_reg = ['sigmoid cross entropy']
+    _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -5762,6 +5776,7 @@ class ObjectDetectionModel(DPPModel):
     _problem_type = definitions.ProblemType.OBJECT_DETECTION
     _loss_fn = 'yolo'
     _supported_loss_fns_reg = ['yolo']
+    _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     # Yolo-specific parameters, non-default values defined by set_yolo_parameters
     _grid_w = 7
