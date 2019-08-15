@@ -2403,15 +2403,17 @@ class DPPModel(object):
         if len(self._layers) < 1:
             raise RuntimeError("A convolutional layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
-        try:  # try to iterate through filter_dimension, checking it has 4 ints
+        try:
+            # try to iterate through filter_dimension, checking it has 4 ints
             idx = 0
             for idx, dim in enumerate(filter_dimension):
                 if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
                     raise TypeError()
             if idx != 3:
                 raise TypeError()
-        except:
+        except Exception:
             raise TypeError("filter_dimension must be a list or array of 4 ints")
+
         if not isinstance(stride_length, int):
             raise TypeError("stride_length must be an int")
         if stride_length <= 0:
@@ -2663,6 +2665,8 @@ class DPPModel(object):
         if regularization_coefficient is None and self._reg_coeff is None:
             regularization_coefficient = 0.0
 
+        num_out = 0
+        filter_dimension = []
         if output_size is None:
             if self._problem_type == definitions.ProblemType.CLASSIFICATION:
                 num_out = self._total_classes
@@ -2707,7 +2711,6 @@ class DPPModel(object):
                                                    regularization_coefficient)
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
-
         self._layers.append(layer)
 
     def use_predefined_model(self, model_name):
@@ -4740,6 +4743,56 @@ class ClassificationModel(DPPModel):
         interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
         return interpreted_outputs
 
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        """
+        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
+
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
+        """
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+        if output_size is not None:
+            if not isinstance(output_size, int):
+                raise TypeError("output_size must be an int or None")
+            if output_size <= 0:
+                raise ValueError("output_size must be positive")
+
+        self.__log('Adding output layer...')
+
+        reshape = self.__last_layer_outputs_volume()
+
+        if regularization_coefficient is None and self._reg_coeff is not None:
+            regularization_coefficient = self._reg_coeff
+        if regularization_coefficient is None and self._reg_coeff is None:
+            regularization_coefficient = 0.0
+
+        if output_size is None:
+            num_out = self._total_classes
+        else:
+            num_out = output_size
+
+        with self._graph.as_default():
+            layer = layers.fullyConnectedLayer('output',
+                                               copy.deepcopy(self.__last_layer().output_size),
+                                               num_out,
+                                               reshape,
+                                               self._batch_size,
+                                               None,
+                                               self._weight_initializer,
+                                               regularization_coefficient)
+
+        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._layers.append(layer)
+
 
 class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
@@ -5272,6 +5325,115 @@ class RegressionModel(DPPModel):
         # nothing special required for regression
         interpreted_outputs = self.forward_pass_with_file_inputs(x)
         return interpreted_outputs
+
+    def __batch_mean_l2_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector L2 norm"""
+        with self._graph.as_default():
+            agg = self.__l2_norm(x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
+
+    def __l2_norm(self, x):
+        """Returns the L2 norm of a tensor"""
+        with self._graph.as_default():
+            y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
+
+        return y
+
+    def __batch_mean_l1_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector L1 norm"""
+        with self._graph.as_default():
+            agg = self.__l1_norm(x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
+
+    def __l1_norm(self, x):
+        """Returns the L1 norm of a tensor"""
+        with self._graph.as_default():
+            y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+
+        return y
+
+    def __batch_mean_smooth_l1_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector smooth L1 norm"""
+        with self._graph.as_default():
+            agg = self.__smooth_l1_norm(x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
+
+    def __smooth_l1_norm(self, x):
+        """Returns the smooth L1 norm of a tensor"""
+        huber_delta = 1  # may want to make this a tunable hyper parameter in future
+        with self._graph.as_default():
+            x = tf.abs(x)
+            y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
+                                              0.5*ex**2,
+                                              huber_delta*(ex-0.5*huber_delta)), x)
+
+        return y
+
+    def __batch_mean_log_loss(self, x):
+        """Given a batch of vectors, calculates the mean per-vector log loss"""
+        with self._graph.as_default():
+            x = tf.abs(x)
+            x = tf.clip_by_value(x, 0, 0.9999999)
+            agg = -tf.log(1-x)
+            mean = tf.reduce_mean(agg)
+
+        return mean
+
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        """
+        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
+
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
+        """
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            if not isinstance(regularization_coefficient, float):
+                raise TypeError("regularization_coefficient must be a float or None")
+            if regularization_coefficient < 0:
+                raise ValueError("regularization_coefficient must be non-negative")
+        if output_size is not None:
+            if not isinstance(output_size, int):
+                raise TypeError("output_size must be an int or None")
+            if output_size <= 0:
+                raise ValueError("output_size must be positive")
+
+        self.__log('Adding output layer...')
+
+        reshape = self.__last_layer_outputs_volume()
+
+        if regularization_coefficient is None and self._reg_coeff is not None:
+            regularization_coefficient = self._reg_coeff
+        if regularization_coefficient is None and self._reg_coeff is None:
+            regularization_coefficient = 0.0
+
+        if output_size is None:
+            num_out = self._num_regression_outputs
+        else:
+            num_out = output_size
+
+        with self._graph.as_default():
+            layer = layers.fullyConnectedLayer('output',
+                                               copy.deepcopy(self.__last_layer().output_size),
+                                               num_out,
+                                               reshape,
+                                               self._batch_size,
+                                               None,
+                                               self._weight_initializer,
+                                               regularization_coefficient)
+
+        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._layers.append(layer)
 
 
 class SemanticSegmentationModel(DPPModel):
@@ -5921,6 +6083,38 @@ class SemanticSegmentationModel(DPPModel):
             interpreted_outputs[i, :, :] = mask
 
         return interpreted_outputs
+
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        """
+        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
+
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
+        """
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            warnings.warn("Object detection doesn't use regularization_coefficient in its output layer")
+        if output_size is not None:
+            raise RuntimeError("output_size should be None for semantic segmentation")
+
+        self.__log('Adding output layer...')
+
+        filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
+
+        with self._graph.as_default():
+            layer = layers.convLayer('output',
+                                     copy.deepcopy(self.__last_layer().output_size),
+                                     filter_dimension,
+                                     1,
+                                     None,
+                                     self._weight_initializer)
+
+        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._layers.append(layer)
 
 
 class ObjectDetectionModel(DPPModel):
@@ -7042,3 +7236,39 @@ class ObjectDetectionModel(DPPModel):
             intersection_area
 
         return intersection_area / union_area
+
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        """
+        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
+
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
+        """
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            warnings.warn("Object detection doesn't use regularization_coefficient in its output layer")
+        if output_size is not None:
+            if output_size is not None:
+                raise RuntimeError("output_size should be None for object detection")
+
+        self.__log('Adding output layer...')
+
+        filter_dimension = [1, 1,
+                            copy.deepcopy(self.__last_layer().output_size[3]),
+                            (5 * self._NUM_BOXES + self._NUM_CLASSES)]
+
+        with self._graph.as_default():
+            if self._problem_type is definitions.ProblemType.OBJECT_DETECTION:
+                layer = layers.convLayer('output',
+                                         copy.deepcopy(self.__last_layer().output_size),
+                                         filter_dimension,
+                                         1,
+                                         None,
+                                         self._weight_initializer)
+
+        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._layers.append(layer)
