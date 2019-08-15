@@ -246,18 +246,6 @@ class DPPModel(object):
         self._batch_size = size
         self._queue_capacity = size * 5
 
-    def set_num_regression_outputs(self, num):
-        """Set the number of regression response variables"""
-        if self._problem_type != definitions.ProblemType.REGRESSION:
-            raise RuntimeError("The problem type needs to be set to 'regression' before setting the number " +
-                               "of regression outputs. Try using DPPModel.set_problem_type() first.")
-        if not isinstance(num, int):
-            raise TypeError("num must be an int")
-        if num <= 0:
-            raise ValueError("num must be positive")
-
-        self._num_regression_outputs = num
-
     def set_train_test_split(self, ratio):
         """DEPRECATED
         Set a ratio for the total number of samples to use as a training set, using the rest of the samples for testing
@@ -556,62 +544,6 @@ class DPPModel(object):
         self._patch_height = height
         self._patch_width = width
         self._with_patching = True
-
-    def set_yolo_parameters(self, grid_size=None, labels=None, anchors=None):
-        """
-        Set YOLO parameters for the grid size, class labels, and anchor/prior sizes
-        :param grid_size: 2-element list/tuple with the width and height of the YOLO grid. Default = [7,7]
-        :param labels: List of class labels for detection. Default = ['plant']
-        :param anchors: List of 2-element anchor/prior widths and heights.
-        Default = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
-        """
-        if not self._image_width or not self._image_height:
-            raise RuntimeError("Image dimensions need to be chosen before setting YOLO parameters")
-
-        # Do type checks and fill in list parameters with arguments or defaults, because mutable function defaults are
-        # dangerous
-        if grid_size:
-            if not isinstance(grid_size, Sequence) or len(grid_size) != 2 \
-                    or not all([isinstance(x, int) for x in grid_size]):
-                raise TypeError("grid_size should be a 2-element integer list")
-            self._grid_w, self._grid_h = grid_size
-        else:
-            self._grid_w, self._grid_h = [7, 7]
-
-        if labels:
-            if not isinstance(labels, Sequence) or isinstance(labels, str) \
-                    or not all([isinstance(lab, str) for lab in labels]):
-                raise TypeError("labels should be a string list")
-            self._LABELS = labels
-            self._NUM_CLASSES = len(labels)
-        else:
-            self._LABELS = ['plant']
-            self._NUM_CLASSES = 1
-
-        if anchors:
-            if not isinstance(anchors, Sequence):
-                raise TypeError("anchors should be a list/tuple of integer lists/tuples")
-            if not all([(isinstance(a, Sequence) and len(a) == 2
-                         and isinstance(a[0], int) and isinstance(a[1], int)) for a in anchors]):
-                raise TypeError("anchors should contain 2-element lists/tuples")
-            self._RAW_ANCHORS = anchors
-        else:
-            self._RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
-
-        # Fill in non-mutable parameters
-        self._NUM_BOXES = len(self._RAW_ANCHORS)
-
-        # Scale anchors to the grid size
-        scale_w = self._grid_w / self._image_width
-        scale_h = self._grid_h / self._image_height
-        self._ANCHORS = [(anchor[0] * scale_w, anchor[1] * scale_h) for anchor in self._RAW_ANCHORS]
-
-    def set_yolo_thresholds(self, thresh_sig=0.6, thresh_overlap=0.3, thresh_correct=0.5):
-        """Set YOLO IoU thresholds for bounding box significance (during output filtering), overlap (during non-maximal
-        suppression), and correctness (for mAP calculation)"""
-        self._THRESH_SIG = thresh_sig
-        self._THRESH_OVERLAP = thresh_overlap
-        self._THRESH_CORRECT = thresh_correct
 
     def _yolo_compute_iou(self, pred_box, true_box):
         """Helper function to compute the intersection over union of pred_box and true_box
@@ -4440,3 +4372,267 @@ class DPPModel(object):
 
         # Use the crop width and height to calculate the required crop ratio
         return (crop_width * crop_height) / (self._image_width * self._image_height)
+
+
+class ClassificationModel(DPPModel):
+    _problem_type = definitions.ProblemType.CLASSIFICATION
+    _loss_fn = 'softmax cross entropy'
+    _supported_loss_fns_cls = ['softmax cross entropy']
+
+    def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
+                 report_rate=100, save_dir=None):
+        super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+    ...
+
+
+class RegressionModel(DPPModel):
+    _problem_type = definitions.ProblemType.REGRESSION
+    _loss_fn = 'l2'
+    _supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']
+    _num_regression_outputs = 1
+
+    def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
+                 report_rate=100, save_dir=None):
+        super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+    def set_num_regression_outputs(self, num):
+        """Set the number of regression response variables"""
+        if not isinstance(num, int):
+            raise TypeError("num must be an int")
+        if num <= 0:
+            raise ValueError("num must be positive")
+
+        self._num_regression_outputs = num
+
+    ...
+
+
+class SemanticSegmentationModel(DPPModel):
+    _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
+    _loss_fn = 'sigmoid cross entropy'
+    _supported_loss_fns_reg = ['sigmoid cross entropy']
+
+    def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
+                 report_rate=100, save_dir=None):
+        super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+    ...
+
+
+class ObjectDetectionModel(DPPModel):
+    _problem_type = definitions.ProblemType.OBJECT_DETECTION
+    _loss_fn = 'yolo'
+    _supported_loss_fns_reg = ['yolo']
+
+    # Yolo-specific parameters, non-default values defined by set_yolo_parameters
+    _grid_w = 7
+    _grid_h = 7
+    _LABELS = ['plant']
+    _NUM_CLASSES = 1
+    _RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
+    _ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
+    _NUM_BOXES = 5
+    _THRESH_SIG = 0.6
+    _THRESH_OVERLAP = 0.3
+    _THRESH_CORRECT = 0.5
+
+    def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
+                 report_rate=100, save_dir=None):
+        super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+    def set_image_dimensions(self, image_height, image_width, image_depth):
+        """Specify the image dimensions for images in the dataset (depth is the number of channels)"""
+        super().set_image_dimensions(image_height, image_width, image_depth)
+
+        # Generate image-scaled anchors for YOLO object detection
+        if self._RAW_ANCHORS:
+            scale_w = self._grid_w / self._image_width
+            scale_h = self._grid_h / self._image_height
+            self._ANCHORS = [(anchor[0] * scale_w, anchor[1] * scale_h) for anchor in self._RAW_ANCHORS]
+
+    def set_yolo_parameters(self, grid_size=None, labels=None, anchors=None):
+        """
+        Set YOLO parameters for the grid size, class labels, and anchor/prior sizes
+        :param grid_size: 2-element list/tuple with the width and height of the YOLO grid. Default = [7,7]
+        :param labels: List of class labels for detection. Default = ['plant']
+        :param anchors: List of 2-element anchor/prior widths and heights.
+        Default = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
+        """
+        if not self._image_width or not self._image_height:
+            raise RuntimeError("Image dimensions need to be chosen before setting YOLO parameters")
+
+        # Do type checks and fill in list parameters with arguments or defaults, because mutable function defaults are
+        # dangerous
+        if grid_size:
+            if not isinstance(grid_size, Sequence) or len(grid_size) != 2 \
+                    or not all([isinstance(x, int) for x in grid_size]):
+                raise TypeError("grid_size should be a 2-element integer list")
+            self._grid_w, self._grid_h = grid_size
+        else:
+            self._grid_w, self._grid_h = [7, 7]
+
+        if labels:
+            if not isinstance(labels, Sequence) or isinstance(labels, str) \
+                    or not all([isinstance(lab, str) for lab in labels]):
+                raise TypeError("labels should be a string list")
+            self._LABELS = labels
+            self._NUM_CLASSES = len(labels)
+        else:
+            self._LABELS = ['plant']
+            self._NUM_CLASSES = 1
+
+        if anchors:
+            if not isinstance(anchors, Sequence):
+                raise TypeError("anchors should be a list/tuple of integer lists/tuples")
+            if not all([(isinstance(a, Sequence) and len(a) == 2
+                         and isinstance(a[0], int) and isinstance(a[1], int)) for a in anchors]):
+                raise TypeError("anchors should contain 2-element lists/tuples")
+            self._RAW_ANCHORS = anchors
+        else:
+            self._RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
+
+        # Fill in non-mutable parameters
+        self._NUM_BOXES = len(self._RAW_ANCHORS)
+
+        # Scale anchors to the grid size
+        scale_w = self._grid_w / self._image_width
+        scale_h = self._grid_h / self._image_height
+        self._ANCHORS = [(anchor[0] * scale_w, anchor[1] * scale_h) for anchor in self._RAW_ANCHORS]
+
+    def set_yolo_thresholds(self, thresh_sig=0.6, thresh_overlap=0.3, thresh_correct=0.5):
+        """Set YOLO IoU thresholds for bounding box significance (during output filtering), overlap (during non-maximal
+        suppression), and correctness (for mAP calculation)"""
+        self._THRESH_SIG = thresh_sig
+        self._THRESH_OVERLAP = thresh_overlap
+        self._THRESH_CORRECT = thresh_correct
+
+    def _yolo_compute_iou(self, pred_box, true_box):
+        """Helper function to compute the intersection over union of pred_box and true_box
+        pred_box and true_box represent multiple boxes with coords being x,y,w,h (0-indexed 0-3)"""
+        # numerator
+        # get coords of intersection rectangle, then compute intersection area
+        x1 = tf.maximum(pred_box[..., 0] - 0.5 * pred_box[..., 2],
+                        true_box[..., 0:1] - 0.5 * true_box[..., 2:3])
+        y1 = tf.maximum(pred_box[..., 1] - 0.5 * pred_box[..., 3],
+                        true_box[..., 1:2] - 0.5 * true_box[..., 3:4])
+        x2 = tf.minimum(pred_box[..., 0] + 0.5 * pred_box[..., 2],
+                        true_box[..., 0:1] + 0.5 * true_box[..., 2:3])
+        y2 = tf.minimum(pred_box[..., 1] + 0.5 * pred_box[..., 3],
+                        true_box[..., 1:2] + 0.5 * true_box[..., 3:4])
+        intersection_area = tf.multiply(tf.maximum(0., x2 - x1), tf.maximum(0., y2 - y1))
+
+        # denominator
+        # compute area of pred and truth, compute union area
+        pred_area = tf.multiply(pred_box[..., 2], pred_box[..., 3])
+        true_area = tf.multiply(true_box[..., 2:3], true_box[..., 3:4])
+        union_area = tf.subtract(tf.add(pred_area, true_area), intersection_area)
+
+        # compute iou
+        iou = tf.divide(intersection_area, union_area)
+        return iou
+
+    def _yolo_loss_function(self, y_true, y_pred):
+        """
+        Loss function based on YOLO
+        See the paper for details: https://pjreddie.com/media/files/papers/yolo.pdf
+
+        :param y_true: Tensor with ground truth bounding boxes for each grid square in each image. Labels have 6
+        elements: [object/no-object, class, x, y, w, h]
+        :param y_pred: Tensor with predicted bounding boxes for each grid square in each image. Predictions consist of
+        one box and confidence [x, y, w, h, conf] for each anchor plus 1 element for specifying the class (only one atm)
+        :return Scalar Tensor with the Yolo loss for the bounding box predictions
+        """
+
+        prior_boxes = tf.convert_to_tensor(self._ANCHORS)
+
+        # object/no-object masks #
+        # create masks for grid cells with objects and with no objects
+        obj_mask = tf.cast(y_true[..., 0], dtype=bool)
+        no_obj_mask = tf.logical_not(obj_mask)
+        obj_pred = tf.boolean_mask(y_pred, obj_mask)
+        obj_true = tf.boolean_mask(y_true, obj_mask)
+        no_obj_pred = tf.boolean_mask(y_pred, no_obj_mask)
+
+        # bbox coordinate loss #
+        # build a tensor of the predicted bounding boxes and confidences, classes will be stored separately
+        # [x1,y1,w1,h1,conf1,x2,y2,w2,h2,conf2,x3,y3,w3,h3,conf3,...]
+        pred_classes = obj_pred[..., self._NUM_BOXES * 5:]
+        # we take the x,y,w,h,conf's that are altogether (dim is 1xB*5) and turn into Bx5, where B is num_boxes
+        obj_pred = tf.reshape(obj_pred[..., 0:self._NUM_BOXES * 5], [-1, self._NUM_BOXES, 5])
+        no_obj_pred = tf.reshape(no_obj_pred[..., 0:self._NUM_BOXES * 5], [-1, self._NUM_BOXES, 5])
+        t_x, t_y, t_w, t_h = obj_pred[..., 0], obj_pred[..., 1], obj_pred[..., 2], obj_pred[..., 3]
+        t_o = obj_pred[..., 4]
+        pred_x = tf.sigmoid(t_x) + 0.00001  # concerned about underflow (might not actually be necessary)
+        pred_y = tf.sigmoid(t_y) + 0.00001
+        pred_w = (tf.exp(t_w) + 0.00001) * prior_boxes[:, 0]
+        pred_h = (tf.exp(t_h) + 0.00001) * prior_boxes[:, 1]
+        pred_conf = tf.sigmoid(t_o) + 0.00001
+        predicted_boxes = tf.stack([pred_x, pred_y, pred_w, pred_h, pred_conf], axis=2)
+
+        # find responsible boxes by computing iou's and select the best one
+        ious = self._yolo_compute_iou(
+            predicted_boxes, obj_true[..., 1 + self._NUM_CLASSES:1 + self._NUM_CLASSES + 4])
+        greatest_iou_indices = tf.argmax(ious, 1)
+        argmax_one_hot = tf.one_hot(indices=greatest_iou_indices, depth=5)
+        resp_box_mask = tf.cast(argmax_one_hot, dtype=bool)
+        responsible_boxes = tf.boolean_mask(predicted_boxes, resp_box_mask)
+
+        # compute loss on responsible boxes
+        loss_xy = tf.square(tf.subtract(responsible_boxes[..., 0:2],
+                                        obj_true[..., 1 + self._NUM_CLASSES:1 + self._NUM_CLASSES + 2]))
+        loss_wh = tf.square(tf.subtract(tf.sqrt(responsible_boxes[..., 2:4]),
+                                        tf.sqrt(obj_true[..., 1 + self._NUM_CLASSES + 2:1 + self._NUM_CLASSES + 4])))
+        coord_loss = tf.reduce_sum(tf.add(loss_xy, loss_wh))
+
+        # confidence loss #
+        # grids that do contain an object, 1 * iou means we simply take the difference between the
+        # iou's and the predicted confidence
+
+        # this was to make responsible boxes confidences aim to go to 1 instead of their current iou score, this is
+        # still being tested
+        # non_resp_box_mask = tf.logical_not(resp_box_mask)
+        # non_responsible_boxes = tf.boolean_mask(predicted_boxes, non_resp_box_mask)
+        # non_responsible_ious = tf.boolean_mask(ious, non_resp_box_mask)
+        # loss1 = tf.reduce_sum(tf.square(1 - responsible_boxes[..., 4]))
+        # loss2 = tf.reduce_sum(tf.square(tf.subtract(non_responsible_ious, non_responsible_boxes[..., 4])))
+        # loss_obj = loss1 + loss2
+
+        # this is how the paper does it, the above 6 lines is experimental
+        obj_num_grids = tf.shape(predicted_boxes)[0]  # [num_boxes, 5, 5]
+        loss_obj = tf.cast((1 / obj_num_grids), dtype='float32') * tf.reduce_sum(
+            tf.square(tf.subtract(ious, predicted_boxes[..., 4])))
+
+        # grids that do not contain an object, 0 * iou means we simply take the predicted confidences of the
+        # grids that do not have an object and square and sum (because they should be 0)
+        no_obj_confs = tf.sigmoid(no_obj_pred[..., 4])
+        no_obj_num_grids = tf.shape(no_obj_confs)[0]  # [number_of_grids_without_an_object, 5]
+        loss_no_obj = tf.cast(1 / no_obj_num_grids, dtype='float32') * tf.reduce_sum(tf.square(no_obj_confs))
+        # incase obj_pred or no_obj_confs is empty (e.g. no objects in the image) we need to make sure we dont
+        # get nan's in our losses...
+        loss_obj = tf.cond(tf.count_nonzero(y_true[..., 4]) > 0, lambda: loss_obj, lambda: 0.)
+        loss_no_obj = tf.cond(tf.count_nonzero(y_true[..., 4]) < self._grid_w * self._grid_h,
+                              lambda: loss_no_obj, lambda: 0.)
+        conf_loss = tf.add(loss_obj, loss_no_obj)
+
+        # classification loss #
+        # currently only one class, plant, will need to be made more general for multi-class in the future
+        class_probs_pred = tf.nn.softmax(pred_classes)
+        class_diffs = tf.subtract(obj_true[..., 1:1 + self._NUM_CLASSES], class_probs_pred)
+        class_loss = tf.reduce_sum(tf.square(class_diffs))
+
+        total_loss = coord_loss + conf_loss + class_loss
+
+        # for some debug/checking, otherwise leave commented #
+        # init_op = tf.global_variables_initializer()
+        # self._session.run(init_op)
+        # self.__initialize_queue_runners()
+        # print('printing losses')
+        # print(self._session.run([loss_obj, loss_no_obj]))
+        # print(self._session.run([coord_loss, conf_loss, class_loss]))
+        # print(self._session.run([loss_obj, loss_no_obj]))
+        # print(self._session.run([coord_loss, conf_loss, class_loss]))
+        # print(self._session.run([loss_obj, loss_no_obj]))
+        # print(self._session.run([coord_loss, conf_loss, class_loss]))
+
+        return total_loss
