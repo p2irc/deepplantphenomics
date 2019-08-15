@@ -4737,6 +4737,32 @@ class ClassificationModel(DPPModel):
                 else:
                     return
 
+    def compute_full_test_accuracy(self):
+        """Returns statistics of the test losses depending on the type of task"""
+
+        self.__log('Computing total test accuracy/regression loss...')
+
+        with self._graph.as_default():
+            num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
+
+            if num_batches == 0:
+                warnings.warn('Less than a batch of testing data')
+                exit()
+
+            # Initialize storage for the retreived test variables
+            loss_sum = 0.0
+
+            # Main test loop
+            for _ in tqdm(range(num_batches)):
+                batch_mean = self._session.run([self._graph_ops['test_losses']])
+                loss_sum = loss_sum + np.mean(batch_mean)
+
+            # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix (not
+            # implemented)
+            mean = (loss_sum / num_batches)
+            self.__log('Average test accuracy: {:.5f}'.format(mean))
+            return 1.0-mean.astype(np.float32)
+
 
 class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
@@ -5128,6 +5154,88 @@ class RegressionModel(DPPModel):
                 else:
                     return
 
+    def compute_full_test_accuracy(self):
+        """Returns statistics of the test losses depending on the type of task"""
+
+        self.__log('Computing total test accuracy/regression loss...')
+
+        with self._graph.as_default():
+            num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
+
+            if num_batches == 0:
+                warnings.warn('Less than a batch of testing data')
+                exit()
+
+            all_losses = np.empty(shape=1)
+            all_y = np.empty(shape=1)
+            all_predictions = np.empty(shape=1)
+
+            # Main test loop
+            for _ in tqdm(range(num_batches)):
+                r_losses, r_y, r_predicted = self._session.run([self._graph_ops['test_losses'],
+                                                                self._graph_ops['y_test'],
+                                                                self._graph_ops['x_test_predicted']])
+                all_losses = np.concatenate((all_losses, r_losses), axis=0)
+                all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
+                all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
+
+            all_losses = np.delete(all_losses, 0)
+            all_y = np.delete(all_y, 0)
+            all_predictions = np.delete(all_predictions, 0)
+
+            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+            # we want to get rid of)
+            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
+            if extra != self._batch_size:
+                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
+                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
+                all_losses = all_losses[mask_extra, ...]
+                all_y = all_y[mask_extra, ...]
+                all_predictions = all_predictions[mask_extra, ...]
+
+            # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
+            abs_mean = np.mean(np.abs(all_losses))
+            abs_var = np.var(np.abs(all_losses))
+            abs_std = np.sqrt(abs_var)
+
+            mean = np.mean(all_losses)
+            var = np.var(all_losses)
+            mse = np.mean(np.square(all_losses))
+            std = np.sqrt(var)
+            loss_max = np.amax(all_losses)
+            loss_min = np.amin(all_losses)
+
+            hist, _ = np.histogram(all_losses, bins=100)
+
+            self.__log('Mean loss: {}'.format(mean))
+            self.__log('Loss standard deviation: {}'.format(std))
+            self.__log('Mean absolute loss: {}'.format(abs_mean))
+            self.__log('Absolute loss standard deviation: {}'.format(abs_std))
+            self.__log('Min error: {}'.format(loss_min))
+            self.__log('Max error: {}'.format(loss_max))
+            self.__log('MSE: {}'.format(mse))
+
+            all_y_mean = np.mean(all_y)
+            total_error = np.sum(np.square(all_y - all_y_mean))
+            unexplained_error = np.sum(np.square(all_losses))
+            # division by zero can happen when using small test sets
+            if total_error == 0:
+                r2 = -np.inf
+            else:
+                r2 = 1. - (unexplained_error / total_error)
+
+            self.__log('R^2: {}'.format(r2))
+            self.__log('All test labels:')
+            self.__log(all_y)
+
+            self.__log('All predictions:')
+            self.__log(all_predictions)
+
+            self.__log('Histogram of {} losses:'.format(self._loss_fn))
+            self.__log(hist)
+
+            return abs_mean.astype(np.float32)
+
 
 class SemanticSegmentationModel(DPPModel):
     _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
@@ -5500,6 +5608,64 @@ class SemanticSegmentationModel(DPPModel):
                     return final_test_loss
                 else:
                     return
+
+    def compute_full_test_accuracy(self):
+        """Returns statistics of the test losses depending on the type of task"""
+
+        self.__log('Computing total test accuracy/regression loss...')
+
+        with self._graph.as_default():
+            num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
+
+            if num_batches == 0:
+                warnings.warn('Less than a batch of testing data')
+                exit()
+
+            # Initialize storage for the retreived test variables
+            all_losses = np.empty(shape=1)
+
+            # Main test loop
+            for _ in tqdm(range(num_batches)):
+                r_losses = self._session.run(self._graph_ops['test_losses'])
+                all_losses = np.concatenate((all_losses, r_losses), axis=0)
+
+            all_losses = np.delete(all_losses, 0)
+
+            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+            # we want to get rid of)
+            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
+            if extra != self._batch_size:
+                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
+                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
+                all_losses = all_losses[mask_extra, ...]
+
+            # For semantic segmentation problems we want relative and abs mean, std of L2 norms, plus a histogram of
+            # errors
+            abs_mean = np.mean(np.abs(all_losses))
+            abs_var = np.var(np.abs(all_losses))
+            abs_std = np.sqrt(abs_var)
+
+            mean = np.mean(all_losses)
+            var = np.var(all_losses)
+            mse = np.mean(np.square(all_losses))
+            std = np.sqrt(var)
+            loss_max = np.amax(all_losses)
+            loss_min = np.amin(all_losses)
+
+            hist, _ = np.histogram(all_losses, bins=100)
+
+            self.__log('Mean loss: {}'.format(mean))
+            self.__log('Loss standard deviation: {}'.format(std))
+            self.__log('Mean absolute loss: {}'.format(abs_mean))
+            self.__log('Absolute loss standard deviation: {}'.format(abs_std))
+            self.__log('Min error: {}'.format(loss_min))
+            self.__log('Max error: {}'.format(loss_max))
+            self.__log('MSE: {}'.format(mse))
+
+            self.__log('Histogram of {} losses:'.format(self._loss_fn))
+            self.__log(hist)
+
+            return abs_mean.astype(np.float32)
 
 
 class ObjectDetectionModel(DPPModel):
@@ -6061,3 +6227,254 @@ class ObjectDetectionModel(DPPModel):
                     return final_test_loss
                 else:
                     return
+
+    def compute_full_test_accuracy(self):
+        """Returns statistics of the test losses depending on the type of task"""
+
+        self.__log('Computing total test accuracy/regression loss...')
+
+        with self._graph.as_default():
+            num_test = self._total_raw_samples - self._total_training_samples
+            num_batches = int(np.ceil(num_test / self._batch_size))
+
+            if num_batches == 0:
+                warnings.warn('Less than a batch of testing data')
+                exit()
+
+            # Initialize storage for the retreived test variables. Object detection needs some special care given to
+            # its variable's shape
+            all_y = np.empty(shape=(1,
+                                    self._grid_w * self._grid_h,
+                                    1 + self._NUM_CLASSES + 4))
+            all_predictions = np.empty(shape=(1,
+                                              self._grid_w * self._grid_h,
+                                              5 * self._NUM_BOXES + self._NUM_CLASSES))
+
+            # Main test loop
+            for _ in tqdm(range(num_batches)):
+                r_y, r_predicted = self._session.run([self._graph_ops['y_test'],
+                                                      self._graph_ops['x_test_predicted']])
+                all_y = np.concatenate((all_y, r_y), axis=0)
+                all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
+
+            # Delete the weird first entries in losses, y values, and predictions (because creating empty arrays
+            # isn't a thing)
+            if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
+                # These are multi-dimensional for object detection, so first entry = first slice
+                all_y = np.delete(all_y, 0, axis=0)
+                all_predictions = np.delete(all_predictions, 0, axis=0)
+
+            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+            # we want to get rid of)
+            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
+            if extra != self._batch_size:
+                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
+                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
+                all_y = all_y[mask_extra, ...]
+                all_predictions = all_predictions[mask_extra, ...]
+
+            # Make the images heterogeneous, storing their separate grids in a list
+            test_labels = [all_y[i, ...] for i in range(all_y.shape[0])]
+            test_preds = [all_predictions[i, ...] for i in range(all_predictions.shape[0])]
+            n_images = len(test_labels)
+
+            # Convert coordinates, then filter out the positive ground truth labels and significant predictions
+            for i in range(n_images):
+                conv_label, conv_pred = self.__yolo_coord_convert(test_labels[i], test_preds[i])
+                truth_mask = conv_label[..., 0] == 1
+                if not np.any(truth_mask):
+                    conv_label = None
+                else:
+                    conv_label = conv_label[truth_mask, :]
+                conv_pred = self.__yolo_filter_predictions(conv_pred)
+                test_labels[i] = conv_label
+                test_preds[i] = conv_pred
+
+            # Get and log the map
+            yolo_map = self.__yolo_map(test_labels, test_preds)
+            self.__log('Yolo mAP: {}'.format(yolo_map))
+            return yolo_map.astype(np.float32)
+
+    def __yolo_coord_convert(self, labels, preds):
+        """
+        Converts Yolo labeled and predicted bounding boxes from xywh coords to x1y1x2y2 coords. Also accounts for
+        required sigmoid and exponential conversions in the predictions (including the confidences)
+
+        :param labels: ndarray with Yolo ground-truth bounding boxes (size ?x(NUM_CLASSES+5))
+        :param preds: ndarray with Yolo predicted bounding boxes (size ?x(NUM_BOXES*5))
+        :return: `labels` and `preds` with the bounding box coords changed from xywh to x1y1x2y2 and predicted box
+        confidences converted to percents
+        """
+
+        def xywh_to_xyxy(x, y, w, h):
+            x_centre = np.arange(self._grid_w * self._grid_h) % self._grid_w
+            y_centre = np.arange(self._grid_w * self._grid_h) // self._grid_w
+            scale_x = self._image_width / self._grid_w
+            scale_y = self._image_height / self._grid_h
+
+            x = (x + x_centre) * scale_x
+            y = (y + y_centre) * scale_y
+            w = w * scale_x
+            h = h * scale_y
+
+            x1 = x - w/2
+            x2 = x + w/2
+            y1 = y - h/2
+            y2 = y + h/2
+            return x1, y1, x2, y2
+
+        # Labels are already sensible numbers, so convert them first
+        lab_coord_idx = np.arange(labels.shape[-1]-4, labels.shape[-1])
+        lab_class, lab_x, lab_y, lab_w, lab_h = np.split(labels, lab_coord_idx, axis=-1)
+        lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(np.squeeze(lab_x),  # Squeezing to aid broadcasting in helper
+                                                      np.squeeze(lab_y),
+                                                      np.squeeze(lab_w),
+                                                      np.squeeze(lab_h))
+        labels = np.concatenate([lab_class,
+                                 lab_x1[:, np.newaxis],  # Dummy dimensions to enable concatenation
+                                 lab_y1[:, np.newaxis],
+                                 lab_x2[:, np.newaxis],
+                                 lab_y2[:, np.newaxis]], axis=-1)
+
+        # Extract the class predictions and reorganize the predicted boxes
+        class_preds = preds[..., self._NUM_BOXES * 5:]
+        preds = np.reshape(preds[..., 0:self._NUM_BOXES * 5], preds.shape[:-1] + (self._NUM_BOXES, 5))
+
+        # Predictions are not, so apply sigmoids and exponentials first and then convert them
+        anchors = np.array(self._ANCHORS)
+        pred_x = expit(preds[..., 0])
+        pred_y = expit(preds[..., 1])
+        pred_w = np.exp(preds[..., 2]) * anchors[:, 0]
+        pred_h = np.exp(preds[..., 3]) * anchors[:, 1]
+        pred_conf = expit(preds[..., 4])
+        pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x.T,  # Transposes to aid broadcasting in helper
+                                                          pred_y.T,
+                                                          pred_w.T,
+                                                          pred_h.T)
+        preds[..., :] = np.stack([pred_x1.T,  # Transposes to restore original shape
+                                  pred_y1.T,
+                                  pred_x2.T,
+                                  pred_y2.T,
+                                  pred_conf], axis=-1)
+
+        # Reattach the class predictions
+        preds = np.reshape(preds, preds.shape[:-2] + (self._NUM_BOXES * 5,))
+        preds = np.concatenate([preds, class_preds], axis=-1)
+
+        return labels, preds
+
+    def __yolo_filter_predictions(self, preds):
+        """
+        Filters the predicted bounding boxes by eliminating insignificant and overlapping predictions
+
+        :param preds: ndarray with predicted bounding boxes for one image in each grid square. Predictions
+        are a list of, for each box, [x1, y1, x2, y2, conf] followed by a list of class predictions
+        :return: `preds` with only the significant and maximal confidence predictions remaining
+        """
+        # Extract the class predictions and separate the predicted boxes
+        grid_count = preds.shape[0]
+        class_preds = preds[..., self._NUM_BOXES * 5:]
+        preds = np.reshape(preds[..., 0:self._NUM_BOXES * 5], preds.shape[:-1] + (self._NUM_BOXES, 5))
+
+        # In each grid square, the highest confidence box is the one responsible for prediction
+        max_conf_idx = np.argmax(preds[..., 4], axis=-1)
+        responsible_boxes = [preds[i, max_conf_idx[i], :] for i in range(grid_count)]
+        preds = np.stack(responsible_boxes, axis=0)
+
+        # Eliminate insignificant predicted boxes
+        sig_mask = preds[:, 4] > self._THRESH_SIG
+        if not np.any(sig_mask):
+            return None
+        class_preds = class_preds[sig_mask, :]
+        preds = preds[sig_mask, :]
+
+        # Apply non-maximal suppression (i.e. eliminate boxes that overlap with a more confidant box)
+        maximal_idx = []
+        sig_grid_count = preds.shape[0]
+        conf_order = np.argsort(preds[:, 4])
+        pair_iou = np.array([self.__compute_iou(preds[i, 0:4], preds[j, 0:4])
+                             for i in range(sig_grid_count) for j in range(sig_grid_count)])
+        pair_iou = pair_iou.reshape(sig_grid_count, sig_grid_count)
+        while len(conf_order) > 0:
+            # Take the most confidant box, then cull the list down to boxes that don't overlap with it
+            cur_grid = conf_order[-1]
+            maximal_idx.append(cur_grid)
+            non_overlap = pair_iou[cur_grid, conf_order] < self._THRESH_OVERLAP
+            if np.any(non_overlap):
+                conf_order = conf_order[non_overlap]
+            else:
+                break
+
+        # Stick things back together. maximal_idx is not sorted, but box and class predictions should still match up
+        # and the original grid order shouldn't matter for mAP calculations
+        class_preds = class_preds[maximal_idx, :]
+        preds = preds[maximal_idx, :]
+        preds = np.concatenate([preds, class_preds], axis=-1)
+
+        return preds
+
+    def __yolo_map(self, labels, preds):
+        """
+        Calculates the mean average precision of Yolo object and class predictions
+
+        :param labels: List of ndarrays with ground truth bounding box labels for each image. Labels are a 6-value
+        list: [object-ness, class, x1, y1, x2, y2]
+        :param preds: List of ndarrays with significant predicted bounding boxes in each image. Predictions are a list
+        of box parameters [x1, y1, x2, y2, conf] followed by a list of class predictions
+        :return: The mean average precision (mAP) of the predictions
+        """
+        # Go over each prediction in each image and determine if it's a true or false positive
+        detections = []
+        for im_lab, im_pred in zip(labels, preds):
+            # No predictions means no positives
+            if im_pred is None:
+                continue
+            n_pred = im_pred.shape[0]
+
+            # No labels means all false positives
+            if im_lab is None:
+                for i in range(n_pred):
+                    detections.append((im_pred[i, 4], 0))
+                continue
+            n_lab = im_lab.shape[0]
+
+            # Add a 7th value to the labels so we can tell which ones get matched up with true positives
+            im_lab = np.concatenate([im_lab, np.zeros((n_lab, 1))], axis=-1)
+
+            # Calculate the IoUs of all the prediction and label pairings, then record each detection as a true or
+            # false positive with the prediction confidence
+            pair_ious = np.array([self.__compute_iou(im_pred[i, 0:4], im_lab[j, 2:6])
+                                  for i in range(n_pred) for j in range(n_lab)])
+            pair_ious = np.reshape(pair_ious, (n_pred, n_lab))
+            for i in range(n_pred):
+                j = np.argmax(pair_ious[i, :])
+                if pair_ious[i, j] >= self._THRESH_CORRECT and not im_lab[j, 6]:
+                    detections.append((im_pred[i, 4], 1))
+                    im_lab[j, 6] = 1
+                else:
+                    detections.append((im_pred[i, 4], 0))
+
+        # If there are no valid predictions at all, the mAP is 0
+        if not detections:
+            return 0
+
+        # With multiple classes, we would also have class tags in the detection tuples so the below code could generate
+        # and iterate over class-separated detection lists, giving multiple AP values and one true mean AP. We aren't
+        # doing that right now because of our one-class plant detector assumption
+
+        # Determine the precision-recall curve from the cumulative detected true and false positives (in order of
+        # descending confidence)
+        detections = np.array(sorted(detections, key=lambda d: d[0], reverse=True))
+        n_truths = sum([x.shape[0] if (x is not None) else 0
+                        for x in labels])
+        n_positives = detections.shape[0]
+        true_positives = np.cumsum(detections[:, 1])
+        precision = true_positives / np.arange(1, n_positives+1)
+        recall = true_positives / n_truths
+
+        # Calculate the area under the precision-recall curve (== AP)
+        for i in range(precision.size - 1, 0, -1):  # Make precision values the maximum precision at further recalls
+            precision[i - 1] = np.max((precision[i], precision[i-1]))
+        ap = np.sum(precision[1:] * (recall[1:] - recall[0:-1]))
+
+        return ap
