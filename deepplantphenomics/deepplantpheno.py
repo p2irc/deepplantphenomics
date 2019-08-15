@@ -59,10 +59,8 @@ class DPPModel(object):
     _supported_weight_initializers = ['normal', 'xavier']
     _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
     _supported_pooling_types = ['max', 'avg']
-    _supported_loss_fns_cls = ['softmax cross entropy']  # supported loss functions for classification
-    _supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']  # ... regression
-    _supported_loss_fns_ss = ['sigmoid cross entropy']  # ... semantic segmentation
-    _supported_loss_fns_od = ['yolo']  # ... object detection
+    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
+                           'yolo']
     _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
 
     # Augmentation options
@@ -432,21 +430,11 @@ class DPPModel(object):
             raise TypeError("loss_fn must be a str")
         loss_fn = loss_fn.lower()
 
-        type_loss_map = {definitions.ProblemType.CLASSIFICATION: self._supported_loss_fns_cls,
-                         definitions.ProblemType.REGRESSION: self._supported_loss_fns_reg,
-                         definitions.ProblemType.SEMANTIC_SEGMETNATION: self._supported_loss_fns_ss,
-                         definitions.ProblemType.OBJECT_DETECTION: self._supported_loss_fns_od}
-
-        if self._problem_type not in type_loss_map.keys():
-            warnings.warn("Problem type not recognized. See documentation for list of supported functions and problem "
-                          "types.")
-            exit()
-
-        if loss_fn not in type_loss_map[self._problem_type]:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for " +
-                             self._problem_type.name + ". Make sure you have the correct problem type set with " +
+        if loss_fn not in self._supported_loss_fns:
+            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for the " +
+                             "current problem type. Make sure you have the correct problem type set with " +
                              "DPPModel.set_problem_type() first, or choose one of " +
-                             " ".join("'" + x + "'" for x in type_loss_map[self._problem_type]))
+                             " ".join("'" + x + "'" for x in self._supported_loss_fns))
 
         self._loss_fn = loss_fn
 
@@ -520,19 +508,17 @@ class DPPModel(object):
 
         if p_type == 'classification':
             self._problem_type = definitions.ProblemType.CLASSIFICATION
-            self._loss_fn = self._supported_loss_fns_cls[0]
         elif p_type == 'regression':
             self._problem_type = definitions.ProblemType.REGRESSION
-            self._loss_fn = self._supported_loss_fns_reg[0]
         elif p_type == 'semantic_segmentation':
             self._problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
-            self._loss_fn = self._supported_loss_fns_ss[0]
         elif p_type == 'object_detection':
             self._problem_type = definitions.ProblemType.OBJECT_DETECTION
-            self._loss_fn = self._supported_loss_fns_od[0]
         else:
             warnings.warn('Problem p_type specified not supported')
             exit()
+
+        self._loss_fn = self._supported_loss_fns[0]
 
     def set_patch_size(self, height, width):
         if not isinstance(height, int):
@@ -3648,7 +3634,7 @@ class DPPModel(object):
 class ClassificationModel(DPPModel):
     _problem_type = definitions.ProblemType.CLASSIFICATION
     _loss_fn = 'softmax cross entropy'
-    _supported_loss_fns_cls = ['softmax cross entropy']
+    _supported_loss_fns = ['softmax cross entropy']
     _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
                             definitions.AugmentationType.FLIP_VER,
                             definitions.AugmentationType.CROP,
@@ -4186,7 +4172,7 @@ class ClassificationModel(DPPModel):
 class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
     _loss_fn = 'l2'
-    _supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']
+    _supported_loss_fns = ['l2', 'l1', 'smooth l1', 'log loss']
     _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
                             definitions.AugmentationType.FLIP_VER,
                             definitions.AugmentationType.CROP,
@@ -4859,7 +4845,7 @@ class RegressionModel(DPPModel):
 class SemanticSegmentationModel(DPPModel):
     _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
     _loss_fn = 'sigmoid cross entropy'
-    _supported_loss_fns_reg = ['sigmoid cross entropy']
+    _supported_loss_fns = ['sigmoid cross entropy']
     _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
@@ -5775,7 +5761,7 @@ class SemanticSegmentationModel(DPPModel):
 class ObjectDetectionModel(DPPModel):
     _problem_type = definitions.ProblemType.OBJECT_DETECTION
     _loss_fn = 'yolo'
-    _supported_loss_fns_reg = ['yolo']
+    _supported_loss_fns = ['yolo']
     _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     # Yolo-specific parameters, non-default values defined by set_yolo_parameters
