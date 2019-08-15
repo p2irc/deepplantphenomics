@@ -17,11 +17,158 @@ from tqdm import tqdm
 
 
 class DPPModel(object):
+    """
+    The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file.
+        This class is the singular point of contact for the DPP module.
+    """
+    # Operation settings
+    _problem_type = definitions.ProblemType.CLASSIFICATION
+    _loss_fn = 'softmax cross entropy'
+    _with_patching = False
+    _has_trained = False
+    _save_checkpoints = None
+    _save_dir = None
+    _validation = True
+    _testing = True
+    _hyper_param_search = False
+
+    # Input options
+    _total_classes = 0
+    _total_raw_samples = 0
+    _total_training_samples = 0
+    _total_validation_samples = 0
+    _total_testing_samples = 0
+
+    _image_width = None
+    _image_height = None
+    _image_width_original = None
+    _image_height_original = None
+    _image_depth = None
+    _patch_height = None
+    _patch_width = None
+    _resize_bbox_coords = False
+
+    _crop_or_pad_images = False
+    _resize_images = False
+
+    _processed_images_dir = './DPP-Processed'
+
+    # supported implementations, we may add more to in future
+    _supported_problem_types = ['classification', 'regression', 'semantic_segmentation', 'object_detection']
+    _supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
+    _supported_weight_initializers = ['normal', 'xavier']
+    _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
+    _supported_pooling_types = ['max', 'avg']
+    _supported_loss_fns_cls = ['softmax cross entropy']  # supported loss functions for classification
+    _supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']  # ... regression
+    _supported_loss_fns_ss = ['sigmoid cross entropy']  # ... semantic segmentation
+    _supported_loss_fns_od = ['yolo']  # ... object detection
+    _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
+
+    # Augmentation options
+    _augmentation_flip_horizontal = False
+    _augmentation_flip_vertical = False
+    _augmentation_crop = False
+    _crop_amount = 0.75
+    _augmentation_contrast = False
+    _augmentation_rotate = False
+    _rotate_crop_borders = False
+
+    # Dataset storage
+    _all_ids = None
+
+    _all_images = None
+    _train_images = None
+    _test_images = None
+    _val_images = None
+
+    _all_labels = None
+    _train_labels = None
+    _test_labels = None
+    _val_labels = None
+    _split_labels = True
+
+    _images_only = False
+
+    _raw_image_files = None
+    _raw_labels = None
+
+    _raw_test_image_files = None
+    _raw_train_image_files = None
+    _raw_val_image_files = None
+    _raw_test_labels = None
+    _raw_train_labels = None
+    _raw_val_labels = None
+
+    _all_moderation_features = None
+    _has_moderation = False
+    _moderation_features_size = None
+    _train_moderation_features = None
+    _test_moderation_features = None
+    _val_moderation_features = None
+
+    _training_augmentation_images = None
+    _training_augmentation_labels = None
+
+    # Network internal representation
+    _session = None
+    _graph = None
+    _graph_ops = {}
+    _layers = []
+    _global_epoch = 0
+
+    _num_layers_norm = 0
+    _num_layers_conv = 0
+    _num_layers_upsample = 0
+    _num_layers_pool = 0
+    _num_layers_fc = 0
+    _num_layers_dropout = 0
+    _num_layers_batchnorm = 0
+
+    # Network options
+    _batch_size = 1
+    _test_split = 0.10
+    _validation_split = 0.10
+    _maximum_training_batches = None
+    _reg_coeff = None
+    _optimizer = 'adam'
+    _weight_initializer = 'xavier'
+
+    _learning_rate = 0.001
+    _lr_decay_factor = None
+    _epochs_per_decay = None
+    _lr_decay_epochs = None
+
+    _num_regression_outputs = 1
+
+    # Yolo parameters, non-default values defined by set_yolo_parameters
+    _grid_w = 7
+    _grid_h = 7
+    _LABELS = ['plant']
+    _NUM_CLASSES = 1
+    _RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
+    _ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
+    _NUM_BOXES = 5
+    _THRESH_SIG = 0.6
+    _THRESH_OVERLAP = 0.3
+    _THRESH_CORRECT = 0.5
+
+    # Wrapper options
+    _debug = None
+    _load_from_saved = None
+    _tb_dir = None
+    _queue_capacity = 50
+    _report_rate = None
+
+    # Multithreading
+    _num_threads = 1
+    _coord = None
+    _threads = None
+
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         """
-        The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file.
-        This class is the singular point of contact for the DPP module.
+        Create a new model object
 
         :param debug: If True, debug messages are printed to the console.
         :param load_from_saved: Optionally, pass the name of a directory containing the checkpoint file.
@@ -31,150 +178,6 @@ class DPPModel(object):
         :param report_rate: Set the frequency at which progress is reported during training (also the rate at which new
         timepoints are recorded to Tensorboard).
         """
-        # Operation settings
-        self._problem_type = definitions.ProblemType.CLASSIFICATION
-        self._loss_fn = 'softmax cross entropy'
-        self._with_patching = False
-        self._has_trained = False
-        self._save_checkpoints = None
-        self._save_dir = None
-        self._validation = True
-        self._testing = True
-        self._hyper_param_search = False
-
-        # Input options
-        self._total_classes = 0
-        self._total_raw_samples = 0
-        self._total_training_samples = 0
-        self._total_validation_samples = 0
-        self._total_testing_samples = 0
-
-        self._image_width = None
-        self._image_height = None
-        self._image_width_original = None
-        self._image_height_original = None
-        self._image_depth = None
-        self._patch_height = None
-        self._patch_width = None
-        self._resize_bbox_coords = False
-
-        self._crop_or_pad_images = False
-        self._resize_images = False
-
-        self._processed_images_dir = './DPP-Processed'
-
-        # supported implementations, we may add more to in future
-        self._supported_problem_types = ['classification', 'regression', 'semantic_segmentation', 'object_detection']
-        self._supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
-        self._supported_weight_initializers = ['normal', 'xavier']
-        self._supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
-        self._supported_pooling_types = ['max', 'avg']
-        self._supported_loss_fns_cls = ['softmax cross entropy']  # supported loss functions for classification
-        self._supported_loss_fns_reg = ['l2', 'l1', 'smooth l1', 'log loss']               # ... regression
-        self._supported_loss_fns_ss = ['sigmoid cross entropy']                            # ... semantic segmentation
-        self._supported_loss_fns_od = ['yolo']                                             # ... object detection
-        self._supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
-
-        # Augmentation options
-        self._augmentation_flip_horizontal = False
-        self._augmentation_flip_vertical = False
-        self._augmentation_crop = False
-        self._crop_amount = 0.75
-        self._augmentation_contrast = False
-        self._augmentation_rotate = False
-        self._rotate_crop_borders = False
-
-        # Dataset storage
-        self._all_ids = None
-
-        self._all_images = None
-        self._train_images = None
-        self._test_images = None
-        self._val_images = None
-
-        self._all_labels = None
-        self._train_labels = None
-        self._test_labels = None
-        self._val_labels = None
-        self._split_labels = True
-
-        self._images_only = False
-
-        self._raw_image_files = None
-        self._raw_labels = None
-
-        self._raw_test_image_files = None
-        self._raw_train_image_files = None
-        self._raw_val_image_files = None
-        self._raw_test_labels = None
-        self._raw_train_labels = None
-        self._raw_val_labels = None
-
-        self._all_moderation_features = None
-        self._has_moderation = False
-        self._moderation_features_size = None
-        self._train_moderation_features = None
-        self._test_moderation_features = None
-        self._val_moderation_features = None
-
-        self._training_augmentation_images = None
-        self._training_augmentation_labels = None
-
-        # Network internal representation
-        self._session = None
-        self._graph = None
-        self._graph_ops = {}
-        self._layers = []
-        self._global_epoch = 0
-
-        self._num_layers_norm = 0
-        self._num_layers_conv = 0
-        self._num_layers_upsample = 0
-        self._num_layers_pool = 0
-        self._num_layers_fc = 0
-        self._num_layers_dropout = 0
-        self._num_layers_batchnorm = 0
-
-        # Network options
-        self._batch_size = 1
-        self._test_split = 0.10
-        self._validation_split = 0.10
-        self._maximum_training_batches = None
-        self._reg_coeff = None
-        self._optimizer = 'adam'
-        self._weight_initializer = 'xavier'
-
-        self._learning_rate = 0.001
-        self._lr_decay_factor = None
-        self._epochs_per_decay = None
-        self._lr_decay_epochs = None
-
-        self._num_regression_outputs = 1
-
-        # Yolo parameters, non-default values defined by set_yolo_parameters
-        self._grid_w = 7
-        self._grid_h = 7
-        self._LABELS = ['plant']
-        self._NUM_CLASSES = 1
-        self._RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
-        self._ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
-        self._NUM_BOXES = 5
-        self._THRESH_SIG = 0.6
-        self._THRESH_OVERLAP = 0.3
-        self._THRESH_CORRECT = 0.5
-
-        # Wrapper options
-        self._debug = None
-        self._load_from_saved = None
-        self._tb_dir = None
-        self._queue_capacity = 50
-        self._report_rate = None
-
-        # Multithreading
-        self._num_threads = 1
-        self._coord = None
-        self._threads = None
-
         self._debug = debug
         self._load_from_saved = load_from_saved
         self._tb_dir = tensorboard_dir
