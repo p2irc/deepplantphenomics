@@ -452,7 +452,7 @@ class DPPModel(object):
         if not isinstance(initializer, str):
             raise TypeError("initializer must be a str")
         initializer = initializer.lower()
-        if not initializer in self._supported_weight_initializers:
+        if initializer not in self._supported_weight_initializers:
             raise ValueError("'" + initializer + "' is not one of the currently supported weight initializers." +
                              " Choose one of: " + " ".join("'"+x+"'" for x in self._supported_weight_initializers))
 
@@ -511,7 +511,7 @@ class DPPModel(object):
         """Set the problem type to be solved, either classification or regression"""
         if not isinstance(p_type, str):
             raise TypeError("p_type must be a str")
-        if not p_type in self._supported_problem_types:
+        if p_type not in self._supported_problem_types:
             raise ValueError("'" + p_type + "' is not one of the currently supported problem types." +
                              " Choose one of: " + " ".join("'"+x+"'" for x in self._supported_problem_types))
 
@@ -702,8 +702,8 @@ class DPPModel(object):
                 # split the data into train/val/test sets, if there is no validation set or no moderation features
                 # being used they will be returned as 0 (val) or None (moderation features)
                 train_images, train_labels, train_mf, \
-                test_images, test_labels, test_mf, \
-                val_images, val_labels, val_mf, = \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
                     loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
                                            self._validation_split, self._all_moderation_features,
                                            self._training_augmentation_images, self._training_augmentation_labels,
@@ -1166,14 +1166,15 @@ class DPPModel(object):
 
                                 samples_per_sec = self._batch_size / elapsed
 
+                                desc_str = "{}: Results for batch {} (epoch {:.1f}) - " + \
+                                           "Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
                                 tqdm_range.set_description(
-                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
-                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
-                                            i,
-                                            i / (self._total_training_samples / self._batch_size),
-                                            loss,
-                                            epoch_accuracy,
-                                            samples_per_sec))
+                                    desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                    i,
+                                                    i / (self._total_training_samples / self._batch_size),
+                                                    loss,
+                                                    epoch_accuracy,
+                                                    samples_per_sec))
 
                             elif self._problem_type == definitions.ProblemType.REGRESSION or \
                                     self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
@@ -1199,14 +1200,15 @@ class DPPModel(object):
 
                                 samples_per_sec = self._batch_size / elapsed
 
+                                desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                                           "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
                                 tqdm_range.set_description(
-                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
-                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
-                                            i,
-                                            i / (self._total_training_samples / self._batch_size),
-                                            loss,
-                                            epoch_accuracy,
-                                            samples_per_sec))
+                                    desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                                    i,
+                                                    i / (self._total_training_samples / self._batch_size),
+                                                    loss,
+                                                    epoch_accuracy,
+                                                    samples_per_sec))
 
                             elif self._problem_type == definitions.ProblemType.REGRESSION or \
                                     self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
@@ -1776,6 +1778,7 @@ class DPPModel(object):
 
         :param x: input tensor where the first dimension is batch
         :param deterministic: if True, performs inference-time operations on stochastic layers e.g. DropOut layers
+        :param moderation_features: ???
         :return: output tensor where the first dimension is batch
         """
         with self._graph.as_default():
@@ -1903,7 +1906,7 @@ class DPPModel(object):
 
                             # need to match total_outputs dimensions, so we add a dimension to the shape to match
                             full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
-                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list of imgs
+                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
                 elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
                     # for i in range(num_batches):
                     #     xx = self._session.run(x_pred)
@@ -1952,11 +1955,13 @@ class DPPModel(object):
             xx = self.forward_pass_with_file_inputs(x)
             # softmax
             interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
+            return interpreted_outputs
 
         # Regression #
         elif self._problem_type == definitions.ProblemType.REGRESSION:
             # nothing special required for regression
             interpreted_outputs = self.forward_pass_with_file_inputs(x)
+            return interpreted_outputs
 
         # Semantic Segmentation #
         elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
@@ -2033,7 +2038,7 @@ class DPPModel(object):
                             # need to match total_outputs dimensions, so we add a dimension to the shape to match
                             full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
                             # this appending may be causing a border, might need to rewrite and specifically index
-                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the array of imgs
+                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
                 else:
                     for i in range(int(num_batches)):
                         xx = self._session.run(x_pred)
@@ -2057,6 +2062,8 @@ class DPPModel(object):
                 mask[mask < 0.5] = 0
                 # store
                 interpreted_outputs[i, :, :] = mask
+
+            return interpreted_outputs
 
         # Object Detection #
         elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
@@ -2137,6 +2144,7 @@ class DPPModel(object):
                 if remainder != 0:
                     for i in range(remainder):
                         total_outputs = np.delete(total_outputs, -1, 0)
+
             # Perform yolo needs
             # this is currently for patching, need a way to be more general or maybe just need to write both ways out
             # fully
@@ -2159,24 +2167,20 @@ class DPPModel(object):
                             box_conf4 = expit(img_data[i, j * 26 + 19])
                             box_conf5 = expit(img_data[i, j * 26 + 24])
                             box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
-                            max_conf_idx = np.argmax(box_confs)
+                            max_conf_idx = int(np.argmax(box_confs))
                             # Then we check if the responsible box is above the threshold for detecting an object
                             if box_confs[max_conf_idx] > 0.6:
-                                # This box has detected an object and we extract its coords
-                                pred_img = True
+                                # This box has detected an object, so we extract and convert its coords
                                 pred_box = img_data[i, j*26+5*max_conf_idx:j*26+5*max_conf_idx+4]
-                            else:  # No object detected
-                                pred_img = False
-                            # If an object is detected we now transform the data into the desired result
-                            if pred_img:
+
                                 # centers from which x and y offsets are applied to, these are in 'grid coords'
                                 c_x = j % self._grid_w
                                 c_y = j // self._grid_w
                                 # x and y go from 'grid coords' to 'patch coords' to 'full img coords'
                                 x = (expit(pred_box[0]) + c_x) * (patch_width / self._grid_w) \
-                                    + (i % num_patches_horiz)*patch_width
+                                    + (i % num_patches_horiz) * patch_width
                                 y = (expit(pred_box[1]) + c_y) * (patch_height / self._grid_h) \
-                                    + (i // num_patches_horiz)*patch_height
+                                    + (i // num_patches_horiz) * patch_height
                                 # get the anchor box based on the highest conf (responsible box)
                                 prior_w = self._ANCHORS[max_conf_idx][0]
                                 prior_h = self._ANCHORS[max_conf_idx][1]
@@ -2184,9 +2188,10 @@ class DPPModel(object):
                                 w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
                                 h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
                                 # turn into points
-                                x1y1 = (int(x - w/2), int(y - h/2))
-                                x2y2 = (int(x + w/2), int(y + h/2))
+                                x1y1 = (int(x - w / 2), int(y - h / 2))
+                                x2y2 = (int(x + w / 2), int(y + h / 2))
                                 total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
+
                     # Non - maximal suppression (Probably make into a general function)
                     all_boxes = np.array(total_pred_boxes)
                     idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
@@ -2194,7 +2199,7 @@ class DPPModel(object):
                     while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
                         last = len(idxs) - 1  # since sorted in reverse order, the last one has the highest conf
                         i = idxs[last]
-                        final_boxes_idxs.append(i)  # add it to the list (highest conf) then we check if there are duplicates to delete
+                        final_boxes_idxs.append(i)  # add it to the maximal list, then check for duplicates to delete
                         suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
                         for pos in range(0, last):  # search for duplicates
                             j = idxs[pos]
@@ -2203,7 +2208,9 @@ class DPPModel(object):
                                 suppress.append(pos)
                         idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
 
-                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])  # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+                # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
+                return interpreted_outputs
             else:
                 print('made it')
                 # no patching
@@ -2223,16 +2230,11 @@ class DPPModel(object):
                         box_conf4 = expit(img_data[i * 26 + 19])
                         box_conf5 = expit(img_data[i * 26 + 24])
                         box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
-                        max_conf_idx = np.argmax(box_confs)
+                        max_conf_idx = int(np.argmax(box_confs))
 
                         if box_confs[max_conf_idx] > 0.6:
-                            pred_img = True
                             pred_box = img_data[i * 26 + 5 * max_conf_idx: i * 26 + 5 * max_conf_idx + 4]
 
-                        else:
-                            pred_img = False
-
-                        if pred_img:
                             # centers from which x and y offsets are applied to, these are in 'grid coords'
                             c_x = i % self._grid_w
                             c_y = i // self._grid_w
@@ -2256,7 +2258,7 @@ class DPPModel(object):
                     while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
                         last = len(idxs) - 1  # since sorted in reverse order, the last one has highest conf
                         i = idxs[last]
-                        final_boxes_idxs.append(i)  # add it to the list (highest conf) then we check if there are duplicates to delete
+                        final_boxes_idxs.append(i)  # add it to the maximal list, then we check for duplicates to delete
                         suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
                         for pos in range(0, last):  # search for duplicates
                             j = idxs[pos]
@@ -2264,12 +2266,13 @@ class DPPModel(object):
                             if iou > 0.3:  # maybe should make this a tunable parameter
                                 suppress.append(pos)
                         idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
-                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])  # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+
+                # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
+                return interpreted_outputs
         else:
             warnings.warn('Problem type is not recognized')
             exit()
-
-        return interpreted_outputs
 
     def __compute_iou(self, box1, box2):
         """
@@ -2401,6 +2404,7 @@ class DPPModel(object):
             raise RuntimeError("A convolutional layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         try:  # try to iterate through filter_dimension, checking it has 4 ints
+            idx = 0
             for idx, dim in enumerate(filter_dimension):
                 if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
                     raise TypeError()
@@ -2415,7 +2419,7 @@ class DPPModel(object):
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
         activation_function = activation_function.lower()
-        if not activation_function in self._supported_activation_functions:
+        if activation_function not in self._supported_activation_functions:
             raise ValueError("'" + activation_function + "' is not one of the currently supported activation " +
                              "functions. Choose one of: " +
                              " ".join("'"+x+"'" for x in self._supported_activation_functions))
@@ -2502,7 +2506,7 @@ class DPPModel(object):
         if not isinstance(pooling_type, str):
             raise TypeError("pooling_type must be a str")
         pooling_type = pooling_type.lower()
-        if not pooling_type in self._supported_pooling_types:
+        if pooling_type not in self._supported_pooling_types:
             raise ValueError("'" + pooling_type + "' is not one of the currently supported pooling types." +
                              " Choose one of: " +
                              " ".join("'"+x+"'" for x in self._supported_pooling_types))
@@ -2590,7 +2594,7 @@ class DPPModel(object):
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
         activation_function = activation_function.lower()
-        if not activation_function in self._supported_activation_functions:
+        if activation_function not in self._supported_activation_functions:
             raise ValueError("'" + activation_function + "' is not one of the currently supported activation " +
                              "functions. Choose one of: " +
                              " ".join("'"+x+"'" for x in self._supported_activation_functions))
@@ -3105,32 +3109,6 @@ class DPPModel(object):
         self._raw_image_files = images
         self._raw_labels = self._all_labels
 
-        # visual image check/debug, printing image and bounding boxes #
-        # img = cv2.imread(self._raw_image_files[0], 1)
-        # boxes = self._raw_labels[0]
-        # height, width, depth = img.shape
-        # print(boxes[53:59])
-        # for i in range(19):
-        #     # p1 = (int((float(boxes[i*54 + 1]) - (float(boxes[i*54+3]/2)))*3108/7), int((float(boxes[i*54 + 2]) - (float(boxes[i*54+4]/2)))*2324/7))
-        #     # p2 = (int((float(boxes[i*54 + 1]) + (float(boxes[i*54+3]/2)))*3108/7), int((float(boxes[i*54 + 2]) + (float(boxes[i*54+4]/2)))*2324/7))
-        #     grid_arr = np.array(boxes[i*54+5:i*54+54])
-        #     grid_pos = np.dot(grid_arr, np.arange(49))
-        #     x = int((boxes[i * 54 + 1] + grid_pos % 7) * 3108 / 7)
-        #     y = int((boxes[i * 54 + 2] + grid_pos // 7) * 2324 / 7)
-        #     print('ANCHOR')
-        #     print(self._ANCHORS[0])
-        #     w = boxes[i * 54 + 3] * self._ANCHORS[0]
-        #     h = boxes[i * 54 + 4] * self._ANCHORS[1]
-        #     p1 = (int(x - w/2),
-        #           int(y - h/2))
-        #     p2 = (int(x + w/2),
-        #           int(y + h/2))
-        #     print(p1, p2)
-        #     cv2.rectangle(img, p1, p2, (255, 0, 0), 5)
-        # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        # cv2.imshow('image', img)
-        # cv2.waitKey(0)
-
     def load_ippn_leaf_count_dataset_from_directory(self, dirname):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
         if self._image_height is None or self._image_width is None or self._image_depth is None:
@@ -3373,38 +3351,6 @@ class DPPModel(object):
         else:
             self._images_only = True
 
-        # visual image check, printing image and bounding boxes #
-        # img = cv2.imread(self._raw_image_files[4], 1)
-        # boxes = self._raw_labels[4]
-        # height, width, depth = img.shape
-        # scale_x = self._image_width / width
-        # scale_y = self._image_height / height
-        # crazy_size = cv2.resize(img, (0, 0), fx=scale_x, fy=scale_y)
-        # j = 1 + self._NUM_CLASSES + 4
-        # print(boxes)
-        # for i in range(len(boxes)//j):
-        #     # p1 = (int((float(boxes[i*54 + 1]) - (float(boxes[i*54+3]/2)))*3108/7), int((float(boxes[i*54 + 2]) - (float(boxes[i*54+4]/2)))*2324/7))
-        #     # p2 = (int((float(boxes[i*54 + 1]) + (float(boxes[i*54+3]/2)))*3108/7), int((float(boxes[i*54 + 2]) + (float(boxes[i*54+4]/2)))*2324/7))
-        #     if boxes[i*j] == 1:
-        #         print('HEREE')
-        #         # grid_arr = np.array(boxes[i*j+5:i*j+j])
-        #         # grid_pos = np.dot(grid_arr, np.arange(self._grid_h*self._grid_w))
-        #         grid_pos = i
-        #         x = int((boxes[i * j + 1 + self._NUM_CLASSES] + grid_pos % self._grid_w) * self._image_width / self._grid_w)
-        #         y = int((boxes[i * j + 1 + self._NUM_CLASSES + 1] + grid_pos // self._grid_w) * self._image_height / self._grid_h)
-        #         w = boxes[i * j + 1 + self._NUM_CLASSES + 2] * self._image_width / self._grid_w
-        #         h = boxes[i * j + 1 + self._NUM_CLASSES + 3] * self._image_height / self._grid_h
-        #
-        #         p1 = (int(x - w/2),
-        #               int(y - h/2))
-        #         p2 = (int(x + w/2),
-        #               int(y + h/2))
-        #         print(p1, p2)
-        #         cv2.rectangle(crazy_size, p1, p2, (255, 0, 0), 2)
-        # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        # cv2.imshow('image', crazy_size)
-        # cv2.waitKey(0)
-
     def object_detection_patching_and_augmentation(self, patch_dir=None):
         # make the below a function
         # labels, images = function()
@@ -3476,9 +3422,6 @@ class DPPModel(object):
                     # hence subtraction
                     new_x = int(box_x - (delta_x * (self._patch_width / self._grid_w)))
                     new_y = int(box_y - (delta_y * (self._patch_height / self._grid_h)))
-                    # add a little bit of noise so it isn't always perfectly centered in the grid
-                    # new_x = int(new_x + np.random.randint(-center_x, center_x))
-                    # new_y = int(new_y + np.random.randint(-center_y, center_y))
 
                     top_row = new_y - (self._patch_height // 2)
                     bot_row = top_row + self._patch_height
@@ -3498,7 +3441,6 @@ class DPPModel(object):
                         box_y = box[2] + box_h / 2
                         if (box_x >= left_col) and (box_x <= right_col) and (box_y >= top_row) and (
                                 box_y <= bot_row):
-                            # if (box_x >= (left_col + box_w/2)) and (box_x <= (right_col - box_w/2)) and (box_y >= (top_row + box_h/2)) and (box_y <= (bot_row - box_h/2)):
                             delta_x = box_x - new_x
                             delta_y = box_y - new_y
                             new_x_center = self._patch_width // 2 + delta_x
@@ -3511,29 +3453,6 @@ class DPPModel(object):
                             new_boxes.append({"all_points_x": [new_x_min, new_x_max],
                                               "all_points_y": [new_y_min, new_y_max]})
                             new_raw_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
-
-                    # visual testing
-                    # # Create figure and axes
-                    # fig, ax = plt.subplots(1)
-                    # # Display the image
-                    # ax.imshow(img_patch)
-                    # plt.show(block=True)
-                    # fig, ax = plt.subplots(1)
-                    # # Create a Rectangle patch
-                    # for box in new_boxes:
-                    #     w = box['all_points_x'][1] - box['all_points_x'][0]
-                    #     h = box['all_points_y'][1] - box['all_points_y'][0]
-                    #     x_min = box['all_points_x'][0]
-                    #     x_max = box['all_points_x'][1]
-                    #     y_min = box['all_points_y'][0]
-                    #     y_max = box['all_points_y'][1]
-                    #     rect = patches.Rectangle((x_min, y_min), w, h, linewidth=1, edgecolor='r',
-                    #                              facecolor='none')
-                    #     # Add the patch to the Axes
-                    #     ax.add_patch(rect)
-                    # # Display the image
-                    # ax.imshow(img_patch)
-                    # plt.show(block=True)
 
                     # save image to disk
                     # print(top_row, bot_row, left_col, right_col)
@@ -3581,8 +3500,6 @@ class DPPModel(object):
                         # check if box is inside current patch, if so convert the coords and add it to the json
                         if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (
                                 cent_y <= bot_row):
-                            # if (cent_x >= (left_col + (box[1] - box[0]) / 2)) and (cent_x <= (right_col - (box[1] - box[0]) / 2)) and (
-                            #             cent_y >= (top_row + (box[3] - box[2]) / 2)) and (cent_y <= (bot_row - (box[3] - box[2]) / 2)):
                             box_w = box[1] - box[0]
                             box_h = box[3] - box[2]
                             box_x = box[0] + box_w / 2
@@ -3612,8 +3529,8 @@ class DPPModel(object):
                     rot_boxes = []
                     raw_rot_boxes = []
                     for box in new_boxes:
-                        # since only rotating by 90 degrees we could probably hard code in 1's, -1's, and 0's in the cases
-                        # instead of using sin and cos
+                        # since only rotating by 90 degrees we could probably hard code in 1's, -1's, and 0's in the
+                        # cases instead of using sin and cos
                         rot_x_min = x0 + (box[0] - x0) * np.cos(theta) + (box[2] - y0) * np.sin(theta)
                         rot_y_min = y0 - (box[0] - x0) * np.sin(theta) + (box[2] - y0) * np.cos(theta)
                         w = box[1] - box[0]
@@ -3688,7 +3605,7 @@ class DPPModel(object):
                         raw_flip_boxes = []
                         for box in new_boxes:
                             w = box[1] - box[0]
-                            h = box[3] - box[2]
+                            # h = box[3] - box[2] for reference
                             x_min = self._patch_width - (box[1])
                             x_max = x_min + w
                             y_min = box[2]
@@ -3716,7 +3633,7 @@ class DPPModel(object):
                         flip_boxes = []
                         raw_flip_boxes = []
                         for box in new_boxes:
-                            w = box[1] - box[0]
+                            # w = box[1] - box[0] for reference
                             h = box[3] - box[2]
                             x_min = box[0]
                             x_max = box[1]
@@ -3776,7 +3693,6 @@ class DPPModel(object):
                     cent_y = box[2] + ((box[3] - box[2]) / 2)
                     # check if box is inside current patch, if so convert the coords and add it to the json
                     if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (cent_y <= bot_row):
-                        # if (cent_x >= (left_col + (box[1] - box[0]) / 2)) and (cent_x <= (right_col - (box[1] - box[0]) / 2)) and (cent_y >= (top_row + (box[3] - box[2]) / 2)) and (cent_y <= (bot_row - (box[3] - box[2]) / 2)):
                         box_w = box[1] - box[0]
                         box_h = box[3] - box[2]
                         box_x = box[0] + box_w / 2
@@ -3877,7 +3793,7 @@ class DPPModel(object):
         sorted_paths = []
 
         for image_id in ids:
-            path = filter(lambda item: item.endswith('/' + image_id), [p for p in image_files])
+            path = list(filter(lambda item: item.endswith('/' + image_id), [p for p in image_files]))
             assert len(path) == 1, 'Found no image or multiple images for %r' % image_id
             sorted_paths.append(path[0])
 
@@ -4399,8 +4315,8 @@ class ClassificationModel(DPPModel):
                 # split the data into train/val/test sets, if there is no validation set or no moderation features
                 # being used they will be returned as 0 (val) or None (moderation features)
                 train_images, train_labels, train_mf, \
-                test_images, test_labels, test_mf, \
-                val_images, val_labels, val_mf, = \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
                     loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
                                            self._validation_split, self._all_moderation_features,
                                            self._training_augmentation_images, self._training_augmentation_labels,
@@ -4763,6 +4679,67 @@ class ClassificationModel(DPPModel):
             self.__log('Average test accuracy: {:.5f}'.format(mean))
             return 1.0-mean.astype(np.float32)
 
+    def forward_pass_with_file_inputs(self, x):
+        """
+        Get network outputs with a list of filenames of images as input.
+        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
+        without any problems.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+        with self._graph.as_default():
+            total_outputs = np.empty([1, self.__last_layer().output_size])
+
+            num_batches = len(x) // self._batch_size
+            remainder = len(x) % self._batch_size
+
+            if remainder != 0:
+                num_batches += 1
+                remainder = self._batch_size - remainder
+
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
+            images = x
+            self.__parse_images(images)
+
+            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            if self._load_from_saved:
+                self.load_state()
+            self.__initialize_queue_runners()
+            # Run model on them
+            x_pred = self.forward_pass(x_test, deterministic=True)
+
+            for i in range(int(num_batches)):
+                xx = self._session.run(x_pred)
+                for img in np.array_split(xx, self._batch_size):
+                    total_outputs = np.append(total_outputs, img, axis=0)
+
+            # delete weird first row
+            total_outputs = np.delete(total_outputs, 0, 0)
+
+            # delete any outputs which are overruns from the last batch
+            if remainder != 0:
+                for i in range(remainder):
+                    total_outputs = np.delete(total_outputs, -1, 0)
+
+        return total_outputs
+
+    def forward_pass_with_interpreted_outputs(self, x):
+        """
+        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
+        problem type and whether patching is being used.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+
+        # Perform forward pass of the network to get raw outputs and apply a softmax
+        xx = self.forward_pass_with_file_inputs(x)
+        interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
+        return interpreted_outputs
+
 
 class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
@@ -4799,8 +4776,8 @@ class RegressionModel(DPPModel):
                 # split the data into train/val/test sets, if there is no validation set or no moderation features
                 # being used they will be returned as 0 (val) or None (moderation features)
                 train_images, train_labels, train_mf, \
-                test_images, test_labels, test_mf, \
-                val_images, val_labels, val_mf, = \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
                     loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
                                            self._validation_split, self._all_moderation_features,
                                            self._training_augmentation_images, self._training_augmentation_labels,
@@ -5236,6 +5213,66 @@ class RegressionModel(DPPModel):
 
             return abs_mean.astype(np.float32)
 
+    def forward_pass_with_file_inputs(self, x):
+        """
+        Get network outputs with a list of filenames of images as input.
+        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
+        without any problems.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+        with self._graph.as_default():
+            total_outputs = np.empty([1, self._num_regression_outputs])
+
+            num_batches = len(x) // self._batch_size
+            remainder = len(x) % self._batch_size
+
+            if remainder != 0:
+                num_batches += 1
+                remainder = self._batch_size - remainder
+
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
+            images = x
+            self.__parse_images(images)
+
+            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+            if self._load_from_saved:
+                self.load_state()
+            self.__initialize_queue_runners()
+            # Run model on them
+            x_pred = self.forward_pass(x_test, deterministic=True)
+
+            for i in range(int(num_batches)):
+                xx = self._session.run(x_pred)
+                for img in np.array_split(xx, self._batch_size):
+                    total_outputs = np.append(total_outputs, img, axis=0)
+
+            # delete weird first row
+            total_outputs = np.delete(total_outputs, 0, 0)
+
+            # delete any outputs which are overruns from the last batch
+            if remainder != 0:
+                for i in range(remainder):
+                    total_outputs = np.delete(total_outputs, -1, 0)
+
+        return total_outputs
+
+    def forward_pass_with_interpreted_outputs(self, x):
+        """
+        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
+        problem type and whether patching is being used.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+
+        # nothing special required for regression
+        interpreted_outputs = self.forward_pass_with_file_inputs(x)
+        return interpreted_outputs
+
 
 class SemanticSegmentationModel(DPPModel):
     _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
@@ -5262,8 +5299,8 @@ class SemanticSegmentationModel(DPPModel):
                 # split the data into train/val/test sets, if there is no validation set or no moderation features
                 # being used they will be returned as 0 (val) or None (moderation features)
                 train_images, train_labels, train_mf, \
-                test_images, test_labels, test_mf, \
-                val_images, val_labels, val_mf, = \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
                     loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
                                            self._validation_split, self._all_moderation_features,
                                            self._training_augmentation_images, self._training_augmentation_labels,
@@ -5667,6 +5704,224 @@ class SemanticSegmentationModel(DPPModel):
 
             return abs_mean.astype(np.float32)
 
+    def forward_pass_with_file_inputs(self, x):
+        """
+        Get network outputs with a list of filenames of images as input.
+        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
+        without any problems.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+        with self._graph.as_default():
+            if self._with_patching:
+                # we want the largest multiple of of patch height/width that is smaller than the original
+                # image height/width, for the final image dimensions
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                final_height = (self._image_height // patch_height) * patch_height
+                final_width = (self._image_width // patch_width) * patch_width
+                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
+                # is equal on all sides of image
+                offset_height = (self._image_height - final_height) // 2
+                offset_width = (self._image_width - final_width) // 2
+                # pre-allocate output dimensions
+                total_outputs = np.empty([1, final_height, final_width])
+            else:
+                total_outputs = np.empty([1, self._image_height, self._image_width])
+
+            num_batches = len(x) // self._batch_size
+            remainder = len(x) % self._batch_size
+
+            if remainder != 0:
+                num_batches += 1
+                remainder = self._batch_size - remainder
+
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
+            images = x
+            self.__parse_images(images)
+
+            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            if self._with_patching:
+                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
+                # Split the images up into the multiple slices of size patch_height x patch_width
+                ksizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]
+                rates = [1, 1, 1, 1]
+                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
+
+            if self._load_from_saved:
+                self.load_state()
+            self.__initialize_queue_runners()
+            # Run model on them
+            x_pred = self.forward_pass(x_test, deterministic=True)
+
+            if self._with_patching:
+                num_patch_rows = final_height // patch_height
+                num_patch_cols = final_width // patch_width
+                for i in range(num_batches):
+                    xx = self._session.run(x_pred)
+
+                    # generalized image stitching
+                    for img in np.array_split(xx, self._batch_size):  # for each img in current batch
+                        # we are going to build a list of rows of imgs called img_rows, where each element
+                        # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
+                        # iterate through img_rows concatenating the rows vertically (axis=0) to build
+                        # the full img
+
+                        img_rows = []
+                        # for each row
+                        for j in range(num_patch_rows):
+                            curr_row = img[j*num_patch_cols]  # start new row with first img
+                            # iterate through the rest of the row, concatenating img's together
+                            for k in range(1, num_patch_cols):
+                                # horizontal cat
+                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
+                            img_rows.append(curr_row)  # add row of img's to the list
+
+                        # start full img with the first full row of imgs
+                        full_img = img_rows[0]
+                        # iterate through rest of rows, concatenating rows together
+                        for row_num in range(1, num_patch_rows):
+                            # vertical cat
+                            full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
+
+                        # need to match total_outputs dimensions, so we add a dimension to the shape to match
+                        full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
+                        total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
+            else:
+                for i in range(int(num_batches)):
+                    xx = self._session.run(x_pred)
+                    for img in np.array_split(xx, self._batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
+
+            # delete weird first row
+            total_outputs = np.delete(total_outputs, 0, 0)
+
+            # delete any outputs which are overruns from the last batch
+            if remainder != 0:
+                for i in range(remainder):
+                    total_outputs = np.delete(total_outputs, -1, 0)
+
+        return total_outputs
+
+    def forward_pass_with_interpreted_outputs(self, x):
+        """
+        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
+        problem type and whether patching is being used.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+
+        with self._graph.as_default():
+            # check for patching needs
+            if self._with_patching:
+                # we want the largest multiple of of patch height/width that is smaller than the original
+                # image height/width, for the final image dimensions
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                final_height = (self._image_height // patch_height) * patch_height
+                final_width = (self._image_width // patch_width) * patch_width
+                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
+                # is equal on all sides of image
+                offset_height = (self._image_height - final_height) // 2
+                offset_width = (self._image_width - final_width) // 2
+                # pre-allocate output dimensions
+                total_outputs = np.empty([1, final_height, final_width])
+            else:
+                total_outputs = np.empty([1, self._image_height, self._image_width])
+
+            num_batches = len(x) // self._batch_size
+            remainder = len(x) % self._batch_size
+            if remainder != 0:
+                num_batches += 1
+                remainder = self._batch_size - remainder
+
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
+            images = x
+            self.__parse_images(images)
+
+            # set up and then initialize the queue
+            x_test = tf.train.batch(
+                [self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            # if using patching we have to determine different image dimensions
+            if self._with_patching:
+                x_test = tf.image.crop_to_bounding_box(
+                    x_test, offset_height, offset_width, final_height, final_width)
+                # Split the images up into the multiple slices of size patch_height x patch_width
+                ksizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]
+                rates = [1, 1, 1, 1]
+                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
+
+            if self._load_from_saved:
+                self.load_state()
+            self.__initialize_queue_runners()
+            x_pred = self.forward_pass(x_test, deterministic=True)
+
+            # check if we need to perform patching
+            if self._with_patching:
+                num_patch_rows = final_height // patch_height
+                num_patch_cols = final_width // patch_width
+                for i in range(num_batches):
+                    xx = self._session.run(x_pred)
+                    # generalized image stitching
+                    for img in np.array_split(xx, self._batch_size):  # for each img in current batch
+                        # we are going to build a list of rows of imgs called img_rows, where each element
+                        # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
+                        # iterate through img_rows concatenating the rows vertically (axis=0) to build
+                        # the full img
+                        img_rows = []
+                        for j in range(num_patch_rows):  # for each row
+                            curr_row = img[j*num_patch_cols]  # start new row with first img
+                            # iterate through the rest of the row, concatenating img's together
+                            for k in range(1, num_patch_cols):
+                                # vertical cat
+                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
+                            img_rows.append(curr_row)  # add row of img's to the list
+                        # start full img with the first full row of imgs
+                        full_img = img_rows[0]
+                        # iterate through rest of rows, concatenating rows together
+                        for row_num in range(1, num_patch_rows):
+                            # vertical cat
+                            full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
+                        # need to match total_outputs dimensions, so we add a dimension to the shape to match
+                        full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
+                        # this appending may be causing a border, might need to rewrite and specifically index
+                        total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
+            else:
+                for i in range(int(num_batches)):
+                    xx = self._session.run(x_pred)
+                    for img in np.array_split(xx, self._batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
+
+            # delete weird first row
+            total_outputs = np.delete(total_outputs, 0, 0)
+            # delete any outputs which are overruns from the last batch
+            if remainder != 0:
+                for i in range(remainder):
+                    total_outputs = np.delete(total_outputs, -1, 0)
+
+        # normalize and then threshold
+        interpreted_outputs = np.zeros(total_outputs.shape, dtype=np.uint8)
+        for i, img in enumerate(total_outputs):
+            # normalize
+            x_min = np.min(img)
+            x_max = np.max(img)
+            mask = (img - x_min) / (x_max - x_min)
+            # threshold
+            mask[mask >= 0.5] = 255
+            mask[mask < 0.5] = 0
+            # store
+            interpreted_outputs[i, :, :] = mask
+
+        return interpreted_outputs
+
 
 class ObjectDetectionModel(DPPModel):
     _problem_type = definitions.ProblemType.OBJECT_DETECTION
@@ -5901,8 +6156,8 @@ class ObjectDetectionModel(DPPModel):
                 # split the data into train/val/test sets, if there is no validation set or no moderation features
                 # being used they will be returned as 0 (val) or None (moderation features)
                 train_images, train_labels, train_mf, \
-                test_images, test_labels, test_mf, \
-                val_images, val_labels, val_mf, = \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
                     loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
                                            self._validation_split, self._all_moderation_features,
                                            self._training_augmentation_images, self._training_augmentation_labels,
@@ -6478,3 +6733,312 @@ class ObjectDetectionModel(DPPModel):
         ap = np.sum(precision[1:] * (recall[1:] - recall[0:-1]))
 
         return ap
+
+    def forward_pass_with_file_inputs(self, x):
+        """
+        Get network outputs with a list of filenames of images as input.
+        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
+        without any problems.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+        with self._graph.as_default():
+            if self._with_patching:
+                # we want the largest multiple of patch height/width that is smaller than the original
+                # image height/width, for the final image dimensions
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                final_height = (self._image_height // patch_height) * patch_height
+                final_width = (self._image_width // patch_width) * patch_width
+                num_patches_vert = self._image_height // patch_height
+                num_patches_horiz = self._image_width // patch_width
+                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
+                # is equal on all sides of image
+                offset_height = (self._image_height - final_height) // 2
+                offset_width = (self._image_width - final_width) // 2
+                # pre-allocate output dimensions
+                total_outputs = np.empty([1,
+                                          num_patches_horiz * num_patches_vert,
+                                          self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
+            else:
+                total_outputs = np.empty(
+                    [1, self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
+
+            num_batches = len(x) // self._batch_size
+            remainder = len(x) % self._batch_size
+
+            if remainder != 0:
+                num_batches += 1
+                remainder = self._batch_size - remainder
+
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
+            images = x
+            self.__parse_images(images)
+
+            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            if self._with_patching:
+                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
+                # Split the images up into the multiple slices of size patch_height x patch_width
+                ksizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]
+                rates = [1, 1, 1, 1]
+                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
+
+            if self._load_from_saved:
+                self.load_state()
+            self.__initialize_queue_runners()
+            # Run model on them
+            x_pred = self.forward_pass(x_test, deterministic=True)
+
+            if self._with_patching:
+                for i in range(int(num_batches)):
+                    xx = self._session.run(x_pred)
+                    xx = np.reshape(xx, [self._batch_size, num_patches_vert * num_patches_horiz, -1])
+                    for img in np.array_split(xx, self._batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
+            else:
+                for i in range(int(num_batches)):
+                    xx = self._session.run(x_pred)
+                    xx = np.reshape(xx, [self._batch_size, -1])
+                    for img in np.array_split(xx, self._batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
+
+            # delete weird first row
+            total_outputs = np.delete(total_outputs, 0, 0)
+
+            # delete any outputs which are overruns from the last batch
+            if remainder != 0:
+                for i in range(remainder):
+                    total_outputs = np.delete(total_outputs, -1, 0)
+
+        return total_outputs
+
+    def forward_pass_with_interpreted_outputs(self, x):
+        """
+        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
+        problem type and whether patching is being used.
+
+        :param x: list of strings representing image filenames
+        :return: ndarray representing network outputs corresponding to inputs in the same order
+        """
+
+        with self._graph.as_default():
+            # check for patching needs
+            if self._with_patching:
+                # we want the largest multiple of patch height/width that is smaller than the original
+                # image height/width, for the final image dimensions
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                final_height = (self._image_height // patch_height) * patch_height
+                final_width = (self._image_width // patch_width) * patch_width
+                num_patches_vert = self._image_height // patch_height
+                num_patches_horiz = self._image_width // patch_width
+                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
+                # is equal on all sides of image
+                offset_height = (self._image_height - final_height) // 2
+                offset_width = (self._image_width - final_width) // 2
+                # pre-allocate output dimensions
+                total_outputs = np.empty([1,
+                                          num_patches_horiz * num_patches_vert,
+                                          self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
+            else:
+                total_outputs = np.empty(
+                    [1, self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
+            num_batches = len(x) // self._batch_size
+            remainder = len(x) % self._batch_size
+
+            if remainder != 0:
+                num_batches += 1
+                remainder = self._batch_size - remainder
+
+            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
+            images = x
+            self.__parse_images(images)
+
+            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size,
+                                    num_threads=self._num_threads)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            if self._with_patching:
+                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height,
+                                                       final_width)
+                # Split the images up into the multiple slices of size patch_height x patch_width
+                ksizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]
+                rates = [1, 1, 1, 1]
+                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
+
+            if self._load_from_saved:
+                self.load_state()
+            self.__initialize_queue_runners()
+            # Run model on them
+            x_pred = self.forward_pass(x_test, deterministic=True)
+
+            if self._with_patching:
+                for i in range(int(num_batches)):
+                    xx = self._session.run(x_pred)
+                    xx = np.reshape(xx, [self._batch_size, num_patches_vert * num_patches_horiz, -1])
+                    for img in np.array_split(xx, self._batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
+            else:
+                for i in range(int(num_batches)):
+                    xx = self._session.run(x_pred)
+                    xx = np.reshape(xx, [self._batch_size, -1])
+                    for img in np.array_split(xx, self._batch_size):
+                        total_outputs = np.append(total_outputs, img, axis=0)
+
+            # delete weird first row
+            total_outputs = np.delete(total_outputs, 0, 0)
+            # delete any outputs which are overruns from the last batch
+            if remainder != 0:
+                for i in range(remainder):
+                    total_outputs = np.delete(total_outputs, -1, 0)
+
+        # Perform yolo needs
+        # this is currently for patching, need a way to be more general or maybe just need to write both ways out
+        # fully
+        total_pred_boxes = []
+        if self._with_patching:
+            num_patches = num_patches_vert * num_patches_horiz
+            for img_data in total_outputs:
+                ###################################################################################################
+                # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
+                # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
+                # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
+                # this may likely need to be made more general in future
+                ###################################################################################################
+                for i in range(num_patches):
+                    for j in range(self._grid_w * self._grid_h):
+                        # We first find the responsible box by finding the one with the highest confidence
+                        box_conf1 = expit(img_data[i, j * 26 + 4])
+                        box_conf2 = expit(img_data[i, j * 26 + 9])
+                        box_conf3 = expit(img_data[i, j * 26 + 14])
+                        box_conf4 = expit(img_data[i, j * 26 + 19])
+                        box_conf5 = expit(img_data[i, j * 26 + 24])
+                        box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
+                        max_conf_idx = int(np.argmax(box_confs))
+                        # Then we check if the responsible box is above the threshold for detecting an object
+                        if box_confs[max_conf_idx] > 0.6:
+                            # This box has detected an object, so we extract and convert its coords
+                            pred_box = img_data[i, j*26+5*max_conf_idx:j*26+5*max_conf_idx+4]
+
+                            # centers from which x and y offsets are applied to, these are in 'grid coords'
+                            c_x = j % self._grid_w
+                            c_y = j // self._grid_w
+                            # x and y go from 'grid coords' to 'patch coords' to 'full img coords'
+                            x = (expit(pred_box[0]) + c_x) * (patch_width / self._grid_w) \
+                                + (i % num_patches_horiz) * patch_width
+                            y = (expit(pred_box[1]) + c_y) * (patch_height / self._grid_h) \
+                                + (i // num_patches_horiz) * patch_height
+                            # get the anchor box based on the highest conf (responsible box)
+                            prior_w = self._ANCHORS[max_conf_idx][0]
+                            prior_h = self._ANCHORS[max_conf_idx][1]
+                            # w and h go from 'grid coords' to 'full img coords'
+                            w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
+                            h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
+                            # turn into points
+                            x1y1 = (int(x - w / 2), int(y - h / 2))
+                            x2y2 = (int(x + w / 2), int(y + h / 2))
+                            total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
+
+                # Non - maximal suppression (Probably make into a general function)
+                all_boxes = np.array(total_pred_boxes)
+                idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
+                final_boxes_idxs = []
+                while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
+                    last = len(idxs) - 1  # since sorted in reverse order, the last one has the highest conf
+                    i = idxs[last]
+                    final_boxes_idxs.append(i)  # add it to the maximal list, then check for duplicates to delete
+                    suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
+                    for pos in range(0, last):  # search for duplicates
+                        j = idxs[pos]
+                        iou = self.__compute_iou(all_boxes[i], all_boxes[j])
+                        if iou > 0.3:  # maybe should make this a tunable parameter
+                            suppress.append(pos)
+                    idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
+
+            # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+            interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
+            return interpreted_outputs
+        else:
+            # no patching
+            print(total_outputs.shape)
+            for img_data in total_outputs:
+                ###################################################################################################
+                # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
+                # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
+                # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
+                # this may likely need to be made more general in future
+                ###################################################################################################
+                for i in range(self._grid_w * self._grid_h):
+                    # x,y,w,h,conf,x,y,w,h,cong,x,y,...... classes
+                    box_conf1 = expit(img_data[i * 26 + 4])
+                    box_conf2 = expit(img_data[i * 26 + 9])
+                    box_conf3 = expit(img_data[i * 26 + 14])
+                    box_conf4 = expit(img_data[i * 26 + 19])
+                    box_conf5 = expit(img_data[i * 26 + 24])
+                    box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
+                    max_conf_idx = int(np.argmax(box_confs))
+
+                    if box_confs[max_conf_idx] > 0.6:
+                        pred_box = img_data[i * 26 + 5 * max_conf_idx: i * 26 + 5 * max_conf_idx + 4]
+
+                        # centers from which x and y offsets are applied to, these are in 'grid coords'
+                        c_x = i % self._grid_w
+                        c_y = i // self._grid_w
+                        # x and y go from 'grid coords' to 'full img coords'
+                        x = (expit(pred_box[0]) + c_x) * (self._image_width / self._grid_w)
+                        y = (expit(pred_box[1]) + c_y) * (self._image_height / self._grid_h)
+                        # get the anchor box based on the highest conf (responsible box)
+                        prior_w = self._ANCHORS[max_conf_idx][0]
+                        prior_h = self._ANCHORS[max_conf_idx][1]
+                        # w and h go from 'grid coords' to 'full img coords'
+                        w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
+                        h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
+                        x1y1 = (int(x - w / 2), int(y - h / 2))
+                        x2y2 = (int(x + w / 2), int(y + h / 2))
+                        total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
+
+                # Non - maximal suppression (Probably make into a general function)
+                all_boxes = np.array(total_pred_boxes)
+                idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
+                final_boxes_idxs = []
+                while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
+                    last = len(idxs) - 1  # since sorted in reverse order, the last one has highest conf
+                    i = idxs[last]
+                    final_boxes_idxs.append(i)  # add it to the maximal list, then check for duplicates to delete
+                    suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
+                    for pos in range(0, last):  # search for duplicates
+                        j = idxs[pos]
+                        iou = self.__compute_iou(all_boxes[i], all_boxes[j])
+                        if iou > 0.3:  # maybe should make this a tunable parameter
+                            suppress.append(pos)
+                    idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
+
+            # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
+            interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
+            return interpreted_outputs
+
+    def __compute_iou(self, box1, box2):
+        """
+        Need to somehow merge with the iou helper function in the yolo cost function.
+
+        :param box1: x1, y1, x2, y2
+        :param box2: x1, y1, x2, y2
+        :return: Intersection Over Union of box1 and box2
+        """
+        x1 = np.maximum(box1[0], box2[0])
+        y1 = np.maximum(box1[1], box2[1])
+        x2 = np.minimum(box1[2], box2[2])
+        y2 = np.minimum(box1[3], box2[3])
+
+        intersection_area = np.maximum(0., x2 - x1) * np.maximum(0., y2 - y1)
+        union_area = \
+            ((box1[2] - box1[0]) * (box1[3] - box1[1])) + \
+            ((box2[2] - box2[0]) * (box2[3] - box2[1])) - \
+            intersection_area
+
+        return intersection_area / union_area
