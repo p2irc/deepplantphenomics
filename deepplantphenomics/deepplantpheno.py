@@ -3061,50 +3061,10 @@ class DPPModel(object):
         for label in labels:
             curr_label = []
             for nums in label:
-                if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    # yolo wants x,y,w,h for coords
-                    curr_label.extend(loaders.box_coordinates_to_xywh_coordinates(nums))
-                else:
-                    curr_label.extend(loaders.box_coordinates_to_pascal_voc_coordinates(nums))
+                curr_label.extend(loaders.box_coordinates_to_pascal_voc_coordinates(nums))
             self._all_labels.append(curr_label)
 
         self._total_raw_samples = len(images)
-
-        # need to add object-ness flag and one-hot encodings for class
-        # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
-        # e.g. [1,0,0,...,1,...,0,223,364,58,62] but since there is only one class for the ippn dataset we get
-        # [1,1,x,y,w,h]
-        if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-            # for scaling bbox coords
-            # scaling image down to the grid size
-            scale_ratio_w = self._grid_w / self._image_width_original
-            scale_ratio_h = self._grid_h / self._image_height_original
-
-            labels_with_one_hot = []
-            for curr_img_coords in self._all_labels:
-                curr_img_labels = []
-                num_boxes = len(curr_img_coords) // 4
-                for i in range(num_boxes):
-                    # start the current box label with the object-ness flag and class label (there is only one class
-                    # for ippn)
-                    curr_box = [1, 1]
-                    # add scaled bbox coords
-                    j = i * 4
-                    # x and y offsets from grid position
-                    x_grid = curr_img_coords[j] * scale_ratio_w
-                    y_grid = curr_img_coords[j + 1] * scale_ratio_h
-                    x_grid_offset, x_grid_loc = np.modf(x_grid)
-                    y_grid_offset, y_grid_loc = np.modf(y_grid)
-                    # w and h ratios from anchor box
-                    w_ratio = curr_img_coords[j + 2] / self._ANCHORS[0]
-                    h_ratio = curr_img_coords[j + 3] / self._ANCHORS[1]
-                    curr_box.append(x_grid_offset)
-                    curr_box.append(y_grid_offset)
-                    curr_box.append(w_ratio)
-                    curr_box.append(h_ratio)
-                    curr_img_labels.extend(curr_box)
-                labels_with_one_hot.append(curr_img_labels)
-            self._raw_labels = labels_with_one_hot
 
         self.__log('Total raw examples is %d' % self._total_raw_samples)
         self.__log('Parsing dataset...')
@@ -3291,51 +3251,6 @@ class DPPModel(object):
             self._raw_image_files = images
             self._raw_labels = labels
 
-    def load_yolo_dataset_from_directory(self, data_dir, label_file=None, image_dir=None):
-        """
-        Loads in labels and images for object detection tasks, converting the labels to YOLO format and automatically
-        patching the images if necessary.
-
-        :param data_dir: String, The directory where the labels and images are stored in
-        :param label_file: String, The filename for the JSON file with the labels. Optional if using automatic patching
-        which has been done already
-        :param image_dir: String, The directory with the images. Optional if using automatic patching which has been
-        done already
-        """
-        if self._problem_type != definitions.ProblemType.OBJECT_DETECTION:
-            raise RuntimeError("YOLO datasets can only be loaded object detection problems")
-
-        load_patched_data = self._with_patching and 'tmp_train' in os.listdir(data_dir)
-
-        # Construct the paths to the labels and images
-        if load_patched_data:
-            label_path = os.path.join(data_dir, 'tmp_train/json/train_patches.json')
-            image_path = os.path.join(data_dir, 'tmp_train/image_patches', '')
-        else:
-            label_path = os.path.join(data_dir, label_file)
-            image_path = os.path.join(data_dir, image_dir, '')
-
-        # Load the labels and images
-        if load_patched_data:
-            # Hack to make the label reader convert the labels to YOLO format when re-reading image patches
-            self._with_patching = False
-        self.load_json_labels_from_file(label_path)
-        images_list = [image_path + filename for filename in sorted(os.listdir(image_path))
-                       if filename.endswith('.png')]
-        self.load_images_from_list(images_list)
-        if load_patched_data:
-            # Remove the hack
-            self._with_patching = True
-
-        # Perform automatic image patching if necessary
-        if self._with_patching and 'tmp_train' not in os.listdir(data_dir):
-            self._raw_image_files, self._all_labels = \
-                self.object_detection_patching_and_augmentation(patch_dir=data_dir)
-            self.__convert_labels_to_yolo_format()
-            self._raw_labels = self._all_labels
-            self._total_raw_samples = len(self._raw_image_files)
-            self.__log('Total raw patch examples is %d' % self._total_raw_samples)
-
     def load_images_from_list(self, image_files):
         """
         Loads images from a list of file names (strings). Regression or classification labels MUST be loaded first.
@@ -3353,391 +3268,6 @@ class DPPModel(object):
             self._raw_labels = self._all_labels
         else:
             self._images_only = True
-
-    def object_detection_patching_and_augmentation(self, patch_dir=None):
-        # make the below a function
-        # labels, images = function()
-        img_dict = {}
-        img_num = 0
-        img_name_idx = 1
-
-        if patch_dir:
-            patch_dir = os.path.join(patch_dir, 'tmp_train', '')
-        else:
-            patch_dir = os.path.join(os.path.curdir, 'tmp_train', '')
-        if not os.path.exists(patch_dir):
-            os.makedirs(patch_dir)
-        else:
-            raise RuntimeError("Patched images already exist in " + patch_dir + ". Either delete them and run again or "
-                               "use them directly (i.e. without patching).")
-
-        img_dir_out = patch_dir + 'image_patches/'
-        if not os.path.exists(img_dir_out):
-            os.makedirs(img_dir_out)
-        json_dir_out = patch_dir + 'json/'
-        if not os.path.exists(json_dir_out):
-            os.makedirs(json_dir_out)
-        new_raw_image_files = []
-        new_raw_labels = []
-
-        # first add images such that each grid cell has a plant in it
-        # should add num_images*grid many images (e.g. 27(images)*49(7x7grid))
-        self.__log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
-        for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
-            img_num += 1
-            img = np.array(Image.open(img_name))
-
-            # take patches that have a plant in each grid cell to ensure come training time that each grid cell learns
-            # to recognize an object
-            for i in range(self._grid_h):
-                for j in range(self._grid_w):
-                    # choose plant randomly (and far enough from edges)
-                    found_one = False
-                    failed = False
-                    find_count = 0
-                    random_indices = list(range(len(img_boxes)))
-                    while found_one is False:
-                        rand_idx = np.random.randint(0, len(random_indices))
-                        rand_plant_idx = random_indices[rand_idx]
-                        box_w = img_boxes[rand_plant_idx][1] - img_boxes[rand_plant_idx][0]
-                        box_h = img_boxes[rand_plant_idx][3] - img_boxes[rand_plant_idx][2]
-                        box_x = img_boxes[rand_plant_idx][0] + box_w / 2
-                        box_y = img_boxes[rand_plant_idx][2] + box_h / 2
-                        if box_x > (self._patch_width + 5) and box_x < (img.shape[1] - (self._patch_width + 5)) \
-                                and box_y > (self._patch_height + 5) and box_y < (
-                                img.shape[0] - (self._patch_height + 5)):
-                            found_one = True
-                        else:
-                            del random_indices[rand_idx]
-                        find_count += 1
-                        if find_count == len(img_boxes):
-                            failed = True
-                            break
-                    if failed:
-                        break
-
-                    # adjust center based on target grid location
-                    center_x = self._grid_w // 2
-                    center_y = self._grid_h // 2
-                    delta_x = j - center_x
-                    delta_y = i - center_y
-                    # note we need to invert the direction of delta_x so as to move the center to where we want it to be
-                    # hence subtraction
-                    new_x = int(box_x - (delta_x * (self._patch_width / self._grid_w)))
-                    new_y = int(box_y - (delta_y * (self._patch_height / self._grid_h)))
-
-                    top_row = new_y - (self._patch_height // 2)
-                    bot_row = top_row + self._patch_height
-                    left_col = new_x - (self._patch_width // 2)
-                    right_col = left_col + self._patch_width
-
-                    img_patch = img[top_row:bot_row, left_col:right_col]
-
-                    # search for, adjust, and add bbox coords for the json
-                    new_boxes = []
-                    new_raw_boxes = []
-                    for box in img_boxes:
-                        # check if box is inside current patch, if so convert the coords and add it to the json
-                        box_w = box[1] - box[0]
-                        box_h = box[3] - box[2]
-                        box_x = box[0] + box_w / 2
-                        box_y = box[2] + box_h / 2
-                        if (box_x >= left_col) and (box_x <= right_col) and (box_y >= top_row) and (
-                                box_y <= bot_row):
-                            delta_x = box_x - new_x
-                            delta_y = box_y - new_y
-                            new_x_center = self._patch_width // 2 + delta_x
-                            new_y_center = self._patch_height // 2 + delta_y
-                            new_x_min = new_x_center - box_w / 2
-                            new_x_max = new_x_min + box_w
-                            new_y_min = new_y_center - box_h / 2
-                            new_y_max = new_y_min + box_h
-
-                            new_boxes.append({"all_points_x": [new_x_min, new_x_max],
-                                              "all_points_y": [new_y_min, new_y_max]})
-                            new_raw_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
-
-                    # save image to disk
-                    # print(top_row, bot_row, left_col, right_col)
-                    result = Image.fromarray(img_patch.astype(np.uint8))
-                    new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                    result.save(new_img_name)
-
-                    new_raw_image_files.append(new_img_name)
-                    new_raw_labels.append(new_raw_boxes)
-
-                    img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                "width": self._patch_width,
-                                                                "file_name": "{:0>6d}".format(
-                                                                    img_name_idx) + '.png',
-                                                                "plants": new_boxes}
-                    img_name_idx += 1
-            self.__log(str(img_num) + '/' + str(len(self._all_labels)))
-        self.__log('Completed baseline train patches set. Total images: ' + str(img_name_idx))
-
-        # augmentation images: rotations, brightness, flips
-        self.__log('Beginning creating of augmentation patches')
-        for i in range(self._grid_h * self._grid_w):
-            for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
-                img = np.array(Image.open(img_name))
-                # randomly grab a patch, make sure it has at least one plant in it
-                max_width = img.shape[1] - (self._patch_width // 2)
-                min_width = (self._patch_width // 2)
-                max_height = img.shape[0] - (self._patch_height // 2)
-                min_height = (self._patch_height // 2)
-                found_one = False
-                while found_one is False:
-                    rand_x = np.random.randint(min_width, max_width + 1)
-                    rand_y = np.random.randint(min_height, max_height + 1)
-                    # determine patch location and slice into mask and img to create patch
-                    top_row = rand_y - (self._patch_height // 2)
-                    bot_row = top_row + self._patch_height
-                    left_col = rand_x - (self._patch_width // 2)
-                    right_col = left_col + self._patch_width
-                    img_patch = img[top_row:bot_row, left_col:right_col]
-                    # objects and corresponding bboxes
-                    new_boxes = []
-                    for box in img_boxes:
-                        cent_x = box[0] + ((box[1] - box[0]) / 2)
-                        cent_y = box[2] + ((box[3] - box[2]) / 2)
-                        # check if box is inside current patch, if so convert the coords and add it to the json
-                        if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (
-                                cent_y <= bot_row):
-                            box_w = box[1] - box[0]
-                            box_h = box[3] - box[2]
-                            box_x = box[0] + box_w / 2
-                            box_y = box[2] + box_h / 2
-                            delta_x = box_x - rand_x
-                            delta_y = box_y - rand_y
-                            new_x_center = self._patch_width // 2 + delta_x
-                            new_y_center = self._patch_height // 2 + delta_y
-                            new_x_min = new_x_center - box_w / 2
-                            new_x_max = new_x_min + box_w
-                            new_y_min = new_y_center - box_h / 2
-                            new_y_max = new_y_min + box_h
-                            new_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
-                    if len(new_boxes) >= 1:
-                        found_one = True
-
-                # augmentation is a random choice of 3 options
-                # 1 == rotation, 2 == brightness, 3 == flip
-                aug = np.random.randint(1, 4)
-                if aug == 1:
-                    # rotation
-                    k = np.random.randint(1, 4)
-                    rot_img_patch = np.rot90(img_patch, k)
-                    theta = np.radians(90 * k)
-                    x0 = self._patch_width // 2
-                    y0 = self._patch_height // 2
-                    rot_boxes = []
-                    raw_rot_boxes = []
-                    for box in new_boxes:
-                        # since only rotating by 90 degrees we could probably hard code in 1's, -1's, and 0's in the
-                        # cases instead of using sin and cos
-                        rot_x_min = x0 + (box[0] - x0) * np.cos(theta) + (box[2] - y0) * np.sin(theta)
-                        rot_y_min = y0 - (box[0] - x0) * np.sin(theta) + (box[2] - y0) * np.cos(theta)
-                        w = box[1] - box[0]
-                        h = box[3] - box[2]
-                        if k == 1:
-                            # w and h flip, x_min y_min become x_min y_max
-                            w, h = h, w
-                            rot_y_min -= h
-                        elif k == 2:
-                            # w and h stay same, x_min y_min become x_max y_max
-                            rot_x_min -= w
-                            rot_y_min -= h
-                        else:  # k == 3
-                            # w and h flip, x_min y_min become x_max y_min
-                            w, h = h, w
-                            rot_x_min -= w
-                        rot_x_max = rot_x_min + w
-                        rot_y_max = rot_y_min + h
-
-                        rot_boxes.append({"all_points_x": [rot_x_min, rot_x_max],
-                                          "all_points_y": [rot_y_min, rot_y_max]})
-                        raw_rot_boxes.append([rot_x_min, rot_x_max, rot_y_min, rot_y_max])
-                    # save image to disk
-                    result = Image.fromarray(rot_img_patch.astype(np.uint8))
-                    new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                    result.save(new_img_name)
-
-                    new_raw_image_files.append(new_img_name)
-                    new_raw_labels.append(raw_rot_boxes)
-
-                    img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                "width": self._patch_width,
-                                                                "file_name": "{:0>6d}".format(img_name_idx) + '.png',
-                                                                "plants": rot_boxes}
-                    img_name_idx += 1
-                elif aug == 2:
-                    # brightness
-                    value = np.random.randint(40, 76)  # just a 'nice amount' of brightness change, could be adjusted
-                    k = np.random.random()
-                    if k < 0.5:  # brighter
-                        bright_img_patch = np.where((255 - img_patch) < value, 255, img_patch + value)
-                    else:  # dimmer
-                        bright_img_patch = np.where(img_patch < value, 0, img_patch - value)
-
-                    bright_boxes = []
-                    raw_bright_boxes = []
-                    for box in new_boxes:
-                        bright_boxes.append({"all_points_x": [box[0], box[1]],
-                                             "all_points_y": [box[2], box[3]]})
-                        raw_bright_boxes.append([box[0], box[1], box[2], box[3]])
-
-                    # save image to disk
-                    result = Image.fromarray(bright_img_patch.astype(np.uint8))
-                    new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                    result.save(new_img_name)
-
-                    new_raw_image_files.append(new_img_name)
-                    new_raw_labels.append(raw_bright_boxes)
-
-                    img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                "width": self._patch_width,
-                                                                "file_name": "{:0>6d}".format(img_name_idx) + '.png',
-                                                                "plants": bright_boxes}
-                    img_name_idx += 1
-
-                else:  # aug == 3
-                    # flip
-                    k = np.random.random()
-                    if k < 0.5:
-                        flip_img_patch = np.fliplr(img_patch)
-                        flip_boxes = []
-                        raw_flip_boxes = []
-                        for box in new_boxes:
-                            w = box[1] - box[0]
-                            # h = box[3] - box[2] for reference
-                            x_min = self._patch_width - (box[1])
-                            x_max = x_min + w
-                            y_min = box[2]
-                            y_max = box[3]
-
-                            flip_boxes.append({"all_points_x": [x_min, x_max],
-                                               "all_points_y": [y_min, y_max]})
-                            raw_flip_boxes.append([x_min, x_max, y_min, y_max])
-
-                        result = Image.fromarray(flip_img_patch.astype(np.uint8))
-                        new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                        result.save(new_img_name)
-
-                        new_raw_image_files.append(new_img_name)
-                        new_raw_labels.append(raw_flip_boxes)
-
-                        img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                    "width": self._patch_width,
-                                                                    "file_name": "{:0>6d}".format(
-                                                                        img_name_idx) + '.png',
-                                                                    "plants": flip_boxes}
-                        img_name_idx += 1
-                    else:
-                        flip_img_patch = np.flipud(img_patch)
-                        flip_boxes = []
-                        raw_flip_boxes = []
-                        for box in new_boxes:
-                            # w = box[1] - box[0] for reference
-                            h = box[3] - box[2]
-                            x_min = box[0]
-                            x_max = box[1]
-                            y_min = self._patch_height - (box[3])
-                            y_max = y_min + h
-
-                            flip_boxes.append({"all_points_x": [x_min, x_max],
-                                               "all_points_y": [y_min, y_max]})
-                            raw_flip_boxes.append([x_min, x_max, y_min, y_max])
-
-                        result = Image.fromarray(flip_img_patch.astype(np.uint8))
-                        new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                        result.save(new_img_name)
-
-                        new_raw_image_files.append(new_img_name)
-                        new_raw_labels.append(raw_flip_boxes)
-
-                        img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                    "width": self._patch_width,
-                                                                    "file_name": "{:0>6d}".format(
-                                                                        img_name_idx) + '.png',
-                                                                    "plants": flip_boxes}
-                        img_name_idx += 1
-            self.__log(str(i + 1) + '/' + str(self._grid_w * self._grid_h))
-        self.__log('Completed augmentation set. Total images: ' + str(img_name_idx))
-
-        # rest are just random patches
-        num_patches = img_name_idx // len(self._raw_image_files)
-        self.__log('Generating random patches')
-        img_num = 0
-        random_imgs = 0
-        for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
-            img_num += 1
-            img = np.array(Image.open(img_name))
-            # we will randomly generate centers of the images we are extracting
-            #  with size: patch_size x patch_size
-            max_width = img.shape[1] - (self._patch_width // 2)
-            min_width = (self._patch_width // 2)
-            max_height = img.shape[0] - (self._patch_height // 2)
-            min_height = (self._patch_height // 2)
-            rand_x = np.random.randint(min_width, max_width + 1, num_patches)
-            rand_y = np.random.randint(min_height, max_height + 1, num_patches)
-
-            for idx, center in enumerate(zip(rand_x, rand_y)):
-                # determine patch location and slice into mask and img to create patch
-                top_row = center[1] - (self._patch_height // 2)
-                bot_row = top_row + self._patch_height
-                left_col = center[0] - (self._patch_width // 2)
-                right_col = left_col + self._patch_width
-                img_patch = img[top_row:bot_row, left_col:right_col]
-
-                # objects and corresponding bboxes
-                new_boxes = []
-                raw_new_boxes = []
-                for box in img_boxes:
-                    cent_x = box[0] + ((box[1] - box[0]) / 2)
-                    cent_y = box[2] + ((box[3] - box[2]) / 2)
-                    # check if box is inside current patch, if so convert the coords and add it to the json
-                    if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (cent_y <= bot_row):
-                        box_w = box[1] - box[0]
-                        box_h = box[3] - box[2]
-                        box_x = box[0] + box_w / 2
-                        box_y = box[2] + box_h / 2
-                        delta_x = box_x - center[0]
-                        delta_y = box_y - center[1]
-                        new_x_center = self._patch_width // 2 + delta_x
-                        new_y_center = self._patch_height // 2 + delta_y
-                        new_x_min = new_x_center - box_w / 2
-                        new_x_max = new_x_min + box_w
-                        new_y_min = new_y_center - box_h / 2
-                        new_y_max = new_y_min + box_h
-
-                        new_boxes.append({"all_points_x": [new_x_min, new_x_max],
-                                          "all_points_y": [new_y_min, new_y_max]})
-                        raw_new_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
-
-                # save image to disk
-                result = Image.fromarray(img_patch.astype(np.uint8))
-                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                result.save(new_img_name)
-
-                new_raw_image_files.append(new_img_name)
-                new_raw_labels.append(raw_new_boxes)
-
-                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                            "width": self._patch_width,
-                                                            "file_name": "{:0>6d}".format(img_name_idx) + '.png',
-                                                            "plants": new_boxes}
-                img_name_idx += 1
-
-            # verbose
-            random_imgs += 1
-            self.__log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
-
-        # save into json
-        # with open('/home/nico/yolo_data/yolo_test_imgs/blanche/test_patches_out.json', 'w') as outfile:
-        #     json.dump(img_dict, outfile)
-        with open(json_dir_out + 'train_patches.json', 'w') as outfile:
-            json.dump(img_dict, outfile)
-
-        return new_raw_image_files, new_raw_labels
 
     def load_multiple_labels_from_csv(self, filepath, id_column=0):
         """
@@ -3825,62 +3355,6 @@ class DPPModel(object):
             self._all_ids.append(im_id)
             self._all_labels.append([x_min, x_max, y_min, y_max])
 
-        # need to add object-ness flag and one-hot encodings for class
-        # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
-        # e.g. [1,0,0,...,1,...,0,223,364,58,62]
-        if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-            # for scaling bbox coords
-            # scaling image down to the grid size
-            scale_ratio_w = self._grid_w / self._image_width
-            scale_ratio_h = self._grid_h / self._image_height
-
-            labels_with_one_hot = []
-            for curr_img_coords in self._all_labels:
-                curr_img_grid_locs = []  # for duplicates; current hacky fix
-                curr_img_labels = np.zeros((self._grid_w * self._grid_h) * (1 + self._NUM_CLASSES + 4))
-
-                # only one object per image so no need to loop here
-                # add scaled bbox coords
-                # x and y offsets from grid position
-                w = curr_img_coords[1] - curr_img_coords[0]
-                h = curr_img_coords[3] - curr_img_coords[2]
-                x_center = (w / 2) + curr_img_coords[0]
-                y_center = (h / 2) + curr_img_coords[2]
-                x_grid = x_center * scale_ratio_w
-                y_grid = y_center * scale_ratio_h
-                x_grid_offset, x_grid_loc = np.modf(x_grid)
-                y_grid_offset, y_grid_loc = np.modf(y_grid)
-
-                # for duplicate object in grid checking
-                if (x_grid_loc, y_grid_loc) in curr_img_grid_locs:
-                    continue
-                else:
-                    curr_img_grid_locs.append((x_grid_loc, y_grid_loc))
-
-                # w and h values on grid scale
-                w_grid = w * scale_ratio_w
-                h_grid = h * scale_ratio_h
-
-                # compute grid-cell location
-                # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
-                # would be 4 (or 3 when 0-indexing)
-                grid_loc = (y_grid_loc * self._grid_w) + x_grid_loc
-
-                # 1 for obj then 1 since only once class <- needs to be made more general for multiple classes
-                # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
-                # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
-                # x,y,w,h then use the in this next line below
-                # cur_box = []... vec_size = len(currbox)....
-                vec_size = (1 + self._NUM_CLASSES + 4)
-                curr_img_labels[int(grid_loc)*vec_size:(int(grid_loc)+1)*vec_size] = \
-                    [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
-                # using extend because I had trouble with converting a list of lists to a tensor using our string
-                # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-                # train shuffle batch has been the current hacky fix
-                labels_with_one_hot.append(curr_img_labels)
-
-            self._all_labels = labels_with_one_hot
-
     def load_json_labels_from_file(self, filename):
         """Loads bounding boxes for multiple images from a single json file."""
         # these are for jsons in the structure that I got from Blanche's data #
@@ -3910,87 +3384,6 @@ class DPPModel(object):
 
                 boxes.append([x_min, x_max, y_min, y_max])
             self._all_labels.append(boxes)
-
-        # need to add one-hot encodings for class and object existence label
-        # it will 1 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
-        # e.g. [1,0,0,...,1,...,0,x,y,w,h]
-        if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-            if not self._with_patching:
-                self.__convert_labels_to_yolo_format()
-
-    def __convert_labels_to_yolo_format(self):
-        """Takes the labels that are in the json format and turns them into formatted arrays
-        that the network and yolo loss function are expecting to work with"""
-
-        # for scaling bbox coords
-        # scaling image down to the grid size
-        scale_ratio_w = self._grid_w / self._image_width
-        scale_ratio_h = self._grid_h / self._image_height
-
-        labels_with_one_hot = []
-        for curr_img_coords in self._all_labels:
-            curr_img_grid_locs = []  # for duplicates; current hacky fix
-            curr_img_labels = np.zeros((self._grid_w * self._grid_h) * (1 + self._NUM_CLASSES + 4))
-            num_boxes = len(curr_img_coords)
-            for i in range(num_boxes):
-                curr_box = []
-                # add objectness
-                curr_box.append(1)
-                # add the class label
-                # (there is only one class ATM -- needs to be fixed to be more general)
-                curr_box.append(1)
-                # add scaled bbox coords
-                # x and y offsets from grid position
-                w = curr_img_coords[i][1] - curr_img_coords[i][0]
-                h = curr_img_coords[i][3] - curr_img_coords[i][2]
-                x_center = (w / 2) + curr_img_coords[i][0]
-                y_center = (h / 2) + curr_img_coords[i][2]
-                x_grid = x_center * scale_ratio_w
-                y_grid = y_center * scale_ratio_h
-                x_grid_offset, x_grid_loc = np.modf(x_grid)
-                y_grid_offset, y_grid_loc = np.modf(y_grid)
-
-                # for duplicate object in grid checking
-                if (x_grid_loc, y_grid_loc) in curr_img_grid_locs:
-                    continue
-                else:
-                    curr_img_grid_locs.append((x_grid_loc, y_grid_loc))
-
-                # w and h values on grid scale
-                w_grid = w * scale_ratio_w
-                h_grid = h * scale_ratio_h
-                curr_box.append(x_grid_offset)
-                curr_box.append(y_grid_offset)
-                curr_box.append(w_grid)
-                curr_box.append(h_grid)
-
-                # compute grid-cell location
-                # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
-                # would be 4 (or 3 when 0-indexing)
-                grid_loc = ((y_grid_loc * self._grid_w) + x_grid_loc) % (self._grid_h * self._grid_w)
-                # the % (self._grid_h*self._grid_w) is to handle the rare case we are right on the edge and
-                # we want the last 0-indexed grid position (off by 1 error, get 49 for 7x7 grid when should have 48)
-
-                # 1 for obj then 1 since only one class <- needs to be made more general for multiple classes #
-                # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
-                # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
-                # x,y,w,h then use the in this next line below
-                # cur_box = []... vec_size = len(currbox)....
-                curr_box = []
-                curr_box.append(1)  # obj
-                curr_box.append(1)  # classes <- needs to be made more general for multiple classes
-                curr_box.append(x_grid_offset)
-                curr_box.append(y_grid_offset)
-                curr_box.append(w_grid)
-                curr_box.append(h_grid)
-                vec_size = (1 + self._NUM_CLASSES + 4)
-                curr_img_labels[int(grid_loc) * vec_size:(int(grid_loc) + 1) * vec_size] = curr_box
-                # using extend because I had trouble with converting a list of lists to a tensor using our string
-                # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-                # train shuffle batch has been the current hacky fix
-            labels_with_one_hot.append(curr_img_labels)
-
-        self._all_labels = labels_with_one_hot
 
     def __parse_dataset(self, train_images, train_labels, train_mf,
                         test_images, test_labels, test_mf,
@@ -4793,6 +4186,38 @@ class ClassificationModel(DPPModel):
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
+    def load_ippn_dataset_from_directory(self, dirname, column='strain'):
+        """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
+
+        labels = []
+        ids = []
+        if column == 'treatment':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 2, 0)
+        elif column == 'strain':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        elif column == 'DAG':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 3, 0)
+        else:
+            warnings.warn('Unknown column in IPPN dataset')
+            exit()
+
+        image_files = [os.path.join(dirname, im_id + '_rgb.png') for im_id in ids]
+
+        self._total_raw_samples = len(image_files)
+
+        self._total_classes = len(set(labels))
+
+        # transform into numerical one-hot labels
+        with self._graph.as_default():
+            labels = loaders.string_labels_to_sequential(labels)
+            labels = tf.one_hot(labels, self._total_classes)
+
+        self.__log('Total classes is %d' % self._total_classes)
+        self.__log('Total raw examples is %d' % self._total_raw_samples)
+
+        self._raw_image_files = image_files
+        self._raw_labels = labels
+
 
 class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
@@ -5434,6 +4859,32 @@ class RegressionModel(DPPModel):
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
+
+    def load_ippn_dataset_from_directory(self, dirname, column='strain'):
+        """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
+
+        labels = []
+        ids = []
+        if column == 'treatment':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 2, 0)
+        elif column == 'strain':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
+        elif column == 'DAG':
+            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 3, 0)
+        else:
+            warnings.warn('Unknown column in IPPN dataset')
+            exit()
+
+        image_files = [os.path.join(dirname, im_id + '_rgb.png') for im_id in ids]
+
+        self._total_raw_samples = len(image_files)
+
+        labels = [[label] for label in labels]
+
+        self.__log('Total raw examples is %d' % self._total_raw_samples)
+
+        self._raw_image_files = image_files
+        self._raw_labels = labels
 
 
 class SemanticSegmentationModel(DPPModel):
@@ -6115,6 +5566,29 @@ class SemanticSegmentationModel(DPPModel):
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
+
+    def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
+        """
+        Loads the png images in the given directory into an internal representation, using binary segmentation
+        masks from another file with the same filename as ground truth.
+
+        :param dirname: the path of the directory containing the images
+        :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
+        """
+
+        image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
+                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
+
+        seg_files = [os.path.join(seg_dirname, name) for name in os.listdir(seg_dirname) if
+                     os.path.isfile(os.path.join(seg_dirname, name)) & name.endswith('.png')]
+
+        self._total_raw_samples = len(image_files)
+
+        self.__log('Total raw examples is %d' % self._total_raw_samples)
+
+        self._raw_image_files = image_files
+        self._raw_labels = seg_files
+        self._split_labels = False  # Band-aid fix
 
 
 class ObjectDetectionModel(DPPModel):
@@ -7272,3 +6746,625 @@ class ObjectDetectionModel(DPPModel):
 
         self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
+
+    def load_ippn_tray_dataset_from_directory(self, dirname):
+        """
+        Loads the RGB tray images and plant bounding box labels from the International Plant Phenotyping Network
+        dataset.
+        """
+        self._resize_bbox_coords = True
+
+        images = [os.path.join(dirname, name) for name in sorted(os.listdir(dirname)) if
+                  os.path.isfile(os.path.join(dirname, name)) & name.endswith('_rgb.png')]
+
+        label_files = [os.path.join(dirname, name) for name in sorted(os.listdir(dirname)) if
+                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('_bbox.csv')]
+
+        # currently reads columns, need to read rows instead!!!
+        labels = [loaders.read_csv_rows(label_file) for label_file in label_files]
+
+        self._all_labels = []
+        for label in labels:
+            curr_label = []
+            for nums in label:
+                # yolo wants x,y,w,h for coords
+                curr_label.extend(loaders.box_coordinates_to_xywh_coordinates(nums))
+            self._all_labels.append(curr_label)
+
+        self._total_raw_samples = len(images)
+
+        # need to add object-ness flag and one-hot encodings for class
+        # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
+        # e.g. [1,0,0,...,1,...,0,223,364,58,62] but since there is only one class for the ippn dataset we get
+        # [1,1,x,y,w,h]
+
+        # for scaling bbox coords
+        # scaling image down to the grid size
+        scale_ratio_w = self._grid_w / self._image_width_original
+        scale_ratio_h = self._grid_h / self._image_height_original
+
+        labels_with_one_hot = []
+        for curr_img_coords in self._all_labels:
+            curr_img_labels = []
+            num_boxes = len(curr_img_coords) // 4
+            for i in range(num_boxes):
+                # start the current box label with the object-ness flag and class label (there is only one class
+                # for ippn)
+                curr_box = [1, 1]
+                # add scaled bbox coords
+                j = i * 4
+                # x and y offsets from grid position
+                x_grid = curr_img_coords[j] * scale_ratio_w
+                y_grid = curr_img_coords[j + 1] * scale_ratio_h
+                x_grid_offset, x_grid_loc = np.modf(x_grid)
+                y_grid_offset, y_grid_loc = np.modf(y_grid)
+                # w and h ratios from anchor box
+                w_ratio = curr_img_coords[j + 2] / self._ANCHORS[0]
+                h_ratio = curr_img_coords[j + 3] / self._ANCHORS[1]
+                curr_box.append(x_grid_offset)
+                curr_box.append(y_grid_offset)
+                curr_box.append(w_ratio)
+                curr_box.append(h_ratio)
+                curr_img_labels.extend(curr_box)
+            labels_with_one_hot.append(curr_img_labels)
+        self._raw_labels = labels_with_one_hot
+
+        self.__log('Total raw examples is %d' % self._total_raw_samples)
+        self.__log('Parsing dataset...')
+
+        self._raw_image_files = images
+        self._raw_labels = self._all_labels
+
+    def load_yolo_dataset_from_directory(self, data_dir, label_file=None, image_dir=None):
+        """
+        Loads in labels and images for object detection tasks, converting the labels to YOLO format and automatically
+        patching the images if necessary.
+
+        :param data_dir: String, The directory where the labels and images are stored in
+        :param label_file: String, The filename for the JSON file with the labels. Optional if using automatic patching
+        which has been done already
+        :param image_dir: String, The directory with the images. Optional if using automatic patching which has been
+        done already
+        """
+        load_patched_data = self._with_patching and 'tmp_train' in os.listdir(data_dir)
+
+        # Construct the paths to the labels and images
+        if load_patched_data:
+            label_path = os.path.join(data_dir, 'tmp_train/json/train_patches.json')
+            image_path = os.path.join(data_dir, 'tmp_train/image_patches', '')
+        else:
+            label_path = os.path.join(data_dir, label_file)
+            image_path = os.path.join(data_dir, image_dir, '')
+
+        # Load the labels and images
+        if load_patched_data:
+            # Hack to make the label reader convert the labels to YOLO format when re-reading image patches
+            self._with_patching = False
+        self.load_json_labels_from_file(label_path)
+        images_list = [image_path + filename for filename in sorted(os.listdir(image_path))
+                       if filename.endswith('.png')]
+        self.load_images_from_list(images_list)
+        if load_patched_data:
+            # Remove the hack
+            self._with_patching = True
+
+        # Perform automatic image patching if necessary
+        if self._with_patching and 'tmp_train' not in os.listdir(data_dir):
+            self._raw_image_files, self._all_labels = \
+                self.__object_detection_patching_and_augmentation(patch_dir=data_dir)
+            self.__convert_labels_to_yolo_format()
+            self._raw_labels = self._all_labels
+            self._total_raw_samples = len(self._raw_image_files)
+            self.__log('Total raw patch examples is %d' % self._total_raw_samples)
+
+    def __object_detection_patching_and_augmentation(self, patch_dir=None):
+        # make the below a function
+        # labels, images = function()
+        img_dict = {}
+        img_num = 0
+        img_name_idx = 1
+
+        if patch_dir:
+            patch_dir = os.path.join(patch_dir, 'tmp_train', '')
+        else:
+            patch_dir = os.path.join(os.path.curdir, 'tmp_train', '')
+        if not os.path.exists(patch_dir):
+            os.makedirs(patch_dir)
+        else:
+            raise RuntimeError("Patched images already exist in " + patch_dir + ". Either delete them and run again or "
+                               "use them directly (i.e. without patching).")
+
+        img_dir_out = patch_dir + 'image_patches/'
+        if not os.path.exists(img_dir_out):
+            os.makedirs(img_dir_out)
+        json_dir_out = patch_dir + 'json/'
+        if not os.path.exists(json_dir_out):
+            os.makedirs(json_dir_out)
+        new_raw_image_files = []
+        new_raw_labels = []
+
+        # first add images such that each grid cell has a plant in it
+        # should add num_images*grid many images (e.g. 27(images)*49(7x7grid))
+        self.__log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
+        for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
+            img_num += 1
+            img = np.array(Image.open(img_name))
+
+            # take patches that have a plant in each grid cell to ensure come training time that each grid cell learns
+            # to recognize an object
+            for i in range(self._grid_h):
+                for j in range(self._grid_w):
+                    # choose plant randomly (and far enough from edges)
+                    found_one = False
+                    failed = False
+                    find_count = 0
+                    random_indices = list(range(len(img_boxes)))
+                    while found_one is False:
+                        rand_idx = np.random.randint(0, len(random_indices))
+                        rand_plant_idx = random_indices[rand_idx]
+                        box_w = img_boxes[rand_plant_idx][1] - img_boxes[rand_plant_idx][0]
+                        box_h = img_boxes[rand_plant_idx][3] - img_boxes[rand_plant_idx][2]
+                        box_x = img_boxes[rand_plant_idx][0] + box_w / 2
+                        box_y = img_boxes[rand_plant_idx][2] + box_h / 2
+                        if (self._patch_width + 5) < box_x < (img.shape[1] - (self._patch_width + 5)) \
+                                and (self._patch_height + 5) < box_y < (img.shape[0] - (self._patch_height + 5)):
+                            found_one = True
+
+                            # adjust center based on target grid location
+                            center_x = self._grid_w // 2
+                            center_y = self._grid_h // 2
+                            delta_x = j - center_x
+                            delta_y = i - center_y
+                            # note we need to invert the direction of delta_x so as to move the center to where we
+                            # want it to be, hence subtraction
+                            new_x = int(box_x - (delta_x * (self._patch_width / self._grid_w)))
+                            new_y = int(box_y - (delta_y * (self._patch_height / self._grid_h)))
+
+                            top_row = new_y - (self._patch_height // 2)
+                            bot_row = top_row + self._patch_height
+                            left_col = new_x - (self._patch_width // 2)
+                            right_col = left_col + self._patch_width
+
+                            img_patch = img[top_row:bot_row, left_col:right_col]
+
+                            # search for, adjust, and add bbox coords for the json
+                            new_boxes = []
+                            new_raw_boxes = []
+                            for box in img_boxes:
+                                # check if box is inside current patch, if so convert the coords and add it to the json
+                                box_w = box[1] - box[0]
+                                box_h = box[3] - box[2]
+                                box_x = box[0] + box_w / 2
+                                box_y = box[2] + box_h / 2
+                                if (box_x >= left_col) and (box_x <= right_col) and (box_y >= top_row) and (
+                                        box_y <= bot_row):
+                                    delta_x = box_x - new_x
+                                    delta_y = box_y - new_y
+                                    new_x_center = self._patch_width // 2 + delta_x
+                                    new_y_center = self._patch_height // 2 + delta_y
+                                    new_x_min = new_x_center - box_w / 2
+                                    new_x_max = new_x_min + box_w
+                                    new_y_min = new_y_center - box_h / 2
+                                    new_y_max = new_y_min + box_h
+
+                                    new_boxes.append({"all_points_x": [new_x_min, new_x_max],
+                                                      "all_points_y": [new_y_min, new_y_max]})
+                                    new_raw_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
+
+                            # save image to disk
+                            # print(top_row, bot_row, left_col, right_col)
+                            result = Image.fromarray(img_patch.astype(np.uint8))
+                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                            result.save(new_img_name)
+
+                            new_raw_image_files.append(new_img_name)
+                            new_raw_labels.append(new_raw_boxes)
+
+                            img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
+                                                                        "width": self._patch_width,
+                                                                        "file_name": "{:0>6d}".format(
+                                                                            img_name_idx) + '.png',
+                                                                        "plants": new_boxes}
+                            img_name_idx += 1
+                        else:
+                            del random_indices[rand_idx]
+                        find_count += 1
+                        if find_count == len(img_boxes):
+                            failed = True
+                            break
+                    if failed:
+                        break
+
+            self.__log(str(img_num) + '/' + str(len(self._all_labels)))
+        self.__log('Completed baseline train patches set. Total images: ' + str(img_name_idx))
+
+        # augmentation images: rotations, brightness, flips
+        self.__log('Beginning creating of augmentation patches')
+        for i in range(self._grid_h * self._grid_w):
+            for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
+                img = np.array(Image.open(img_name))
+                # randomly grab a patch, make sure it has at least one plant in it
+                max_width = img.shape[1] - (self._patch_width // 2)
+                min_width = (self._patch_width // 2)
+                max_height = img.shape[0] - (self._patch_height // 2)
+                min_height = (self._patch_height // 2)
+                found_one = False
+                while found_one is False:
+                    rand_x = np.random.randint(min_width, max_width + 1)
+                    rand_y = np.random.randint(min_height, max_height + 1)
+                    # determine patch location and slice into mask and img to create patch
+                    top_row = rand_y - (self._patch_height // 2)
+                    bot_row = top_row + self._patch_height
+                    left_col = rand_x - (self._patch_width // 2)
+                    right_col = left_col + self._patch_width
+                    img_patch = img[top_row:bot_row, left_col:right_col]
+                    # objects and corresponding bboxes
+                    new_boxes = []
+                    for box in img_boxes:
+                        cent_x = box[0] + ((box[1] - box[0]) / 2)
+                        cent_y = box[2] + ((box[3] - box[2]) / 2)
+                        # check if box is inside current patch, if so convert the coords and add it to the json
+                        if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (
+                                cent_y <= bot_row):
+                            box_w = box[1] - box[0]
+                            box_h = box[3] - box[2]
+                            box_x = box[0] + box_w / 2
+                            box_y = box[2] + box_h / 2
+                            delta_x = box_x - rand_x
+                            delta_y = box_y - rand_y
+                            new_x_center = self._patch_width // 2 + delta_x
+                            new_y_center = self._patch_height // 2 + delta_y
+                            new_x_min = new_x_center - box_w / 2
+                            new_x_max = new_x_min + box_w
+                            new_y_min = new_y_center - box_h / 2
+                            new_y_max = new_y_min + box_h
+                            new_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
+                    if len(new_boxes) >= 1:
+                        found_one = True
+
+                        # augmentation is a random choice of 3 options
+                        # 1 == rotation, 2 == brightness, 3 == flip
+                        aug = np.random.randint(1, 4)
+                        if aug == 1:
+                            # rotation
+                            k = np.random.randint(1, 4)
+                            rot_img_patch = np.rot90(img_patch, k)
+                            theta = np.radians(90 * k)
+                            x0 = self._patch_width // 2
+                            y0 = self._patch_height // 2
+                            rot_boxes = []
+                            raw_rot_boxes = []
+                            for box in new_boxes:
+                                # since only rotating by 90 degrees we could probably hard code in 1's, -1's, and 0's
+                                # in the cases instead of using sin and cos
+                                rot_x_min = x0 + (box[0] - x0) * np.cos(theta) + (box[2] - y0) * np.sin(theta)
+                                rot_y_min = y0 - (box[0] - x0) * np.sin(theta) + (box[2] - y0) * np.cos(theta)
+                                w = box[1] - box[0]
+                                h = box[3] - box[2]
+                                if k == 1:
+                                    # w and h flip, x_min y_min become x_min y_max
+                                    w, h = h, w
+                                    rot_y_min -= h
+                                elif k == 2:
+                                    # w and h stay same, x_min y_min become x_max y_max
+                                    rot_x_min -= w
+                                    rot_y_min -= h
+                                else:  # k == 3
+                                    # w and h flip, x_min y_min become x_max y_min
+                                    w, h = h, w
+                                    rot_x_min -= w
+                                rot_x_max = rot_x_min + w
+                                rot_y_max = rot_y_min + h
+
+                                rot_boxes.append({"all_points_x": [rot_x_min, rot_x_max],
+                                                  "all_points_y": [rot_y_min, rot_y_max]})
+                                raw_rot_boxes.append([rot_x_min, rot_x_max, rot_y_min, rot_y_max])
+                            # save image to disk
+                            result = Image.fromarray(rot_img_patch.astype(np.uint8))
+                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                            result.save(new_img_name)
+
+                            new_raw_image_files.append(new_img_name)
+                            new_raw_labels.append(raw_rot_boxes)
+
+                            img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
+                                                                        "width": self._patch_width,
+                                                                        "file_name": "{:0>6d}".format(img_name_idx) +
+                                                                                     '.png',
+                                                                        "plants": rot_boxes}
+                            img_name_idx += 1
+                        elif aug == 2:
+                            # brightness
+                            value = np.random.randint(40, 76)  # just a 'nice amount' of brightness change
+                            k = np.random.random()
+                            if k < 0.5:  # brighter
+                                bright_img_patch = np.where((255 - img_patch) < value, 255, img_patch + value)
+                            else:  # dimmer
+                                bright_img_patch = np.where(img_patch < value, 0, img_patch - value)
+
+                            bright_boxes = []
+                            raw_bright_boxes = []
+                            for box in new_boxes:
+                                bright_boxes.append({"all_points_x": [box[0], box[1]],
+                                                     "all_points_y": [box[2], box[3]]})
+                                raw_bright_boxes.append([box[0], box[1], box[2], box[3]])
+
+                            # save image to disk
+                            result = Image.fromarray(bright_img_patch.astype(np.uint8))
+                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                            result.save(new_img_name)
+
+                            new_raw_image_files.append(new_img_name)
+                            new_raw_labels.append(raw_bright_boxes)
+
+                            img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
+                                                                        "width": self._patch_width,
+                                                                        "file_name": "{:0>6d}".format(img_name_idx) +
+                                                                                     '.png',
+                                                                        "plants": bright_boxes}
+                            img_name_idx += 1
+
+                        else:  # aug == 3
+                            # flip
+                            k = np.random.random()
+                            if k < 0.5:
+                                flip_img_patch = np.fliplr(img_patch)
+                                flip_boxes = []
+                                raw_flip_boxes = []
+                                for box in new_boxes:
+                                    w = box[1] - box[0]
+                                    # h = box[3] - box[2] for reference
+                                    x_min = self._patch_width - (box[1])
+                                    x_max = x_min + w
+                                    y_min = box[2]
+                                    y_max = box[3]
+
+                                    flip_boxes.append({"all_points_x": [x_min, x_max],
+                                                       "all_points_y": [y_min, y_max]})
+                                    raw_flip_boxes.append([x_min, x_max, y_min, y_max])
+
+                                result = Image.fromarray(flip_img_patch.astype(np.uint8))
+                                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                                result.save(new_img_name)
+
+                                new_raw_image_files.append(new_img_name)
+                                new_raw_labels.append(raw_flip_boxes)
+
+                                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
+                                                                            "width": self._patch_width,
+                                                                            "file_name": "{:0>6d}".format(
+                                                                                img_name_idx) + '.png',
+                                                                            "plants": flip_boxes}
+                                img_name_idx += 1
+                            else:
+                                flip_img_patch = np.flipud(img_patch)
+                                flip_boxes = []
+                                raw_flip_boxes = []
+                                for box in new_boxes:
+                                    # w = box[1] - box[0] for reference
+                                    h = box[3] - box[2]
+                                    x_min = box[0]
+                                    x_max = box[1]
+                                    y_min = self._patch_height - (box[3])
+                                    y_max = y_min + h
+
+                                    flip_boxes.append({"all_points_x": [x_min, x_max],
+                                                       "all_points_y": [y_min, y_max]})
+                                    raw_flip_boxes.append([x_min, x_max, y_min, y_max])
+
+                                result = Image.fromarray(flip_img_patch.astype(np.uint8))
+                                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                                result.save(new_img_name)
+
+                                new_raw_image_files.append(new_img_name)
+                                new_raw_labels.append(raw_flip_boxes)
+
+                                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
+                                                                            "width": self._patch_width,
+                                                                            "file_name": "{:0>6d}".format(
+                                                                                img_name_idx) + '.png',
+                                                                            "plants": flip_boxes}
+                                img_name_idx += 1
+            self.__log(str(i + 1) + '/' + str(self._grid_w * self._grid_h))
+        self.__log('Completed augmentation set. Total images: ' + str(img_name_idx))
+
+        # rest are just random patches
+        num_patches = img_name_idx // len(self._raw_image_files)
+        self.__log('Generating random patches')
+        img_num = 0
+        random_imgs = 0
+        for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
+            img_num += 1
+            img = np.array(Image.open(img_name))
+            # we will randomly generate centers of the images we are extracting
+            #  with size: patch_size x patch_size
+            max_width = img.shape[1] - (self._patch_width // 2)
+            min_width = (self._patch_width // 2)
+            max_height = img.shape[0] - (self._patch_height // 2)
+            min_height = (self._patch_height // 2)
+            rand_x = np.random.randint(min_width, max_width + 1, num_patches)
+            rand_y = np.random.randint(min_height, max_height + 1, num_patches)
+
+            for idx, center in enumerate(zip(rand_x, rand_y)):
+                # determine patch location and slice into mask and img to create patch
+                top_row = center[1] - (self._patch_height // 2)
+                bot_row = top_row + self._patch_height
+                left_col = center[0] - (self._patch_width // 2)
+                right_col = left_col + self._patch_width
+                img_patch = img[top_row:bot_row, left_col:right_col]
+
+                # objects and corresponding bboxes
+                new_boxes = []
+                raw_new_boxes = []
+                for box in img_boxes:
+                    cent_x = box[0] + ((box[1] - box[0]) / 2)
+                    cent_y = box[2] + ((box[3] - box[2]) / 2)
+                    # check if box is inside current patch, if so convert the coords and add it to the json
+                    if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (cent_y <= bot_row):
+                        box_w = box[1] - box[0]
+                        box_h = box[3] - box[2]
+                        box_x = box[0] + box_w / 2
+                        box_y = box[2] + box_h / 2
+                        delta_x = box_x - center[0]
+                        delta_y = box_y - center[1]
+                        new_x_center = self._patch_width // 2 + delta_x
+                        new_y_center = self._patch_height // 2 + delta_y
+                        new_x_min = new_x_center - box_w / 2
+                        new_x_max = new_x_min + box_w
+                        new_y_min = new_y_center - box_h / 2
+                        new_y_max = new_y_min + box_h
+
+                        new_boxes.append({"all_points_x": [new_x_min, new_x_max],
+                                          "all_points_y": [new_y_min, new_y_max]})
+                        raw_new_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
+
+                # save image to disk
+                result = Image.fromarray(img_patch.astype(np.uint8))
+                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                result.save(new_img_name)
+
+                new_raw_image_files.append(new_img_name)
+                new_raw_labels.append(raw_new_boxes)
+
+                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
+                                                            "width": self._patch_width,
+                                                            "file_name": "{:0>6d}".format(img_name_idx) + '.png',
+                                                            "plants": new_boxes}
+                img_name_idx += 1
+
+            # verbose
+            random_imgs += 1
+            self.__log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
+
+        # save into json
+        # with open('/home/nico/yolo_data/yolo_test_imgs/blanche/test_patches_out.json', 'w') as outfile:
+        #     json.dump(img_dict, outfile)
+        with open(json_dir_out + 'train_patches.json', 'w') as outfile:
+            json.dump(img_dict, outfile)
+
+        return new_raw_image_files, new_raw_labels
+
+    def load_pascal_voc_labels_from_directory(self, data_dir):
+        """Loads single per-image bounding boxes from XML files in Pascal VOC format."""
+
+        super().load_pascal_voc_labels_from_directory(data_dir)
+
+        # need to add object-ness flag and one-hot encodings for class
+        # it will be 1 or 0 for object-ness, one-hot for the class, then 4 bbox coords (x,y,w,h)
+        # e.g. [1,0,0,...,1,...,0,223,364,58,62]
+        # for scaling bbox coords
+        # scaling image down to the grid size
+        scale_ratio_w = self._grid_w / self._image_width
+        scale_ratio_h = self._grid_h / self._image_height
+
+        labels_with_one_hot = []
+        for curr_img_coords in self._all_labels:
+            curr_img_grid_locs = []  # for duplicates; current hacky fix
+            curr_img_labels = np.zeros((self._grid_w * self._grid_h) * (1 + self._NUM_CLASSES + 4))
+
+            # only one object per image so no need to loop here
+            # add scaled bbox coords
+            # x and y offsets from grid position
+            w = curr_img_coords[1] - curr_img_coords[0]
+            h = curr_img_coords[3] - curr_img_coords[2]
+            x_center = (w / 2) + curr_img_coords[0]
+            y_center = (h / 2) + curr_img_coords[2]
+            x_grid = x_center * scale_ratio_w
+            y_grid = y_center * scale_ratio_h
+            x_grid_offset, x_grid_loc = np.modf(x_grid)
+            y_grid_offset, y_grid_loc = np.modf(y_grid)
+
+            # for duplicate object in grid checking
+            if (x_grid_loc, y_grid_loc) in curr_img_grid_locs:
+                continue
+            else:
+                curr_img_grid_locs.append((x_grid_loc, y_grid_loc))
+
+            # w and h values on grid scale
+            w_grid = w * scale_ratio_w
+            h_grid = h * scale_ratio_h
+
+            # compute grid-cell location
+            # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
+            # would be 4 (or 3 when 0-indexing)
+            grid_loc = (y_grid_loc * self._grid_w) + x_grid_loc
+
+            # 1 for obj then 1 since only once class <- needs to be made more general for multiple classes
+            # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
+            # maybe define a new list inside the loop, append a 1, then extend a one-hot list, then append
+            # x,y,w,h then use the in this next line below
+            # cur_box = []... vec_size = len(currbox)....
+            vec_size = (1 + self._NUM_CLASSES + 4)
+            curr_img_labels[int(grid_loc)*vec_size:(int(grid_loc)+1)*vec_size] = \
+                [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
+            # using extend because I had trouble with converting a list of lists to a tensor using our string
+            # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
+            # train shuffle batch has been the current hacky fix
+            labels_with_one_hot.append(curr_img_labels)
+
+        self._all_labels = labels_with_one_hot
+
+    def load_json_labels_from_file(self, filename):
+        """Loads bounding boxes for multiple images from a single json file."""
+        # these are for jsons in the structure that I got from Blanche's data #
+
+        super().load_json_labels_from_file(filename)
+
+        if not self._with_patching:
+            self.__convert_labels_to_yolo_format()
+
+    def __convert_labels_to_yolo_format(self):
+        """Takes the labels that are in the json format and turns them into formatted arrays
+        that the network and yolo loss function are expecting to work with"""
+
+        # for scaling bbox coords
+        # scaling image down to the grid size
+        scale_ratio_w = self._grid_w / self._image_width
+        scale_ratio_h = self._grid_h / self._image_height
+
+        labels_with_one_hot = []
+        for curr_img_coords in self._all_labels:
+            curr_img_grid_locs = []  # for duplicates; current hacky fix
+            curr_img_labels = np.zeros((self._grid_w * self._grid_h) * (1 + self._NUM_CLASSES + 4))
+            num_boxes = len(curr_img_coords)
+            for i in range(num_boxes):
+                # add scaled bbox coords
+                # x and y offsets from grid position
+                w = curr_img_coords[i][1] - curr_img_coords[i][0]
+                h = curr_img_coords[i][3] - curr_img_coords[i][2]
+                x_center = (w / 2) + curr_img_coords[i][0]
+                y_center = (h / 2) + curr_img_coords[i][2]
+                x_grid = x_center * scale_ratio_w
+                y_grid = y_center * scale_ratio_h
+                x_grid_offset, x_grid_loc = np.modf(x_grid)
+                y_grid_offset, y_grid_loc = np.modf(y_grid)
+
+                # for duplicate object in grid checking
+                if (x_grid_loc, y_grid_loc) in curr_img_grid_locs:
+                    continue
+                else:
+                    curr_img_grid_locs.append((x_grid_loc, y_grid_loc))
+
+                # w and h values on grid scale
+                w_grid = w * scale_ratio_w
+                h_grid = h * scale_ratio_h
+
+                # compute grid-cell location
+                # grid is defined as left-right, down, left-right, down... so in a 3x3 grid the middle left cell
+                # would be 4 (or 3 when 0-indexing)
+                grid_loc = ((y_grid_loc * self._grid_w) + x_grid_loc) % (self._grid_h * self._grid_w)
+                # the % (self._grid_h*self._grid_w) is to handle the rare case we are right on the edge and
+                # we want the last 0-indexed grid position (off by 1 error, get 49 for 7x7 grid when should have 48)
+
+                # 1 for obj then 1 since only one class <- needs to be made more general for multiple classes #
+                # should be [1,0,...,1,...,0,x,y,w,h] where 0,...,1,...,0 represents the one-hot encoding of classes
+                curr_box = [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
+
+                vec_size = (1 + self._NUM_CLASSES + 4)
+                curr_img_labels[int(grid_loc) * vec_size:(int(grid_loc) + 1) * vec_size] = curr_box
+                # using extend because I had trouble with converting a list of lists to a tensor using our string
+                # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
+                # train shuffle batch has been the current hacky fix
+            labels_with_one_hot.append(curr_img_labels)
+
+        self._all_labels = labels_with_one_hot
