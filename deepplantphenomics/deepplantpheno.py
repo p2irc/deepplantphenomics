@@ -21,7 +21,7 @@ class DPPModel(ABC):
     """
     The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file. It
     provides common functionality and parameters for models of all problem types. Subclasses of DPPModel implement any
-    changes and extra methods required to support that partiucular problem.
+    changes and extra methods required to support that particular problem.
     """
 
     # Operation settings
@@ -505,6 +505,52 @@ class DPPModel(ABC):
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
                 layer.add_to_graph()
+
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        """
+        Adds graph components related to outputting losses and other summary variables to Tensorboard. This covers
+        common outputs across every problem type.
+        :param l2_cost: ...
+        :param gradients: ...
+        :param global_grad_norm: ...
+        """
+        if self._tb_dir is not None:
+            self.__log('Creating Tensorboard summaries...')
+
+            # Summaries for any problem type
+            tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+            tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+            tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+            filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
+            tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+
+            # Summaries for each layer
+            for layer in self._layers:
+                if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                    tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                    tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+
+                    # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                    # and it was found that if you commented the below line then the code wouldn't hang. Never
+                    # fully understood why, as it only happened if you tried running with train/test and no
+                    # validation. But after adding more features and just randomly trying to uncomment the below
+                    # line to see if it would work, it appears to now be working, but still don't know why...
+                    tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                         collections=['custom_summaries'])
+
+            # Summaries for gradients
+            # We use variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+            # the name and tensorboard does not like this so we remove it with the [:-2]
+            # We also currently seem to get None's for gradients when performing a hyper-parameter search
+            # and as such it is simply left out for hyper-param searches, needs to be fixed
+            if not self._hyper_param_search:
+                for index, grad in enumerate(gradients):
+                    tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                         collections=['custom_summaries'])
+
+                tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+
+            self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     @abstractmethod
     def __assemble_graph(self):
@@ -1916,9 +1962,25 @@ class ClassificationModel(DPPModel):
                             definitions.AugmentationType.CONTRAST_BRIGHT,
                             definitions.AugmentationType.ROTATE]
 
+    # State variables specific to classification for constructing the graph and passing to Tensorboard
+    __class_predictions = None
+    __val_class_predictions = None
+
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+        # Summaries specific to classification problems
+        tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
+        tf.summary.histogram('train/class_predictions', self.__class_predictions, collections=['custom_summaries'])
+        if self._validation:
+            tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
+                              collections=['custom_summaries'])
+            tf.summary.histogram('validation/class_predictions', self.__val_class_predictions,
+                                 collections=['custom_summaries'])
 
     def __assemble_graph(self):
         with self._graph.as_default():
@@ -2031,8 +2093,8 @@ class ClassificationModel(DPPModel):
             self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
 
             # for classification problems we will compute the training accuracy, this is also used for tensorboard
-            class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
-            correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
+            self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
+            correct_predictions = tf.equal(self.__class_predictions, tf.argmax(y, 1))
             self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
             # Calculate test accuracy
@@ -2099,58 +2161,13 @@ class ClassificationModel(DPPModel):
                 self._graph_ops['test_losses'] = test_correct_predictions
                 self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             if self._validation:
-                val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
-                val_correct_predictions = tf.equal(val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
+                self.__val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
+                val_correct_predictions = tf.equal(self.__val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
                 self._graph_ops['val_losses'] = val_correct_predictions
                 self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
 
             # Epoch summaries for Tensorboard
-            if self._tb_dir is not None:
-                self.__log('Creating Tensorboard summaries...')
-
-                # Summaries for any problem type
-                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
-                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
-
-                # Summaries specific to classification problems
-                tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
-                tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
-                if self._validation:
-                    tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
-                                      collections=['custom_summaries'])
-                    tf.summary.histogram('validation/class_predictions', val_class_predictions,
-                                         collections=['custom_summaries'])
-
-                # Summaries for each layer
-                for layer in self._layers:
-                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
-
-                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                        # and it was found that if you commented the below line then the code wouldn't hang. Never
-                        # fully understood why, as it only happened if you tried running with train/test and no
-                        # validation. But after adding more features and just randomly trying to uncomment the below
-                        # line to see if it would work, it appears to now be working, but still don't know why...
-                        tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                             collections=['custom_summaries'])
-
-                # Summaries for gradients
-                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-                # the name and tensorboard does not like this so we remove it with the [:-2]
-                # We also currently seem to get None's for gradients when performing a hyperparameter search
-                # and as such it is simply left out for hyper-param searches, needs to be fixed
-                if not self._hyper_param_search:
-                    for index, grad in enumerate(gradients):
-                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                             collections=['custom_summaries'])
-
-                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
-
-                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
         with self._graph.as_default():
@@ -2412,6 +2429,9 @@ class RegressionModel(DPPModel):
                             definitions.AugmentationType.ROTATE]
     _num_regression_outputs = 1
 
+    # State variables specific to regression for constructing the graph and passing to Tensorboard
+    _regression_loss = None
+
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
@@ -2424,6 +2444,18 @@ class RegressionModel(DPPModel):
             raise ValueError("num must be positive")
 
         self._num_regression_outputs = num
+
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+        # Summaries specific to regression problems
+        if self._num_regression_outputs == 1:
+            tf.summary.scalar('train/regression_loss', self._regression_loss, collections=['custom_summaries'])
+            if self._validation:
+                tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
+                                  collections=['custom_summaries'])
+                tf.summary.histogram('validation/batch_losses', self._graph_ops['val_losses'],
+                                     collections=['custom_summaries'])
 
     def __assemble_graph(self):
         with self._graph.as_default():
@@ -2508,14 +2540,14 @@ class RegressionModel(DPPModel):
 
             # Define cost function based on which one was selected via set_loss_function
             if self._loss_fn == 'l2':
-                regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
+                self._regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
             elif self._loss_fn == 'l1':
-                regression_loss = self.__batch_mean_l1_loss(tf.subtract(xx, y))
+                self._regression_loss = self.__batch_mean_l1_loss(tf.subtract(xx, y))
             elif self._loss_fn == 'smooth l1':
-                regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
+                self._regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
             elif self._loss_fn == 'log loss':
-                regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
-            self._graph_ops['cost'] = tf.add(regression_loss, l2_cost)
+                self._regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
+            self._graph_ops['cost'] = tf.add(self._regression_loss, l2_cost)
 
             # Identify which optimizer we are using
             if self._optimizer == 'adagrad':
@@ -2635,52 +2667,7 @@ class RegressionModel(DPPModel):
                 self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
 
             # Epoch summaries for Tensorboard
-            if self._tb_dir is not None:
-                self.__log('Creating Tensorboard summaries...')
-
-                # Summaries for any problem type
-                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
-                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
-
-                # Summaries specific to regression problems
-                if self._num_regression_outputs == 1:
-                    tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
-                    if self._validation:
-                        tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
-                                          collections=['custom_summaries'])
-                        tf.summary.histogram('validation/batch_losses', self._graph_ops['val_losses'],
-                                             collections=['custom_summaries'])
-
-                # Summaries for each layer
-                for layer in self._layers:
-                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
-
-                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                        # and it was found that if you commented the below line then the code wouldn't hang. Never
-                        # fully understood why, as it only happened if you tried running with train/test and no
-                        # validation. But after adding more features and just randomly trying to uncomment the below
-                        # line to see if it would work, it appears to now be working, but still don't know why...
-                        tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                             collections=['custom_summaries'])
-
-                # Summaries for gradients
-                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-                # the name and tensorboard does not like this so we remove it with the [:-2]
-                # We also currently seem to get None's for gradients when performing a hyperparameter search
-                # and as such it is simply left out for hyper-param searches, needs to be fixed
-                if not self._hyper_param_search:
-                    for index, grad in enumerate(gradients):
-                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                             collections=['custom_summaries'])
-
-                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
-
-                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
         with self._graph.as_default():
@@ -3037,9 +3024,30 @@ class SemanticSegmentationModel(DPPModel):
     _supported_loss_fns = ['sigmoid cross entropy']
     _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
+    # State variables specific to semantic segmentation for constructing the graph and passing to Tensorboard
+    _graph_forward_pass = None
+
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+        # Summaries specific to semantic segmentation
+        # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
+        # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
+        train_images_summary = self.__get_weights_as_image(
+            tf.transpose(tf.expand_dims(self._graph_forward_pass, -1), (1, 2, 3, 0)),
+            self._layers[-1].output_size)
+        tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
+        if self._validation:
+            tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
+                              collections=['custom_summaries'])
+            val_images_summary = self.__get_weights_as_image(
+                tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
+                self._layers[-1].output_size)
+            tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
     def __assemble_graph(self):
         with self._graph.as_default():
@@ -3113,6 +3121,7 @@ class SemanticSegmentationModel(DPPModel):
                 xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
             else:
                 xx = self.forward_pass(x, deterministic=False)
+            self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
 
             # Define regularization cost
             if self._reg_coeff is not None:
@@ -3237,58 +3246,7 @@ class SemanticSegmentationModel(DPPModel):
                 self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
 
             # Epoch summaries for Tensorboard
-            if self._tb_dir is not None:
-                self.__log('Creating Tensorboard summaries...')
-
-                # Summaries for any problem type
-                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
-                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
-
-                # Summaries specific to semantic segmentation
-                # we send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
-                # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-                train_images_summary = self.__get_weights_as_image(
-                    tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)),
-                    self._layers[-1].output_size)
-                tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
-                if self._validation:
-                    tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
-                                      collections=['custom_summaries'])
-                    val_images_summary = self.__get_weights_as_image(
-                        tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
-                        self._layers[-1].output_size)
-                    tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
-
-                # Summaries for each layer
-                for layer in self._layers:
-                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
-
-                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                        # and it was found that if you commented the below line then the code wouldn't hang. Never
-                        # fully understood why, as it only happened if you tried running with train/test and no
-                        # validation. But after adding more features and just randomly trying to uncomment the below
-                        # line to see if it would work, it appears to now be working, but still don't know why...
-                        tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                             collections=['custom_summaries'])
-
-                # Summaries for gradients
-                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-                # the name and tensorboard does not like this so we remove it with the [:-2]
-                # We also currently seem to get None's for gradients when performing a hyperparameter search
-                # and as such it is simply left out for hyper-param searches, needs to be fixed
-                if not self._hyper_param_search:
-                    for index, grad in enumerate(gradients):
-                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                             collections=['custom_summaries'])
-
-                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
-
-                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
         with self._graph.as_default():
@@ -3910,6 +3868,9 @@ class ObjectDetectionModel(DPPModel):
     _supported_loss_fns = ['yolo']
     _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
+    # State variables specific to object detection for constructing the graph and passing to Tensorboard
+    _yolo_loss = None
+
     # Yolo-specific parameters, non-default values defined by set_yolo_parameters
     _grid_w = 7
     _grid_h = 7
@@ -4099,6 +4060,15 @@ class ObjectDetectionModel(DPPModel):
         total_loss = coord_loss + conf_loss + class_loss
         return total_loss
 
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+        # Summaries specific to object detection
+        tf.summary.scalar('train/yolo_loss', self._yolo_loss, collections=['custom_summaries'])
+        if self._validation:
+            tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
+                              collections=['custom_sumamries'])
+
     def __assemble_graph(self):
         with self._graph.as_default():
 
@@ -4171,11 +4141,11 @@ class ObjectDetectionModel(DPPModel):
 
             # Define cost function  based on which one was selected via set_loss_function
             if self._loss_fn == 'yolo':
-                yolo_loss = self._yolo_loss_function(
+                self._yolo_loss = self._yolo_loss_function(
                     y, tf.reshape(xx, [self._batch_size,
                                        self._grid_w * self._grid_h,
                                        self._NUM_BOXES * 5 + self._NUM_CLASSES]))
-            self._graph_ops['cost'] = tf.squeeze(tf.add(yolo_loss, l2_cost))
+            self._graph_ops['cost'] = tf.squeeze(tf.add(self._yolo_loss, l2_cost))
 
             # Identify which optimizer we are using
             if self._optimizer == 'adagrad':
@@ -4284,49 +4254,7 @@ class ObjectDetectionModel(DPPModel):
                                                                              self._graph_ops['x_val_predicted'])
 
             # Epoch summaries for Tensorboard
-            if self._tb_dir is not None:
-                self.__log('Creating Tensorboard summaries...')
-
-                # Summaries for any problem type
-                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
-                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
-
-                # Summaries specific to object detection
-                tf.summary.scalar('train/yolo_loss', yolo_loss, collections=['custom_summaries'])
-                if self._validation:
-                    tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
-                                      collections=['custom_sumamries'])
-
-                # Summaries for each layer
-                for layer in self._layers:
-                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
-
-                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                        # and it was found that if you commented the below line then the code wouldn't hang. Never
-                        # fully understood why, as it only happened if you tried running with train/test and no
-                        # validation. But after adding more features and just randomly trying to uncomment the below
-                        # line to see if it would work, it appears to now be working, but still don't know why...
-                        tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                             collections=['custom_summaries'])
-
-                # Summaries for gradients
-                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-                # the name and tensorboard does not like this so we remove it with the [:-2]
-                # We also currently seem to get None's for gradients when performing a hyperparameter search
-                # and as such it is simply left out for hyper-param searches, needs to be fixed
-                if not self._hyper_param_search:
-                    for index, grad in enumerate(gradients):
-                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                             collections=['custom_summaries'])
-
-                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
-
-                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
         with self._graph.as_default():
