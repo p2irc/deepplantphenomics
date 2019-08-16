@@ -10,17 +10,20 @@ import time
 import warnings
 import copy
 from collections.abc import Sequence
+from abc import ABC, abstractmethod
 import math
 from scipy.special import expit
 from PIL import Image
 from tqdm import tqdm
 
 
-class DPPModel(object):
+class DPPModel(ABC):
     """
-    The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file.
-        This class is the singular point of contact for the DPP module.
+    The DPPModel class represents a model which can either be trained, or loaded from an existing checkpoint file. It
+    provides common functionality and parameters for models of all problem types. Subclasses of DPPModel implement any
+    changes and extra methods required to support that partiucular problem.
     """
+
     # Operation settings
     _problem_type = definitions.ProblemType.CLASSIFICATION
     _loss_fn = 'softmax cross entropy'
@@ -53,8 +56,7 @@ class DPPModel(object):
 
     _processed_images_dir = './DPP-Processed'
 
-    # supported implementations, we may add more to in future
-    _supported_problem_types = ['classification', 'regression', 'semantic_segmentation', 'object_detection']
+    # Supported implementations for various network components
     _supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
     _supported_weight_initializers = ['normal', 'xavier']
     _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
@@ -71,6 +73,7 @@ class DPPModel(object):
     _augmentation_contrast = False
     _augmentation_rotate = False
     _rotate_crop_borders = False
+    # The list of valid augmentations defaults to including all possible augmentations
     _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
                             definitions.AugmentationType.FLIP_VER,
                             definitions.AugmentationType.CROP,
@@ -142,20 +145,6 @@ class DPPModel(object):
     _epochs_per_decay = None
     _lr_decay_epochs = None
 
-    _num_regression_outputs = 1
-
-    # Yolo parameters, non-default values defined by set_yolo_parameters
-    _grid_w = 7
-    _grid_h = 7
-    _LABELS = ['plant']
-    _NUM_CLASSES = 1
-    _RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
-    _ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
-    _NUM_BOXES = 5
-    _THRESH_SIG = 0.6
-    _THRESH_OVERLAP = 0.3
-    _THRESH_CORRECT = 0.5
-
     # Wrapper options
     _debug = None
     _load_from_saved = None
@@ -163,7 +152,7 @@ class DPPModel(object):
     _queue_capacity = 50
     _report_rate = None
 
-    # Multithreading
+    # Multi-threading
     _num_threads = 1
     _coord = None
     _threads = None
@@ -468,12 +457,6 @@ class DPPModel(object):
         self._image_height = image_height
         self._image_depth = image_depth
 
-        # Generate image-scaled anchors for YOLO object detection
-        if self._RAW_ANCHORS:
-            scale_w = self._grid_w / self._image_width
-            scale_h = self._grid_h / self._image_height
-            self._ANCHORS = [(anchor[0] * scale_w, anchor[1] * scale_h) for anchor in self._RAW_ANCHORS]
-
     def set_original_image_dimensions(self, image_height, image_width):
         """
         Specify the original size of the image, before resizing.
@@ -498,28 +481,6 @@ class DPPModel(object):
         self._moderation_features_size = moderation_features.shape[1]
         self._all_moderation_features = moderation_features
 
-    def set_problem_type(self, p_type):
-        """Set the problem type to be solved, either classification or regression"""
-        if not isinstance(p_type, str):
-            raise TypeError("p_type must be a str")
-        if p_type not in self._supported_problem_types:
-            raise ValueError("'" + p_type + "' is not one of the currently supported problem types." +
-                             " Choose one of: " + " ".join("'"+x+"'" for x in self._supported_problem_types))
-
-        if p_type == 'classification':
-            self._problem_type = definitions.ProblemType.CLASSIFICATION
-        elif p_type == 'regression':
-            self._problem_type = definitions.ProblemType.REGRESSION
-        elif p_type == 'semantic_segmentation':
-            self._problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
-        elif p_type == 'object_detection':
-            self._problem_type = definitions.ProblemType.OBJECT_DETECTION
-        else:
-            warnings.warn('Problem p_type specified not supported')
-            exit()
-
-        self._loss_fn = self._supported_loss_fns[0]
-
     def set_patch_size(self, height, width):
         if not isinstance(height, int):
             raise TypeError("height must be an int")
@@ -534,136 +495,6 @@ class DPPModel(object):
         self._patch_width = width
         self._with_patching = True
 
-    def _yolo_compute_iou(self, pred_box, true_box):
-        """Helper function to compute the intersection over union of pred_box and true_box
-        pred_box and true_box represent multiple boxes with coords being x,y,w,h (0-indexed 0-3)"""
-        # numerator
-        # get coords of intersection rectangle, then compute intersection area
-        x1 = tf.maximum(pred_box[..., 0] - 0.5 * pred_box[..., 2],
-                        true_box[..., 0:1] - 0.5 * true_box[..., 2:3])
-        y1 = tf.maximum(pred_box[..., 1] - 0.5 * pred_box[..., 3],
-                        true_box[..., 1:2] - 0.5 * true_box[..., 3:4])
-        x2 = tf.minimum(pred_box[..., 0] + 0.5 * pred_box[..., 2],
-                        true_box[..., 0:1] + 0.5 * true_box[..., 2:3])
-        y2 = tf.minimum(pred_box[..., 1] + 0.5 * pred_box[..., 3],
-                        true_box[..., 1:2] + 0.5 * true_box[..., 3:4])
-        intersection_area = tf.multiply(tf.maximum(0., x2 - x1), tf.maximum(0., y2 - y1))
-
-        # denominator
-        # compute area of pred and truth, compute union area
-        pred_area = tf.multiply(pred_box[..., 2], pred_box[..., 3])
-        true_area = tf.multiply(true_box[..., 2:3], true_box[..., 3:4])
-        union_area = tf.subtract(tf.add(pred_area, true_area), intersection_area)
-
-        # compute iou
-        iou = tf.divide(intersection_area, union_area)
-        return iou
-
-    def _yolo_loss_function(self, y_true, y_pred):
-        """
-        Loss function based on YOLO
-        See the paper for details: https://pjreddie.com/media/files/papers/yolo.pdf
-
-        :param y_true: Tensor with ground truth bounding boxes for each grid square in each image. Labels have 6
-        elements: [object/no-object, class, x, y, w, h]
-        :param y_pred: Tensor with predicted bounding boxes for each grid square in each image. Predictions consist of
-        one box and confidence [x, y, w, h, conf] for each anchor plus 1 element for specifying the class (only one atm)
-        :return Scalar Tensor with the Yolo loss for the bounding box predictions
-        """
-
-        prior_boxes = tf.convert_to_tensor(self._ANCHORS)
-
-        # object/no-object masks #
-        # create masks for grid cells with objects and with no objects
-        obj_mask = tf.cast(y_true[..., 0], dtype=bool)
-        no_obj_mask = tf.logical_not(obj_mask)
-        obj_pred = tf.boolean_mask(y_pred, obj_mask)
-        obj_true = tf.boolean_mask(y_true, obj_mask)
-        no_obj_pred = tf.boolean_mask(y_pred, no_obj_mask)
-
-        # bbox coordinate loss #
-        # build a tensor of the predicted bounding boxes and confidences, classes will be stored separately
-        # [x1,y1,w1,h1,conf1,x2,y2,w2,h2,conf2,x3,y3,w3,h3,conf3,...]
-        pred_classes = obj_pred[..., self._NUM_BOXES * 5:]
-        # we take the x,y,w,h,conf's that are altogether (dim is 1xB*5) and turn into Bx5, where B is num_boxes
-        obj_pred = tf.reshape(obj_pred[..., 0:self._NUM_BOXES * 5], [-1, self._NUM_BOXES, 5])
-        no_obj_pred = tf.reshape(no_obj_pred[..., 0:self._NUM_BOXES * 5], [-1, self._NUM_BOXES, 5])
-        t_x, t_y, t_w, t_h = obj_pred[..., 0], obj_pred[..., 1], obj_pred[..., 2], obj_pred[..., 3]
-        t_o = obj_pred[..., 4]
-        pred_x = tf.sigmoid(t_x) + 0.00001  # concerned about underflow (might not actually be necessary)
-        pred_y = tf.sigmoid(t_y) + 0.00001
-        pred_w = (tf.exp(t_w) + 0.00001) * prior_boxes[:, 0]
-        pred_h = (tf.exp(t_h) + 0.00001) * prior_boxes[:, 1]
-        pred_conf = tf.sigmoid(t_o) + 0.00001
-        predicted_boxes = tf.stack([pred_x, pred_y, pred_w, pred_h, pred_conf], axis=2)
-
-        # find responsible boxes by computing iou's and select the best one
-        ious = self._yolo_compute_iou(
-            predicted_boxes, obj_true[..., 1 + self._NUM_CLASSES:1 + self._NUM_CLASSES + 4])
-        greatest_iou_indices = tf.argmax(ious, 1)
-        argmax_one_hot = tf.one_hot(indices=greatest_iou_indices, depth=5)
-        resp_box_mask = tf.cast(argmax_one_hot, dtype=bool)
-        responsible_boxes = tf.boolean_mask(predicted_boxes, resp_box_mask)
-
-        # compute loss on responsible boxes
-        loss_xy = tf.square(tf.subtract(responsible_boxes[..., 0:2],
-                                        obj_true[..., 1+self._NUM_CLASSES:1 + self._NUM_CLASSES + 2]))
-        loss_wh = tf.square(tf.subtract(tf.sqrt(responsible_boxes[..., 2:4]),
-                                        tf.sqrt(obj_true[..., 1 + self._NUM_CLASSES + 2:1 + self._NUM_CLASSES + 4])))
-        coord_loss = tf.reduce_sum(tf.add(loss_xy, loss_wh))
-
-        # confidence loss #
-        # grids that do contain an object, 1 * iou means we simply take the difference between the
-        # iou's and the predicted confidence
-
-        # this was to make responsible boxes confidences aim to go to 1 instead of their current iou score, this is
-        # still being tested
-        # non_resp_box_mask = tf.logical_not(resp_box_mask)
-        # non_responsible_boxes = tf.boolean_mask(predicted_boxes, non_resp_box_mask)
-        # non_responsible_ious = tf.boolean_mask(ious, non_resp_box_mask)
-        # loss1 = tf.reduce_sum(tf.square(1 - responsible_boxes[..., 4]))
-        # loss2 = tf.reduce_sum(tf.square(tf.subtract(non_responsible_ious, non_responsible_boxes[..., 4])))
-        # loss_obj = loss1 + loss2
-
-        # this is how the paper does it, the above 6 lines is experimental
-        obj_num_grids = tf.shape(predicted_boxes)[0]  # [num_boxes, 5, 5]
-        loss_obj = tf.cast((1/obj_num_grids), dtype='float32') * tf.reduce_sum(
-            tf.square(tf.subtract(ious, predicted_boxes[..., 4])))
-
-        # grids that do not contain an object, 0 * iou means we simply take the predicted confidences of the
-        # grids that do not have an object and square and sum (because they should be 0)
-        no_obj_confs = tf.sigmoid(no_obj_pred[..., 4])
-        no_obj_num_grids = tf.shape(no_obj_confs)[0]  # [number_of_grids_without_an_object, 5]
-        loss_no_obj = tf.cast(1/no_obj_num_grids, dtype='float32') * tf.reduce_sum(tf.square(no_obj_confs))
-        # incase obj_pred or no_obj_confs is empty (e.g. no objects in the image) we need to make sure we dont
-        # get nan's in our losses...
-        loss_obj = tf.cond(tf.count_nonzero(y_true[..., 4]) > 0, lambda: loss_obj, lambda: 0.)
-        loss_no_obj = tf.cond(tf.count_nonzero(y_true[..., 4]) < self._grid_w * self._grid_h,
-                              lambda: loss_no_obj, lambda: 0.)
-        conf_loss = tf.add(loss_obj, loss_no_obj)
-
-        # classification loss #
-        # currently only one class, plant, will need to be made more general for multi-class in the future
-        class_probs_pred = tf.nn.softmax(pred_classes)
-        class_diffs = tf.subtract(obj_true[..., 1:1+self._NUM_CLASSES], class_probs_pred)
-        class_loss = tf.reduce_sum(tf.square(class_diffs))
-
-        total_loss = coord_loss + conf_loss + class_loss
-
-        # for some debug/checking, otherwise leave commented #
-        # init_op = tf.global_variables_initializer()
-        # self._session.run(init_op)
-        # self.__initialize_queue_runners()
-        # print('printing losses')
-        # print(self._session.run([loss_obj, loss_no_obj]))
-        # print(self._session.run([coord_loss, conf_loss, class_loss]))
-        # print(self._session.run([loss_obj, loss_no_obj]))
-        # print(self._session.run([coord_loss, conf_loss, class_loss]))
-        # print(self._session.run([loss_obj, loss_no_obj]))
-        # print(self._session.run([coord_loss, conf_loss, class_loss]))
-
-        return total_loss
-
     def __add_layers_to_graph(self):
         """
         Adds the layers in self.layers to the computational graph.
@@ -675,574 +506,30 @@ class DPPModel(object):
             if callable(getattr(layer, 'add_to_graph', None)):
                 layer.add_to_graph()
 
+    @abstractmethod
     def __assemble_graph(self):
-        with self._graph.as_default():
+        """
+        Constructs the Tensorflow graph that defines the network. This includes splitting the input data into
+        train/validation/test partitions, parsing it into Tensors, performing the forward pass and optimization steps,
+        returning test and validation losses, and outputting losses and other variables to Tensorboard if necessary.
+        Parts of the graph should be exposed by adding graph nodes to the `_graph_ops` variable; which nodes and their
+        names will vary with the problem type.
+        """
+        pass
 
-            self.__log('Parsing dataset...')
-
-            if self._raw_test_labels is not None:
-                # currently think of moderation features as None so they are passed in hard-coded
-                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                     self._raw_test_image_files, self._raw_test_labels, None,
-                                     self._raw_val_image_files, self._raw_val_labels, None)
-            elif self._images_only:
-                self.__parse_images(self._raw_image_files)
-            else:
-                # split the data into train/val/test sets, if there is no validation set or no moderation features
-                # being used they will be returned as 0 (val) or None (moderation features)
-                train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
-                # parse the images and set the appropriate environment variables
-                self.__parse_dataset(train_images, train_labels, train_mf,
-                                     test_images, test_labels, test_mf,
-                                     val_images, val_labels, val_mf)
-
-            self.__log('Creating layer parameters...')
-
-            self.__add_layers_to_graph()
-
-            self.__log('Assembling graph...')
-
-            # Define batches
-            if self._has_moderation:
-                x, y, mod_w = tf.train.shuffle_batch(
-                    [self._train_images, self._train_labels, self._train_moderation_features],
-                    batch_size=self._batch_size,
-                    num_threads=self._num_threads,
-                    capacity=self._queue_capacity,
-                    min_after_dequeue=self._batch_size)
-            else:
-                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                              batch_size=self._batch_size,
-                                              num_threads=self._num_threads,
-                                              capacity=self._queue_capacity,
-                                              min_after_dequeue=self._batch_size)
-
-            # Reshape input to the expected image dimensions
-            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
-
-            # If this is a regression problem, unserialize the label
-            if self._problem_type == definitions.ProblemType.REGRESSION:
-                y = loaders.label_string_to_tensor(y, self._batch_size, self._num_regression_outputs)
-            elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                y = loaders.label_string_to_tensor(y, self._batch_size)
-                vec_size = 1 + self._NUM_CLASSES + 4
-                y = tf.reshape(y, [self._batch_size, self._grid_w * self._grid_h, vec_size])
-
-            # if using patching we extract a patch of image here (object detection patching is different
-            # and is done when data is loaded)
-            if self._with_patching and self._problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                # Take a slice
-                patch_width = self._patch_width
-                patch_height = self._patch_height
-                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
-                                             self._batch_size)
-                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
-                                             self._batch_size)
-                offsets = [x for x in zip(offset_h, offset_w)]
-                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
-                                             normalized=False, centered=False)
-                if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    y = tf.image.extract_glimpse(y, [patch_height, patch_width], offsets, normalized=False,
-                                                 centered=False)
-
-            # Run the network operations
-            if self._has_moderation:
-                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
-            else:
-                xx = self.forward_pass(x, deterministic=False)
-
-            # Define regularization cost
-            if self._reg_coeff is not None:
-                l2_cost = tf.squeeze(tf.reduce_sum(
-                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                     if isinstance(layer, layers.fullyConnectedLayer)]))
-            else:
-                l2_cost = 0.0
-
-            # Define cost function
-            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                # define cost function based on which one was selected via set_loss_function
-                if self._loss_fn == 'softmax cross entropy':
-                    sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-                # define the cost
-                self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
-            elif self._problem_type == definitions.ProblemType.REGRESSION:
-                # define cost function based on which one was selected via set_loss_function
-                if self._loss_fn == 'l2':
-                    regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
-                elif self._loss_fn == 'l1':
-                    regression_loss = self.__batch_mean_l1_loss(tf.subtract(xx, y))
-                elif self._loss_fn == 'smooth l1':
-                    regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
-                elif self._loss_fn == 'log loss':
-                    regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
-                # define the cost
-                self._graph_ops['cost'] = tf.add(regression_loss, l2_cost)
-            elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                # define cost function based on which one was selected via set_loss_function
-                if self._loss_fn == 'sigmoid cross entropy':
-                    pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
-                # define the cost
-                self._graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
-            elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                # define cost function based on which one was selected via set_loss_function
-                if self._loss_fn == 'yolo':
-                    yolo_loss = self._yolo_loss_function(
-                        y, tf.reshape(xx, [self._batch_size,
-                                           self._grid_w * self._grid_h,
-                                           self._NUM_BOXES * 5 + self._NUM_CLASSES]))
-                # define the cost
-                self._graph_ops['cost'] = tf.squeeze(tf.add(yolo_loss, l2_cost))
-
-            # Identify which optimizer we are using
-            if self._optimizer == 'adagrad':
-                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
-                self.__log('Using Adagrad optimizer')
-            elif self._optimizer == 'adadelta':
-                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-                self.__log('Using adadelta optimizer')
-            elif self._optimizer == 'sgd':
-                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
-                self.__log('Using SGD optimizer')
-            elif self._optimizer == 'adam':
-                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
-                self.__log('Using Adam optimizer')
-            elif self._optimizer == 'sgd_momentum':
-                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
-                self.__log('Using SGD with momentum optimizer')
-            else:
-                warnings.warn('Unrecognized optimizer requested')
-                exit()
-
-            # Compute gradients, clip them, the apply the clipped gradients
-            # This is broken up so that we can add gradients to tensorboard
-            # need to make the 5.0 an adjustable hyperparameter
-            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
-            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
-
-            # for classification problems we will compute the training accuracy, this is also used for tensorboard
-            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
-                correct_predictions = tf.equal(class_predictions, tf.argmax(y, 1))
-                self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
-
-            # Calculate test accuracy
-            if self._has_moderation:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
-                        [self._test_images, self._test_labels, self._test_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
-                        [self._val_images, self._val_labels, self._val_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-            else:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
-                                                                       batch_size=self._batch_size,
-                                                                       num_threads=self._num_threads,
-                                                                       capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
-                                                                     batch_size=self._batch_size,
-                                                                     num_threads=self._num_threads,
-                                                                     capacity=self._queue_capacity)
-            if self._testing:
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
-
-            if self._problem_type == definitions.ProblemType.REGRESSION:
-                if self._testing:
-                    self._graph_ops['y_test'] = loaders.label_string_to_tensor(self._graph_ops['y_test'],
-                                                                               self._batch_size,
-                                                                               self._num_regression_outputs)
-                if self._validation:
-                    self._graph_ops['y_val'] = loaders.label_string_to_tensor(self._graph_ops['y_val'],
-                                                                              self._batch_size,
-                                                                              self._num_regression_outputs)
-
-            if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                if self._testing:
-                    self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
-                                                           shape=[-1, self._image_height, self._image_width, 1])
-                if self._validation:
-                    self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
-                                                          shape=[-1, self._image_height, self._image_width, 1])
-
-            if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                vec_size = 1 + self._NUM_CLASSES + 4
-                if self._testing:
-                    self._graph_ops['y_test'] = loaders.label_string_to_tensor(self._graph_ops['y_test'],
-                                                                               self._batch_size)
-                    self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
-                                                           shape=[self._batch_size,
-                                                                  self._grid_w * self._grid_h,
-                                                                  vec_size])
-                if self._validation:
-                    self._graph_ops['y_val'] = loaders.label_string_to_tensor(self._graph_ops['y_val'],
-                                                                              self._batch_size)
-                    self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
-                                                          shape=[self._batch_size,
-                                                                 self._grid_w * self._grid_h,
-                                                                 vec_size])
-
-            # if using patching we need to properly pull patches from the images (object detection patching is different
-            # and is done when data is loaded)
-            if self._with_patching and self._problem_type != definitions.ProblemType.OBJECT_DETECTION:
-                # Take a slice of image. Same size and location (offsets) as the slice from training.
-                patch_width = self._patch_width
-                patch_height = self._patch_height
-                if self._testing:
-                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
-                                                      normalized=False, centered=False)
-                if self._validation:
-                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
-                                                     normalized=False, centered=False)
-                if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    if self._testing:
-                        self._graph_ops['y_test'] = tf.image.extract_glimpse(self._graph_ops['y_test'],
-                                                                             [patch_height, patch_width], offsets,
-                                                                             normalized=False, centered=False)
-                    if self._validation:
-                        self._graph_ops['y_val'] = tf.image.extract_glimpse(self._graph_ops['y_val'],
-                                                                            [patch_height, patch_width], offsets,
-                                                                            normalized=False, centered=False)
-
-            if self._has_moderation:
-                if self._testing:
-                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
-                                                                            moderation_features=mod_w_test)
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
-                                                                           moderation_features=mod_w_val)
-            else:
-                if self._testing:
-                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
-
-            # For object detection, the network outputs need to be reshaped to match y_test and y_val
-            if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                if self._testing:
-                    self._graph_ops['x_test_predicted'] = tf.reshape(self._graph_ops['x_test_predicted'],
-                                                                     [self._batch_size,
-                                                                      self._grid_w * self._grid_h,
-                                                                      self._NUM_BOXES * 5 + self._NUM_CLASSES])
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = tf.reshape(self._graph_ops['x_val_predicted'],
-                                                                    [self._batch_size,
-                                                                     self._grid_w * self._grid_h,
-                                                                     self._NUM_BOXES * 5 + self._NUM_CLASSES])
-
-            # compute the loss and accuracy based on problem type
-            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                if self._testing:
-                    test_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_test_predicted']), 1)
-                    test_correct_predictions = tf.equal(test_class_predictions,
-                                                        tf.argmax(self._graph_ops['y_test'], 1))
-                    self._graph_ops['test_losses'] = test_correct_predictions
-                    self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
-                if self._validation:
-                    val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
-                    val_correct_predictions = tf.equal(val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
-                    self._graph_ops['val_losses'] = val_correct_predictions
-                    self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
-            elif self._problem_type == definitions.ProblemType.REGRESSION:
-                if self._testing:
-                    if self._num_regression_outputs == 1:
-                        self._graph_ops['test_losses'] = tf.squeeze(tf.stack(
-                            tf.subtract(self._graph_ops['x_test_predicted'], self._graph_ops['y_test'])))
-                    else:
-                        self._graph_ops['test_losses'] = self.__l2_norm(
-                            tf.subtract(self._graph_ops['x_test_predicted'], self._graph_ops['y_test']))
-                if self._validation:
-                    if self._num_regression_outputs == 1:
-                        self._graph_ops['val_losses'] = tf.squeeze(
-                            tf.stack(tf.subtract(self._graph_ops['x_val_predicted'], self._graph_ops['y_val'])))
-                    else:
-                        self._graph_ops['val_losses'] = self.__l2_norm(
-                            tf.subtract(self._graph_ops['x_val_predicted'], self._graph_ops['y_val']))
-                    self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
-            elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                if self._testing:
-                    self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                        logits=self._graph_ops['x_test_predicted'],
-                        labels=self._graph_ops['y_test']),
-                        axis=2)
-                    self._graph_ops['test_losses'] = tf.reshape(tf.reduce_mean(self._graph_ops['test_losses'],
-                                                                               axis=1),
-                                                                [self._batch_size])
-                if self._validation:
-                    self._graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                        logits=self._graph_ops['x_val_predicted'], labels=self._graph_ops['y_val']),
-                        axis=2)
-                    self._graph_ops['val_losses'] = tf.transpose(
-                        tf.reduce_mean(self._graph_ops['val_losses'], axis=1))
-                    self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
-            elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                if self._testing:
-                    if self._loss_fn == 'yolo':
-                        self._graph_ops['test_losses'] = self._yolo_loss_function(self._graph_ops['y_test'],
-                                                                                  self._graph_ops['x_test_predicted'])
-                if self._validation:
-                    if self._loss_fn == 'yolo':
-                        self._graph_ops['val_losses'] = self._yolo_loss_function(self._graph_ops['y_val'],
-                                                                                 self._graph_ops['x_val_predicted'])
-
-            # Epoch summaries for Tensorboard
-            if self._tb_dir is not None:
-                self.__log('Creating Tensorboard summaries...')
-
-                # Summaries for any problem type
-                tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-                tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-                tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-                filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
-                tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
-
-                # Summaries for classification problems
-                if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                    tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
-                    tf.summary.histogram('train/class_predictions', class_predictions, collections=['custom_summaries'])
-                    if self._validation:
-                        tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
-                                          collections=['custom_summaries'])
-                        tf.summary.histogram('validation/class_predictions', val_class_predictions,
-                                             collections=['custom_summaries'])
-
-                # Summaries for regression
-                if self._problem_type == definitions.ProblemType.REGRESSION:
-                    if self._num_regression_outputs == 1:
-                        tf.summary.scalar('train/regression_loss', regression_loss, collections=['custom_summaries'])
-                        if self._validation:
-                            tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
-                                              collections=['custom_summaries'])
-                            tf.summary.histogram('validation/batch_losses', self._graph_ops['val_losses'],
-                                                 collections=['custom_summaries'])
-
-                # Summaries for semantic segmentation
-                # we send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
-                # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-                if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    train_images_summary = self.__get_weights_as_image(
-                        tf.transpose(tf.expand_dims(xx, -1), (1, 2, 3, 0)),
-                        self._layers[-1].output_size)
-                    tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
-                    if self._validation:
-                        tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
-                                          collections=['custom_summaries'])
-                        val_images_summary = self.__get_weights_as_image(
-                            tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
-                            self._layers[-1].output_size)
-                        tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
-
-                if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    tf.summary.scalar('train/yolo_loss', yolo_loss, collections=['custom_summaries'])
-                    if self._validation:
-                        tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
-                                          collections=['custom_sumamries'])
-
-                # Summaries for each layer
-                for layer in self._layers:
-                    if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                        tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                        tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
-
-                        # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                        # and it was found that if you commented the below line then the code wouldn't hang. Never
-                        # fully understood why, as it only happened if you tried running with train/test and no
-                        # validation. But after adding more features and just randomly trying to uncomment the below
-                        # line to see if it would work, it appears to now be working, but still don't know why...
-                        tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                             collections=['custom_summaries'])
-
-                # Summaries for gradients
-                # we variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-                # the name and tensorboard does not like this so we remove it with the [:-2]
-                # We also currently seem to get None's for gradients when performing a hyperparameter search
-                # and as such it is simply left out for hyper-param searches, needs to be fixed
-                if not self._hyper_param_search:
-                    for index, grad in enumerate(gradients):
-                        tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                             collections=['custom_summaries'])
-
-                    tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
-
-                self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
-
+    @abstractmethod
     def begin_training(self, return_test_loss=False):
         """
-        Initialize the network and either run training to the specified max epoch, or load trainable variables.
-        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
-        the session is shut down.
-        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
+        Initialize the network and either run training to the specified max epoch, or load trainable variables. The
+        full test accuracy is calculated immediately afterward and the trainable parameters are saved before the
+        session is shut down. Before calling this function, the images and labels should be loaded, as well as all
+        relevant hyper-parameters.
         """
-        # if None in [self._train_images, self._test_images,
-        #             self._train_labels, self._test_labels]:
-        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
-        #                        "Try first using one of the methods starting with 'load_...' such as " +
-        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
-        # if (len(self._layers) < 1):
-        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
-        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
-        #                        layers.")
-
-        with self._graph.as_default():
-            self.__assemble_graph()
-            print('assembled the graph')
-
-            # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
-                self.load_state()
-
-                self.__initialize_queue_runners()
-
-                self.compute_full_test_accuracy()
-
-                self.shut_down()
-            else:
-                if self._tb_dir is not None:
-                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
-
-                self.__log('Initializing parameters...')
-                init_op = tf.global_variables_initializer()
-                self._session.run(init_op)
-
-                self.__initialize_queue_runners()
-
-                self.__log('Beginning training...')
-
-                self.__set_learning_rate()
-
-                # Needed for batch norm
-                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
-
-                # for i in range(self._maximum_training_batches):
-                tqdm_range = tqdm(range(self._maximum_training_batches))
-                for i in tqdm_range:
-                    start_time = time.time()
-
-                    self._global_epoch = i
-                    self._session.run(self._graph_ops['optimizer'])
-                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        elapsed = time.time() - start_time
-
-                        if self._tb_dir is not None:
-                            summary = self._session.run(self._graph_ops['merged'])
-                            train_writer.add_summary(summary, i)
-                        if self._validation:
-                            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                                loss, epoch_accuracy, epoch_val_accuracy = self._session.run(
-                                    [self._graph_ops['cost'],
-                                     self._graph_ops['accuracy'],
-                                     self._graph_ops['val_accuracy']])
-
-                                samples_per_sec = self._batch_size / elapsed
-
-                                desc_str = "{}: Results for batch {} (epoch {:.1f}) - " + \
-                                           "Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
-                                tqdm_range.set_description(
-                                    desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                    i,
-                                                    i / (self._total_training_samples / self._batch_size),
-                                                    loss,
-                                                    epoch_accuracy,
-                                                    samples_per_sec))
-
-                            elif self._problem_type == definitions.ProblemType.REGRESSION or \
-                                    self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
-                                    self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                                loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
-                                                                           self._graph_ops['val_cost']])
-
-                                samples_per_sec = self._batch_size / elapsed
-
-                                tqdm_range.set_description(
-                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
-                                            i,
-                                            i / (self._total_training_samples / self._batch_size),
-                                            loss,
-                                            samples_per_sec))
-
-                        else:
-                            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                                loss, epoch_accuracy = self._session.run(
-                                    [self._graph_ops['cost'],
-                                     self._graph_ops['accuracy']])
-
-                                samples_per_sec = self._batch_size / elapsed
-
-                                desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
-                                           "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
-                                tqdm_range.set_description(
-                                    desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                    i,
-                                                    i / (self._total_training_samples / self._batch_size),
-                                                    loss,
-                                                    epoch_accuracy,
-                                                    samples_per_sec))
-
-                            elif self._problem_type == definitions.ProblemType.REGRESSION or \
-                                    self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION or \
-                                    self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-
-                                loss = self._session.run([self._graph_ops['cost']])
-
-                                samples_per_sec = self._batch_size / elapsed
-
-                                tqdm_range.set_description(
-                                    "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                                    .format(datetime.datetime.now().strftime("%I:%M%p"),
-                                            i,
-                                            i / (self._total_training_samples / self._batch_size),
-                                            loss,
-                                            samples_per_sec))
-
-                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
-                            self.save_state(self._save_dir)
-                    else:
-                        loss = self._session.run([self._graph_ops['cost']])
-
-                    if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
-                        break
-
-                    if i == self._maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
-
-                self.save_state(self._save_dir)
-
-                final_test_loss = None
-                if self._testing:
-                    final_test_loss = self.compute_full_test_accuracy()
-
-                self.shut_down()
-
-                if return_test_loss:
-                    return final_test_loss
-                else:
-                    return
+        pass
 
     def begin_training_with_hyperparameter_search(self, l2_reg_limits=None, lr_limits=None, num_steps=3):
         """
-        Performs grid-based hyperparameter search given the ranges passed. Parameters are optional.
+        Performs grid-based hyper-parameter search given the ranges passed. Parameters are optional.
 
         :param l2_reg_limits: array representing a range of L2 regularization coefficients in the form [low, high]
         :param lr_limits: array representing a range of learning rates in the form [low, high]
@@ -1313,349 +600,13 @@ class DPPModel(object):
         self.__log('Loss/error grid:')
         self.__log('\n'+np.array2string(all_loss_results, precision=4))
 
+    @abstractmethod
     def compute_full_test_accuracy(self):
-        """Returns statistics of the test losses depending on the type of task"""
-
-        self.__log('Computing total test accuracy/regression loss...')
-
-        with self._graph.as_default():
-            num_test = self._total_raw_samples - self._total_training_samples
-            num_batches = int(np.ceil(num_test / self._batch_size))
-
-            if num_batches == 0:
-                warnings.warn('Less than a batch of testing data')
-                exit()
-
-            use_losses = [definitions.ProblemType.REGRESSION, definitions.ProblemType.SEMANTIC_SEGMETNATION]
-            use_y = [definitions.ProblemType.REGRESSION, definitions.ProblemType.OBJECT_DETECTION]
-            use_predictions = [definitions.ProblemType.REGRESSION, definitions.ProblemType.OBJECT_DETECTION]
-
-            # Initialize storage for the retreived test variables
-            if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                # Object detection needs some special care given to its variable's shape
-                all_y = np.empty(shape=(1,
-                                        self._grid_w * self._grid_h,
-                                        1 + self._NUM_CLASSES + 4))
-                all_predictions = np.empty(shape=(1,
-                                                  self._grid_w * self._grid_h,
-                                                  5 * self._NUM_BOXES + self._NUM_CLASSES))
-            else:
-                if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                    loss_sum = 0.0
-                if self._problem_type in use_losses:
-                    all_losses = np.empty(shape=1)
-                if self._problem_type in use_y:
-                    all_y = np.empty(shape=1)
-                if self._problem_type in use_predictions:
-                    all_predictions = np.empty(shape=1)
-
-            # Main test loop
-            for _ in tqdm(range(num_batches)):
-                if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                    batch_mean = self._session.run([self._graph_ops['test_losses']])
-                    loss_sum = loss_sum + np.mean(batch_mean)
-                elif self._problem_type == definitions.ProblemType.REGRESSION:
-                    r_losses, r_y, r_predicted = self._session.run([self._graph_ops['test_losses'],
-                                                                    self._graph_ops['y_test'],
-                                                                    self._graph_ops['x_test_predicted']])
-                    all_losses = np.concatenate((all_losses, r_losses), axis=0)
-                    all_y = np.concatenate((all_y, np.squeeze(r_y)), axis=0)
-                    all_predictions = np.concatenate((all_predictions, np.squeeze(r_predicted)), axis=0)
-                elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    r_losses = self._session.run(self._graph_ops['test_losses'])
-                    all_losses = np.concatenate((all_losses, r_losses), axis=0)
-                elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    r_y, r_predicted = self._session.run([self._graph_ops['y_test'],
-                                                          self._graph_ops['x_test_predicted']])
-                    all_y = np.concatenate((all_y, r_y), axis=0)
-                    all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
-
-            if self._problem_type != definitions.ProblemType.CLASSIFICATION:
-                # Delete the weird first entries in losses, y values, and predictions (because creating empty arrays
-                # isn't a thing)
-                if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    # These are multi-dimensional for object detection, so first entry = first slice
-                    all_y = np.delete(all_y, 0, axis=0)
-                    all_predictions = np.delete(all_predictions, 0, axis=0)
-                else:
-                    if self._problem_type in use_losses:
-                        all_losses = np.delete(all_losses, 0)
-                    if self._problem_type in use_y:
-                        all_y = np.delete(all_y, 0)
-                    if self._problem_type in use_predictions:
-                        all_predictions = np.delete(all_predictions, 0)
-
-                # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
-                # we want to get rid of)
-                extra = self._batch_size - (self._total_testing_samples % self._batch_size)
-                if extra != self._batch_size:
-                    mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
-                    mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
-                    if self._problem_type in use_losses:
-                        all_losses = all_losses[mask_extra, ...]
-                    if self._problem_type in use_y:
-                        all_y = all_y[mask_extra, ...]
-                    if self._problem_type in use_predictions:
-                        all_predictions = all_predictions[mask_extra, ...]
-
-            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix
-                mean = (loss_sum / num_batches)
-
-                self.__log('Average test accuracy: {:.5f}'.format(mean))
-
-                return 1.0-mean.astype(np.float32)
-            elif self._problem_type == definitions.ProblemType.REGRESSION or \
-                    self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                # For regression problems we want relative and abs mean, std of L2 norms, plus a histogram of errors
-                abs_mean = np.mean(np.abs(all_losses))
-                abs_var = np.var(np.abs(all_losses))
-                abs_std = np.sqrt(abs_var)
-
-                mean = np.mean(all_losses)
-                var = np.var(all_losses)
-                mse = np.mean(np.square(all_losses))
-                std = np.sqrt(var)
-                loss_max = np.amax(all_losses)
-                loss_min = np.amin(all_losses)
-
-                hist, _ = np.histogram(all_losses, bins=100)
-
-                self.__log('Mean loss: {}'.format(mean))
-                self.__log('Loss standard deviation: {}'.format(std))
-                self.__log('Mean absolute loss: {}'.format(abs_mean))
-                self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-                self.__log('Min error: {}'.format(loss_min))
-                self.__log('Max error: {}'.format(loss_max))
-                self.__log('MSE: {}'.format(mse))
-
-                if self._problem_type == definitions.ProblemType.REGRESSION:
-                    all_y_mean = np.mean(all_y)
-                    total_error = np.sum(np.square(all_y - all_y_mean))
-                    unexplained_error = np.sum(np.square(all_losses))
-                    # division by zero can happen when using small test sets
-                    if total_error == 0:
-                        r2 = -np.inf
-                    else:
-                        r2 = 1. - (unexplained_error / total_error)
-
-                    self.__log('R^2: {}'.format(r2))
-                    self.__log('All test labels:')
-                    self.__log(all_y)
-
-                    self.__log('All predictions:')
-                    self.__log(all_predictions)
-
-                self.__log('Histogram of {} losses:'.format(self._loss_fn))
-                self.__log(hist)
-
-                return abs_mean.astype(np.float32)
-            elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                # Make the images heterogeneous, storing their separate grids in a list
-                test_labels = [all_y[i, ...] for i in range(all_y.shape[0])]
-                test_preds = [all_predictions[i, ...] for i in range(all_predictions.shape[0])]
-                n_images = len(test_labels)
-
-                # Convert coordinates, then filter out the positive ground truth labels and significant predictions
-                for i in range(n_images):
-                    conv_label, conv_pred = self.__yolo_coord_convert(test_labels[i], test_preds[i])
-                    truth_mask = conv_label[..., 0] == 1
-                    if not np.any(truth_mask):
-                        conv_label = None
-                    else:
-                        conv_label = conv_label[truth_mask, :]
-                    conv_pred = self.__yolo_filter_predictions(conv_pred)
-                    test_labels[i] = conv_label
-                    test_preds[i] = conv_pred
-
-                # Get and log the map
-                yolo_map = self.__yolo_map(test_labels, test_preds)
-                self.__log('Yolo mAP: {}'.format(yolo_map))
-            return
-
-    def __yolo_coord_convert(self, labels, preds):
         """
-        Converts Yolo labeled and predicted bounding boxes from xywh coords to x1y1x2y2 coords. Also accounts for
-        required sigmoid and exponential conversions in the predictions (including the confidences)
-
-        :param labels: ndarray with Yolo ground-truth bounding boxes (size ?x(NUM_CLASSES+5))
-        :param preds: ndarray with Yolo predicted bounding boxes (size ?x(NUM_BOXES*5))
-        :return: `labels` and `preds` with the bounding box coords changed from xywh to x1y1x2y2 and predicted box
-        confidences converted to percents
+        Prints to console and returns accuracy and loss statistics for the trained network. The applicable statistics
+        will depend on the problem type.
         """
-
-        def xywh_to_xyxy(x, y, w, h):
-            x_centre = np.arange(self._grid_w * self._grid_h) % self._grid_w
-            y_centre = np.arange(self._grid_w * self._grid_h) // self._grid_w
-            scale_x = self._image_width / self._grid_w
-            scale_y = self._image_height / self._grid_h
-
-            x = (x + x_centre) * scale_x
-            y = (y + y_centre) * scale_y
-            w = w * scale_x
-            h = h * scale_y
-
-            x1 = x - w/2
-            x2 = x + w/2
-            y1 = y - h/2
-            y2 = y + h/2
-            return x1, y1, x2, y2
-
-        # Labels are already sensible numbers, so convert them first
-        lab_coord_idx = np.arange(labels.shape[-1]-4, labels.shape[-1])
-        lab_class, lab_x, lab_y, lab_w, lab_h = np.split(labels, lab_coord_idx, axis=-1)
-        lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(np.squeeze(lab_x),  # Squeezing to aid broadcasting in helper
-                                                      np.squeeze(lab_y),
-                                                      np.squeeze(lab_w),
-                                                      np.squeeze(lab_h))
-        labels = np.concatenate([lab_class,
-                                 lab_x1[:, np.newaxis],  # Dummy dimensions to enable concatenation
-                                 lab_y1[:, np.newaxis],
-                                 lab_x2[:, np.newaxis],
-                                 lab_y2[:, np.newaxis]], axis=-1)
-
-        # Extract the class predictions and reorganize the predicted boxes
-        class_preds = preds[..., self._NUM_BOXES * 5:]
-        preds = np.reshape(preds[..., 0:self._NUM_BOXES * 5], preds.shape[:-1] + (self._NUM_BOXES, 5))
-
-        # Predictions are not, so apply sigmoids and exponentials first and then convert them
-        anchors = np.array(self._ANCHORS)
-        pred_x = expit(preds[..., 0])
-        pred_y = expit(preds[..., 1])
-        pred_w = np.exp(preds[..., 2]) * anchors[:, 0]
-        pred_h = np.exp(preds[..., 3]) * anchors[:, 1]
-        pred_conf = expit(preds[..., 4])
-        pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x.T,  # Transposes to aid broadcasting in helper
-                                                          pred_y.T,
-                                                          pred_w.T,
-                                                          pred_h.T)
-        preds[..., :] = np.stack([pred_x1.T,  # Transposes to restore original shape
-                                  pred_y1.T,
-                                  pred_x2.T,
-                                  pred_y2.T,
-                                  pred_conf], axis=-1)
-
-        # Reattach the class predictions
-        preds = np.reshape(preds, preds.shape[:-2] + (self._NUM_BOXES * 5,))
-        preds = np.concatenate([preds, class_preds], axis=-1)
-
-        return labels, preds
-
-    def __yolo_filter_predictions(self, preds):
-        """
-        Filters the predicted bounding boxes by eliminating insignificant and overlapping predictions
-
-        :param preds: ndarray with predicted bounding boxes for one image in each grid square. Predictions
-        are a list of, for each box, [x1, y1, x2, y2, conf] followed by a list of class predictions
-        :return: `preds` with only the significant and maximal confidence predictions remaining
-        """
-        # Extract the class predictions and separate the predicted boxes
-        grid_count = preds.shape[0]
-        class_preds = preds[..., self._NUM_BOXES * 5:]
-        preds = np.reshape(preds[..., 0:self._NUM_BOXES * 5], preds.shape[:-1] + (self._NUM_BOXES, 5))
-
-        # In each grid square, the highest confidence box is the one responsible for prediction
-        max_conf_idx = np.argmax(preds[..., 4], axis=-1)
-        responsible_boxes = [preds[i, max_conf_idx[i], :] for i in range(grid_count)]
-        preds = np.stack(responsible_boxes, axis=0)
-
-        # Eliminate insignificant predicted boxes
-        sig_mask = preds[:, 4] > self._THRESH_SIG
-        if not np.any(sig_mask):
-            return None
-        class_preds = class_preds[sig_mask, :]
-        preds = preds[sig_mask, :]
-
-        # Apply non-maximal suppression (i.e. eliminate boxes that overlap with a more confidant box)
-        maximal_idx = []
-        sig_grid_count = preds.shape[0]
-        conf_order = np.argsort(preds[:, 4])
-        pair_iou = np.array([self.__compute_iou(preds[i, 0:4], preds[j, 0:4])
-                             for i in range(sig_grid_count) for j in range(sig_grid_count)])
-        pair_iou = pair_iou.reshape(sig_grid_count, sig_grid_count)
-        while len(conf_order) > 0:
-            # Take the most confidant box, then cull the list down to boxes that don't overlap with it
-            cur_grid = conf_order[-1]
-            maximal_idx.append(cur_grid)
-            non_overlap = pair_iou[cur_grid, conf_order] < self._THRESH_OVERLAP
-            if np.any(non_overlap):
-                conf_order = conf_order[non_overlap]
-            else:
-                break
-
-        # Stick things back together. maximal_idx is not sorted, but box and class predictions should still match up
-        # and the original grid order shouldn't matter for mAP calculations
-        class_preds = class_preds[maximal_idx, :]
-        preds = preds[maximal_idx, :]
-        preds = np.concatenate([preds, class_preds], axis=-1)
-
-        return preds
-
-    def __yolo_map(self, labels, preds):
-        """
-        Calculates the mean average precision of Yolo object and class predictions
-
-        :param labels: List of ndarrays with ground truth bounding box labels for each image. Labels are a 6-value
-        list: [object-ness, class, x1, y1, x2, y2]
-        :param preds: List of ndarrays with significant predicted bounding boxes in each image. Predictions are a list
-        of box parameters [x1, y1, x2, y2, conf] followed by a list of class predictions
-        :return: The mean average precision (mAP) of the predictions
-        """
-        # Go over each prediction in each image and determine if it's a true or false positive
-        detections = []
-        for im_lab, im_pred in zip(labels, preds):
-            # No predictions means no positives
-            if im_pred is None:
-                continue
-            n_pred = im_pred.shape[0]
-
-            # No labels means all false positives
-            if im_lab is None:
-                for i in range(n_pred):
-                    detections.append((im_pred[i, 4], 0))
-                continue
-            n_lab = im_lab.shape[0]
-
-            # Add a 7th value to the labels so we can tell which ones get matched up with true positives
-            im_lab = np.concatenate([im_lab, np.zeros((n_lab, 1))], axis=-1)
-
-            # Calculate the IoUs of all the prediction and label pairings, then record each detection as a true or
-            # false positive with the prediction confidence
-            pair_ious = np.array([self.__compute_iou(im_pred[i, 0:4], im_lab[j, 2:6])
-                                  for i in range(n_pred) for j in range(n_lab)])
-            pair_ious = np.reshape(pair_ious, (n_pred, n_lab))
-            for i in range(n_pred):
-                j = np.argmax(pair_ious[i, :])
-                if pair_ious[i, j] >= self._THRESH_CORRECT and not im_lab[j, 6]:
-                    detections.append((im_pred[i, 4], 1))
-                    im_lab[j, 6] = 1
-                else:
-                    detections.append((im_pred[i, 4], 0))
-
-        # If there are no valid predictions at all, the mAP is 0
-        if not detections:
-            return 0
-
-        # With multiple classes, we would also have class tags in the detection tuples so the below code could generate
-        # and iterate over class-separated detection lists, giving multiple AP values and one true mean AP. We aren't
-        # doing that right now because of our one-class plant detector assumption
-
-        # Determine the precision-recall curve from the cumulative detected true and false positives (in order of
-        # descending confidence)
-        detections = np.array(sorted(detections, key=lambda d: d[0], reverse=True))
-        n_truths = sum([x.shape[0] if (x is not None) else 0
-                        for x in labels])
-        n_positives = detections.shape[0]
-        true_positives = np.cumsum(detections[:, 1])
-        precision = true_positives / np.arange(1, n_positives+1)
-        recall = true_positives / n_truths
-
-        # Calculate the area under the precision-recall curve (== AP)
-        for i in range(precision.size - 1, 0, -1):  # Make precision values the maximum precision at further recalls
-            precision[i - 1] = np.max((precision[i], precision[i-1]))
-        ap = np.sum(precision[1:] * (recall[1:] - recall[0:-1]))
-
-        return ap
+        pass
 
     def shut_down(self):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
@@ -1761,9 +712,9 @@ class DPPModel(object):
 
     def forward_pass(self, x, deterministic=False, moderation_features=None):
         """
-        Perform a forward pass of the network with an input tensor.
-        In general, this is only used when the model is integrated into a Tensorflow graph.
-        See also forward_pass_with_file_inputs.
+        Perform a forward pass of the network with an input tensor. In general, this is only used when the model is
+        integrated into a Tensorflow graph. See forward_pass_with_file_inputs for a version that returns network
+        outputs detached from a graph.
 
         :param x: input tensor where the first dimension is batch
         :param deterministic: if True, performs inference-time operations on stochastic layers e.g. DropOut layers
@@ -1779,569 +730,27 @@ class DPPModel(object):
 
         return x
 
+    @abstractmethod
     def forward_pass_with_file_inputs(self, x):
         """
-        Get network outputs with a list of filenames of images as input.
-        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
-        without any problems.
+        Get network outputs with a list of filenames of images as input. Handles all the loading and batching
+        automatically, so the size of the input can exceed the available memory without any problems.
 
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-        with self._graph.as_default():
-            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                total_outputs = np.empty([1, self.__last_layer().output_size])
-            elif self._problem_type == definitions.ProblemType.REGRESSION:
-                total_outputs = np.empty([1, self._num_regression_outputs])
-            elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                if self._with_patching:
-                    # we want the largest multiple of of patch height/width that is smaller than the original
-                    # image height/width, for the final image dimensions
-                    patch_height = self._patch_height
-                    patch_width = self._patch_width
-                    final_height = (self._image_height // patch_height) * patch_height
-                    final_width = (self._image_width // patch_width) * patch_width
-                    # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
-                    # is equal on all sides of image
-                    offset_height = (self._image_height - final_height) // 2
-                    offset_width = (self._image_width - final_width) // 2
-                    # pre-allocate output dimensions
-                    total_outputs = np.empty([1, final_height, final_width])
-                else:
-                    total_outputs = np.empty([1, self._image_height, self._image_width])
-            elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                if self._with_patching:
-                    # we want the largest multiple of patch height/width that is smaller than the original
-                    # image height/width, for the final image dimensions
-                    patch_height = self._patch_height
-                    patch_width = self._patch_width
-                    final_height = (self._image_height // patch_height) * patch_height
-                    final_width = (self._image_width // patch_width) * patch_width
-                    num_patches_vert = self._image_height // patch_height
-                    num_patches_horiz = self._image_width // patch_width
-                    # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
-                    # is equal on all sides of image
-                    offset_height = (self._image_height - final_height) // 2
-                    offset_width = (self._image_width - final_width) // 2
-                    # pre-allocate output dimensions
-                    total_outputs = np.empty([1,
-                                              num_patches_horiz * num_patches_vert,
-                                              self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
-                else:
-                    total_outputs = np.empty(
-                        [1, self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
-            else:
-                warnings.warn('Problem type is not recognized')
-                exit()
+        pass
 
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
-
-            if remainder != 0:
-                num_batches += 1
-                remainder = self._batch_size - remainder
-
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = x
-            self.__parse_images(images)
-
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._with_patching:
-                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
-                # Split the images up into the multiple slices of size patch_height x patch_width
-                ksizes = [1, patch_height, patch_width, 1]
-                strides = [1, patch_height, patch_width, 1]
-                rates = [1, 1, 1, 1]
-                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
-
-            if self._load_from_saved:
-                self.load_state()
-            self.__initialize_queue_runners()
-            # Run model on them
-            x_pred = self.forward_pass(x_test, deterministic=True)
-
-            if self._with_patching:
-                if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    num_patch_rows = final_height // patch_height
-                    num_patch_cols = final_width // patch_width
-                    for i in range(num_batches):
-                        xx = self._session.run(x_pred)
-
-                        # generalized image stitching
-                        for img in np.array_split(xx, self._batch_size):  # for each img in current batch
-                            # we are going to build a list of rows of imgs called img_rows, where each element
-                            # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
-                            # iterate through img_rows concatenating the rows vertically (axis=0) to build
-                            # the full img
-
-                            img_rows = []
-                            # for each row
-                            for j in range(num_patch_rows):
-                                curr_row = img[j*num_patch_cols]  # start new row with first img
-                                # iterate through the rest of the row, concatenating img's together
-                                for k in range(1, num_patch_cols):
-                                    # horizontal cat
-                                    curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
-                                img_rows.append(curr_row)  # add row of img's to the list
-
-                            # start full img with the first full row of imgs
-                            full_img = img_rows[0]
-                            # iterate through rest of rows, concatenating rows together
-                            for row_num in range(1, num_patch_rows):
-                                # vertical cat
-                                full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
-
-                            # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                            full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
-                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
-                elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                    # for i in range(num_batches):
-                    #     xx = self._session.run(x_pred)
-                    #     # init_op = tf.global_variables_initializer()
-                    #     # self._session.run(init_op)
-                    #     # self.__initialize_queue_runners()
-                    #     print('printing xx')
-                    #     print(xx)
-                    #     print(xx.shape)
-                    for i in range(int(num_batches)):
-                        xx = self._session.run(x_pred)
-                        xx = np.reshape(xx, [self._batch_size, num_patches_vert * num_patches_horiz, -1])
-                        for img in np.array_split(xx, self._batch_size):
-                            total_outputs = np.append(total_outputs, img, axis=0)
-
-            else:
-                for i in range(int(num_batches)):
-                    xx = self._session.run(x_pred)
-                    if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                        xx = np.reshape(xx, [self._batch_size, -1])
-                    for img in np.array_split(xx, self._batch_size):
-                        total_outputs = np.append(total_outputs, img, axis=0)
-
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
-
-            # delete any outputs which are overruns from the last batch
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
-
-        return total_outputs
-
+    @abstractmethod
     def forward_pass_with_interpreted_outputs(self, x):
         """
         Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
-        problem type and whether patching is being used.
+        the problem type and whether patching is being used.
 
         :param x: list of strings representing image filenames
         :return: ndarray representing network outputs corresponding to inputs in the same order
         """
-
-        # Classification #
-        if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-            # perform forward pass of the network to get raw outputs
-            xx = self.forward_pass_with_file_inputs(x)
-            # softmax
-            interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
-            return interpreted_outputs
-
-        # Regression #
-        elif self._problem_type == definitions.ProblemType.REGRESSION:
-            # nothing special required for regression
-            interpreted_outputs = self.forward_pass_with_file_inputs(x)
-            return interpreted_outputs
-
-        # Semantic Segmentation #
-        elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-            with self._graph.as_default():
-                # check for patching needs
-                if self._with_patching:
-                    # we want the largest multiple of of patch height/width that is smaller than the original
-                    # image height/width, for the final image dimensions
-                    patch_height = self._patch_height
-                    patch_width = self._patch_width
-                    final_height = (self._image_height // patch_height) * patch_height
-                    final_width = (self._image_width // patch_width) * patch_width
-                    # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
-                    # is equal on all sides of image
-                    offset_height = (self._image_height - final_height) // 2
-                    offset_width = (self._image_width - final_width) // 2
-                    # pre-allocate output dimensions
-                    total_outputs = np.empty([1, final_height, final_width])
-                else:
-                    total_outputs = np.empty([1, self._image_height, self._image_width])
-
-                num_batches = len(x) // self._batch_size
-                remainder = len(x) % self._batch_size
-                if remainder != 0:
-                    num_batches += 1
-                    remainder = self._batch_size - remainder
-                # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-                images = x
-                self.__parse_images(images)
-                # set up and then initialize the queue
-                x_test = tf.train.batch(
-                    [self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                # if using patching we have to determine different image dimensions
-                if self._with_patching:
-                    x_test = tf.image.crop_to_bounding_box(
-                        x_test, offset_height, offset_width, final_height, final_width)
-                    # Split the images up into the multiple slices of size patch_height x patch_width
-                    ksizes = [1, patch_height, patch_width, 1]
-                    strides = [1, patch_height, patch_width, 1]
-                    rates = [1, 1, 1, 1]
-                    x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-                    x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
-                if self._load_from_saved:
-                    self.load_state()
-                self.__initialize_queue_runners()
-                x_pred = self.forward_pass(x_test, deterministic=True)
-                # check if we need to perform patching
-                if self._with_patching:
-                    num_patch_rows = final_height // patch_height
-                    num_patch_cols = final_width // patch_width
-                    for i in range(num_batches):
-                        xx = self._session.run(x_pred)
-                        # generalized image stitching
-                        for img in np.array_split(xx, self._batch_size):  # for each img in current batch
-                            # we are going to build a list of rows of imgs called img_rows, where each element
-                            # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
-                            # iterate through img_rows concatenating the rows vertically (axis=0) to build
-                            # the full img
-                            img_rows = []
-                            for j in range(num_patch_rows):  # for each row
-                                curr_row = img[j*num_patch_cols]  # start new row with first img
-                                # iterate through the rest of the row, concatenating img's together
-                                for k in range(1, num_patch_cols):
-                                    # vertical cat
-                                    curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
-                                img_rows.append(curr_row)  # add row of img's to the list
-                            # start full img with the first full row of imgs
-                            full_img = img_rows[0]
-                            # iterate through rest of rows, concatenating rows together
-                            for row_num in range(1, num_patch_rows):
-                                # vertical cat
-                                full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
-                            # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                            full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
-                            # this appending may be causing a border, might need to rewrite and specifically index
-                            total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
-                else:
-                    for i in range(int(num_batches)):
-                        xx = self._session.run(x_pred)
-                        for img in np.array_split(xx, self._batch_size):
-                            total_outputs = np.append(total_outputs, img, axis=0)
-                # delete weird first row
-                total_outputs = np.delete(total_outputs, 0, 0)
-                # delete any outputs which are overruns from the last batch
-                if remainder != 0:
-                    for i in range(remainder):
-                        total_outputs = np.delete(total_outputs, -1, 0)
-            # normalize and then threshold
-            interpreted_outputs = np.zeros(total_outputs.shape, dtype=np.uint8)
-            for i, img in enumerate(total_outputs):
-                # normalize
-                x_min = np.min(img)
-                x_max = np.max(img)
-                mask = (img - x_min) / (x_max - x_min)
-                # threshold
-                mask[mask >= 0.5] = 255
-                mask[mask < 0.5] = 0
-                # store
-                interpreted_outputs[i, :, :] = mask
-
-            return interpreted_outputs
-
-        # Object Detection #
-        elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-            with self._graph.as_default():
-                # check for patching needs
-                if self._with_patching:
-                    # we want the largest multiple of patch height/width that is smaller than the original
-                    # image height/width, for the final image dimensions
-                    patch_height = self._patch_height
-                    patch_width = self._patch_width
-                    final_height = (self._image_height // patch_height) * patch_height
-                    final_width = (self._image_width // patch_width) * patch_width
-                    num_patches_vert = self._image_height // patch_height
-                    num_patches_horiz = self._image_width // patch_width
-                    # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
-                    # is equal on all sides of image
-                    offset_height = (self._image_height - final_height) // 2
-                    offset_width = (self._image_width - final_width) // 2
-                    # pre-allocate output dimensions
-                    total_outputs = np.empty([1,
-                                              num_patches_horiz * num_patches_vert,
-                                              self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
-                else:
-                    total_outputs = np.empty(
-                        [1, self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
-                num_batches = len(x) // self._batch_size
-                remainder = len(x) % self._batch_size
-
-                if remainder != 0:
-                    num_batches += 1
-                    remainder = self._batch_size - remainder
-
-                # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-                images = x
-                self.__parse_images(images)
-
-                x_test = tf.train.batch([self._all_images], batch_size=self._batch_size,
-                                        num_threads=self._num_threads)
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                if self._with_patching:
-                    x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height,
-                                                           final_width)
-                    # Split the images up into the multiple slices of size patch_height x patch_width
-                    ksizes = [1, patch_height, patch_width, 1]
-                    strides = [1, patch_height, patch_width, 1]
-                    rates = [1, 1, 1, 1]
-                    x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-                    x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
-
-                if self._load_from_saved:
-                    self.load_state()
-                self.__initialize_queue_runners()
-                # Run model on them
-                x_pred = self.forward_pass(x_test, deterministic=True)
-                if self._with_patching:
-                    # for i in range(num_batches):
-                    #     xx = self._session.run(x_pred)
-                    #     # init_op = tf.global_variables_initializer()
-                    #     # self._session.run(init_op)
-                    #     # self.__initialize_queue_runners()
-                    #     print('printing xx')
-                    #     print(xx)
-                    #     print(xx.shape)
-                    for i in range(int(num_batches)):
-                        xx = self._session.run(x_pred)
-                        xx = np.reshape(xx, [self._batch_size, num_patches_vert * num_patches_horiz, -1])
-                        for img in np.array_split(xx, self._batch_size):
-                            total_outputs = np.append(total_outputs, img, axis=0)
-                else:
-                    for i in range(int(num_batches)):
-                        xx = self._session.run(x_pred)
-                        xx = np.reshape(xx, [self._batch_size, -1])
-                        for img in np.array_split(xx, self._batch_size):
-                            total_outputs = np.append(total_outputs, img, axis=0)
-                # delete weird first row
-                total_outputs = np.delete(total_outputs, 0, 0)
-                # delete any outputs which are overruns from the last batch
-                if remainder != 0:
-                    for i in range(remainder):
-                        total_outputs = np.delete(total_outputs, -1, 0)
-
-            # Perform yolo needs
-            # this is currently for patching, need a way to be more general or maybe just need to write both ways out
-            # fully
-            total_pred_boxes = []
-            if self._with_patching:
-                num_patches = num_patches_vert * num_patches_horiz
-                for img_data in total_outputs:
-                    ###################################################################################################
-                    # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
-                    # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
-                    # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
-                    # this may likely need to be made more general in future
-                    ###################################################################################################
-                    for i in range(num_patches):
-                        for j in range(self._grid_w * self._grid_h):
-                            # We first find the responsible box by finding the one with the highest confidence
-                            box_conf1 = expit(img_data[i, j * 26 + 4])
-                            box_conf2 = expit(img_data[i, j * 26 + 9])
-                            box_conf3 = expit(img_data[i, j * 26 + 14])
-                            box_conf4 = expit(img_data[i, j * 26 + 19])
-                            box_conf5 = expit(img_data[i, j * 26 + 24])
-                            box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
-                            max_conf_idx = int(np.argmax(box_confs))
-                            # Then we check if the responsible box is above the threshold for detecting an object
-                            if box_confs[max_conf_idx] > 0.6:
-                                # This box has detected an object, so we extract and convert its coords
-                                pred_box = img_data[i, j*26+5*max_conf_idx:j*26+5*max_conf_idx+4]
-
-                                # centers from which x and y offsets are applied to, these are in 'grid coords'
-                                c_x = j % self._grid_w
-                                c_y = j // self._grid_w
-                                # x and y go from 'grid coords' to 'patch coords' to 'full img coords'
-                                x = (expit(pred_box[0]) + c_x) * (patch_width / self._grid_w) \
-                                    + (i % num_patches_horiz) * patch_width
-                                y = (expit(pred_box[1]) + c_y) * (patch_height / self._grid_h) \
-                                    + (i // num_patches_horiz) * patch_height
-                                # get the anchor box based on the highest conf (responsible box)
-                                prior_w = self._ANCHORS[max_conf_idx][0]
-                                prior_h = self._ANCHORS[max_conf_idx][1]
-                                # w and h go from 'grid coords' to 'full img coords'
-                                w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
-                                h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
-                                # turn into points
-                                x1y1 = (int(x - w / 2), int(y - h / 2))
-                                x2y2 = (int(x + w / 2), int(y + h / 2))
-                                total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
-
-                    # Non - maximal suppression (Probably make into a general function)
-                    all_boxes = np.array(total_pred_boxes)
-                    idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
-                    final_boxes_idxs = []
-                    while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
-                        last = len(idxs) - 1  # since sorted in reverse order, the last one has the highest conf
-                        i = idxs[last]
-                        final_boxes_idxs.append(i)  # add it to the maximal list, then check for duplicates to delete
-                        suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
-                        for pos in range(0, last):  # search for duplicates
-                            j = idxs[pos]
-                            iou = self.__compute_iou(all_boxes[i], all_boxes[j])
-                            if iou > 0.3:  # maybe should make this a tunable parameter
-                                suppress.append(pos)
-                        idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
-
-                # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
-                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
-                return interpreted_outputs
-            else:
-                print('made it')
-                # no patching
-                print(total_outputs.shape)
-                for img_data in total_outputs:
-                    ###################################################################################################
-                    # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
-                    # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
-                    # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
-                    # this may likely need to be made more general in future
-                    ###################################################################################################
-                    for i in range(self._grid_w * self._grid_h):
-                        # x,y,w,h,conf,x,y,w,h,cong,x,y,...... classes
-                        box_conf1 = expit(img_data[i * 26 + 4])
-                        box_conf2 = expit(img_data[i * 26 + 9])
-                        box_conf3 = expit(img_data[i * 26 + 14])
-                        box_conf4 = expit(img_data[i * 26 + 19])
-                        box_conf5 = expit(img_data[i * 26 + 24])
-                        box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
-                        max_conf_idx = int(np.argmax(box_confs))
-
-                        if box_confs[max_conf_idx] > 0.6:
-                            pred_box = img_data[i * 26 + 5 * max_conf_idx: i * 26 + 5 * max_conf_idx + 4]
-
-                            # centers from which x and y offsets are applied to, these are in 'grid coords'
-                            c_x = i % self._grid_w
-                            c_y = i // self._grid_w
-                            # x and y go from 'grid coords' to 'full img coords'
-                            x = (expit(pred_box[0]) + c_x) * (self._image_width / self._grid_w)
-                            y = (expit(pred_box[1]) + c_y) * (self._image_height / self._grid_h)
-                            # get the anchor box based on the highest conf (responsible box)
-                            prior_w = self._ANCHORS[max_conf_idx][0]
-                            prior_h = self._ANCHORS[max_conf_idx][1]
-                            # w and h go from 'grid coords' to 'full img coords'
-                            w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
-                            h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
-                            x1y1 = (int(x - w / 2), int(y - h / 2))
-                            x2y2 = (int(x + w / 2), int(y + h / 2))
-                            total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
-
-                    # Non - maximal suppression (Probably make into a general function)
-                    all_boxes = np.array(total_pred_boxes)
-                    idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
-                    final_boxes_idxs = []
-                    while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
-                        last = len(idxs) - 1  # since sorted in reverse order, the last one has highest conf
-                        i = idxs[last]
-                        final_boxes_idxs.append(i)  # add it to the maximal list, then we check for duplicates to delete
-                        suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
-                        for pos in range(0, last):  # search for duplicates
-                            j = idxs[pos]
-                            iou = self.__compute_iou(all_boxes[i], all_boxes[j])
-                            if iou > 0.3:  # maybe should make this a tunable parameter
-                                suppress.append(pos)
-                        idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
-
-                # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
-                interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
-                return interpreted_outputs
-        else:
-            warnings.warn('Problem type is not recognized')
-            exit()
-
-    def __compute_iou(self, box1, box2):
-        """
-        Need to somehow merge with the iou helper function in the yolo cost function.
-
-        :param box1: x1, y1, x2, y2
-        :param box2: x1, y1, x2, y2
-        :return: Intersection Over Union of box1 and box2
-        """
-        x1 = np.maximum(box1[0], box2[0])
-        y1 = np.maximum(box1[1], box2[1])
-        x2 = np.minimum(box1[2], box2[2])
-        y2 = np.minimum(box1[3], box2[3])
-
-        intersection_area = np.maximum(0., x2 - x1) * np.maximum(0., y2 - y1)
-        union_area = \
-            ((box1[2] - box1[0]) * (box1[3] - box1[1])) + \
-            ((box2[2] - box2[0]) * (box2[3] - box2[1])) - \
-            intersection_area
-
-        return intersection_area / union_area
-
-    def __batch_mean_l2_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector L2 norm"""
-        with self._graph.as_default():
-            agg = self.__l2_norm(x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
-
-    def __l2_norm(self, x):
-        """Returns the L2 norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
-
-        return y
-
-    def __batch_mean_l1_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector L1 norm"""
-        with self._graph.as_default():
-            agg = self.__l1_norm(x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
-
-    def __l1_norm(self, x):
-        """Returns the L1 norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
-
-        return y
-
-    def __batch_mean_smooth_l1_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector smooth L1 norm"""
-        with self._graph.as_default():
-            agg = self.__smooth_l1_norm(x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
-
-    def __smooth_l1_norm(self, x):
-        """Returns the smooth L1 norm of a tensor"""
-        huber_delta = 1  # may want to make this a tunable hyper parameter in future
-        with self._graph.as_default():
-            x = tf.abs(x)
-            y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
-                                              0.5*ex**2,
-                                              huber_delta*(ex-0.5*huber_delta)), x)
-
-        return y
-
-    def __batch_mean_log_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector log loss"""
-        with self._graph.as_default():
-            x = tf.abs(x)
-            x = tf.clip_by_value(x, 0, 0.9999999)
-            agg = -tf.log(1-x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
+        pass
 
     def add_input_layer(self):
         """Add an input layer to the network"""
@@ -2620,6 +1029,7 @@ class DPPModel(object):
 
         self._layers.append(layer)
 
+    @abstractmethod
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         """
         Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
@@ -2629,78 +1039,7 @@ class DPPModel(object):
         :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
         use cases such as creating the output layer before loading data.
         """
-        if len(self._layers) < 1:
-            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
-                               "Add an input layer with DPPModel.add_input_layer() first.")
-        if regularization_coefficient is not None:
-            if not isinstance(regularization_coefficient, float):
-                raise TypeError("regularization_coefficient must be a float or None")
-            if regularization_coefficient < 0:
-                raise ValueError("regularization_coefficient must be non-negative")
-        if output_size is not None:
-            if not isinstance(output_size, int):
-                raise TypeError("output_size must be an int or None")
-            if output_size <= 0:
-                raise ValueError("output_size must be positive")
-            if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                raise RuntimeError("output_size should be None for problem_type semantic_segmentation")
-
-        self.__log('Adding output layer...')
-
-        reshape = self.__last_layer_outputs_volume()
-
-        if regularization_coefficient is None and self._reg_coeff is not None:
-            regularization_coefficient = self._reg_coeff
-        if regularization_coefficient is None and self._reg_coeff is None:
-            regularization_coefficient = 0.0
-
-        num_out = 0
-        filter_dimension = []
-        if output_size is None:
-            if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-                num_out = self._total_classes
-            elif self._problem_type == definitions.ProblemType.REGRESSION:
-                num_out = self._num_regression_outputs
-            elif self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
-            elif self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                # yolo S x S x (5B + K)
-                num_out = self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)
-                filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]),
-                                    (5 * self._NUM_BOXES + self._NUM_CLASSES)]
-            else:
-                warnings.warn('Problem type is not recognized')
-                exit()
-        else:
-            num_out = output_size
-
-        with self._graph.as_default():
-            if self._problem_type is definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                layer = layers.convLayer('output',
-                                         copy.deepcopy(self.__last_layer().output_size),
-                                         filter_dimension,
-                                         1,
-                                         None,
-                                         self._weight_initializer)
-            elif self._problem_type is definitions.ProblemType.OBJECT_DETECTION:
-                layer = layers.convLayer('output',
-                                         copy.deepcopy(self.__last_layer().output_size),
-                                         filter_dimension,
-                                         1,
-                                         None,
-                                         self._weight_initializer)
-            else:
-                layer = layers.fullyConnectedLayer('output',
-                                                   copy.deepcopy(self.__last_layer().output_size),
-                                                   num_out,
-                                                   reshape,
-                                                   self._batch_size,
-                                                   None,
-                                                   self._weight_initializer,
-                                                   regularization_coefficient)
-
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
-        self._layers.append(layer)
+        pass
 
     def use_predefined_model(self, model_name):
         """
@@ -2966,69 +1305,6 @@ class DPPModel(object):
         self._raw_image_files = image_files
         self._raw_labels = labels
         self._split_labels = False  # Band-aid fix
-
-    def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
-        """
-        Loads the png images in the given directory into an internal representation, using binary segmentation
-        masks from another file with the same filename as ground truth.
-
-        :param dirname: the path of the directory containing the images
-        :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
-        """
-
-        if self._problem_type is not definitions.ProblemType.SEMANTIC_SEGMETNATION:
-            warnings.warn('Trying to load a segmentation dataset, but the problem type is not properly set.')
-            exit()
-
-        image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
-                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
-
-        seg_files = [os.path.join(seg_dirname, name) for name in os.listdir(seg_dirname) if
-                     os.path.isfile(os.path.join(seg_dirname, name)) & name.endswith('.png')]
-
-        self._total_raw_samples = len(image_files)
-
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-
-        self._raw_image_files = image_files
-        self._raw_labels = seg_files
-        self._split_labels = False  # Band-aid fix
-
-    def load_ippn_dataset_from_directory(self, dirname, column='strain'):
-        """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
-
-        labels = []
-        ids = []
-        if column == 'treatment':
-            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 2, 0)
-        elif column == 'strain':
-            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 1, 0)
-        elif column == 'DAG':
-            labels, ids = loaders.read_csv_labels_and_ids(os.path.join(dirname, 'Metadata.csv'), 3, 0)
-        else:
-            warnings.warn('Unknown column in IPPN dataset')
-            exit()
-
-        image_files = [os.path.join(dirname, im_id + '_rgb.png') for im_id in ids]
-
-        self._total_raw_samples = len(image_files)
-
-        if self._problem_type == definitions.ProblemType.CLASSIFICATION:
-            self._total_classes = len(set(labels))
-
-            # transform into numerical one-hot labels
-            with self._graph.as_default():
-                labels = loaders.string_labels_to_sequential(labels)
-                labels = tf.one_hot(labels, self._total_classes)
-
-            self.__log('Total classes is %d' % self._total_classes)
-        elif self._problem_type == definitions.ProblemType.REGRESSION:
-            labels = [[label] for label in labels]
-
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-
-        self._raw_image_files = image_files
-        self._raw_labels = labels
 
     def load_ippn_tray_dataset_from_directory(self, dirname):
         """
@@ -3346,7 +1622,6 @@ class DPPModel(object):
 
     def load_json_labels_from_file(self, filename):
         """Loads bounding boxes for multiple images from a single json file."""
-        # these are for jsons in the structure that I got from Blanche's data #
 
         self._all_ids = []
         self._all_labels = []
@@ -3878,23 +2153,6 @@ class ClassificationModel(DPPModel):
                 self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def begin_training(self, return_test_loss=False):
-        """
-        Initialize the network and either run training to the specified max epoch, or load trainable variables.
-        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
-        the session is shut down.
-        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
-        """
-        # if None in [self._train_images, self._test_images,
-        #             self._train_labels, self._test_labels]:
-        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
-        #                        "Try first using one of the methods starting with 'load_...' such as " +
-        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
-        # if (len(self._layers) < 1):
-        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
-        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
-        #                        layers.")
-
         with self._graph.as_default():
             self.__assemble_graph()
             print('assembled the graph')
@@ -4000,8 +2258,6 @@ class ClassificationModel(DPPModel):
                     return
 
     def compute_full_test_accuracy(self):
-        """Returns statistics of the test losses depending on the type of task"""
-
         self.__log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
@@ -4026,14 +2282,6 @@ class ClassificationModel(DPPModel):
             return 1.0-mean.astype(np.float32)
 
     def forward_pass_with_file_inputs(self, x):
-        """
-        Get network outputs with a list of filenames of images as input.
-        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
-        without any problems.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
         with self._graph.as_default():
             total_outputs = np.empty([1, self.__last_layer().output_size])
 
@@ -4073,28 +2321,12 @@ class ClassificationModel(DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-        """
-        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
-        problem type and whether patching is being used.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
-
         # Perform forward pass of the network to get raw outputs and apply a softmax
         xx = self.forward_pass_with_file_inputs(x)
         interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
-        """
-        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
-
-        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
-         set by set_regularization_coefficient)
-        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
-        use cases such as creating the output layer before loading data.
-        """
         if len(self._layers) < 1:
             raise RuntimeError("An output layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
@@ -4451,23 +2683,6 @@ class RegressionModel(DPPModel):
                 self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def begin_training(self, return_test_loss=False):
-        """
-        Initialize the network and either run training to the specified max epoch, or load trainable variables.
-        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
-        the session is shut down.
-        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
-        """
-        # if None in [self._train_images, self._test_images,
-        #             self._train_labels, self._test_labels]:
-        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
-        #                        "Try first using one of the methods starting with 'load_...' such as " +
-        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
-        # if (len(self._layers) < 1):
-        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
-        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
-        #                        layers.")
-
         with self._graph.as_default():
             self.__assemble_graph()
             print('assembled the graph')
@@ -4565,8 +2780,6 @@ class RegressionModel(DPPModel):
                     return
 
     def compute_full_test_accuracy(self):
-        """Returns statistics of the test losses depending on the type of task"""
-
         self.__log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
@@ -4647,14 +2860,6 @@ class RegressionModel(DPPModel):
             return abs_mean.astype(np.float32)
 
     def forward_pass_with_file_inputs(self, x):
-        """
-        Get network outputs with a list of filenames of images as input.
-        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
-        without any problems.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
         with self._graph.as_default():
             total_outputs = np.empty([1, self._num_regression_outputs])
 
@@ -4694,15 +2899,7 @@ class RegressionModel(DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-        """
-        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
-        problem type and whether patching is being used.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
-
-        # nothing special required for regression
+        # Nothing special required for regression
         interpreted_outputs = self.forward_pass_with_file_inputs(x)
         return interpreted_outputs
 
@@ -4766,14 +2963,6 @@ class RegressionModel(DPPModel):
         return mean
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
-        """
-        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
-
-        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
-         set by set_regularization_coefficient)
-        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
-        use cases such as creating the output layer before loading data.
-        """
         if len(self._layers) < 1:
             raise RuntimeError("An output layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
@@ -5102,23 +3291,6 @@ class SemanticSegmentationModel(DPPModel):
                 self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def begin_training(self, return_test_loss=False):
-        """
-        Initialize the network and either run training to the specified max epoch, or load trainable variables.
-        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
-        the session is shut down.
-        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
-        """
-        # if None in [self._train_images, self._test_images,
-        #             self._train_labels, self._test_labels]:
-        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
-        #                        "Try first using one of the methods starting with 'load_...' such as " +
-        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
-        # if (len(self._layers) < 1):
-        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
-        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
-        #                        layers.")
-
         with self._graph.as_default():
             self.__assemble_graph()
             print('assembled the graph')
@@ -5216,8 +3388,6 @@ class SemanticSegmentationModel(DPPModel):
                     return
 
     def compute_full_test_accuracy(self):
-        """Returns statistics of the test losses depending on the type of task"""
-
         self.__log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
@@ -5274,14 +3444,6 @@ class SemanticSegmentationModel(DPPModel):
             return abs_mean.astype(np.float32)
 
     def forward_pass_with_file_inputs(self, x):
-        """
-        Get network outputs with a list of filenames of images as input.
-        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
-        without any problems.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
         with self._graph.as_default():
             if self._with_patching:
                 # we want the largest multiple of of patch height/width that is smaller than the original
@@ -5377,14 +3539,6 @@ class SemanticSegmentationModel(DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-        """
-        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
-        problem type and whether patching is being used.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
-
         with self._graph.as_default():
             # check for patching needs
             if self._with_patching:
@@ -5492,14 +3646,6 @@ class SemanticSegmentationModel(DPPModel):
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
-        """
-        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
-
-        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
-         set by set_regularization_coefficient)
-        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
-        use cases such as creating the output layer before loading data.
-        """
         if len(self._layers) < 1:
             raise RuntimeError("An output layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
@@ -5781,10 +3927,9 @@ class ObjectDetectionModel(DPPModel):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
     def set_image_dimensions(self, image_height, image_width, image_depth):
-        """Specify the image dimensions for images in the dataset (depth is the number of channels)"""
         super().set_image_dimensions(image_height, image_width, image_depth)
 
-        # Generate image-scaled anchors for YOLO object detection
+        # Generate image-scaled anchors for YOLO object detection once the image dimensions are set
         if self._RAW_ANCHORS:
             scale_w = self._grid_w / self._image_width
             scale_h = self._grid_h / self._image_height
@@ -5928,15 +4073,6 @@ class ObjectDetectionModel(DPPModel):
         # grids that do contain an object, 1 * iou means we simply take the difference between the
         # iou's and the predicted confidence
 
-        # this was to make responsible boxes confidences aim to go to 1 instead of their current iou score, this is
-        # still being tested
-        # non_resp_box_mask = tf.logical_not(resp_box_mask)
-        # non_responsible_boxes = tf.boolean_mask(predicted_boxes, non_resp_box_mask)
-        # non_responsible_ious = tf.boolean_mask(ious, non_resp_box_mask)
-        # loss1 = tf.reduce_sum(tf.square(1 - responsible_boxes[..., 4]))
-        # loss2 = tf.reduce_sum(tf.square(tf.subtract(non_responsible_ious, non_responsible_boxes[..., 4])))
-        # loss_obj = loss1 + loss2
-
         # this is how the paper does it, the above 6 lines is experimental
         obj_num_grids = tf.shape(predicted_boxes)[0]  # [num_boxes, 5, 5]
         loss_obj = tf.cast((1 / obj_num_grids), dtype='float32') * tf.reduce_sum(
@@ -5961,19 +4097,6 @@ class ObjectDetectionModel(DPPModel):
         class_loss = tf.reduce_sum(tf.square(class_diffs))
 
         total_loss = coord_loss + conf_loss + class_loss
-
-        # for some debug/checking, otherwise leave commented #
-        # init_op = tf.global_variables_initializer()
-        # self._session.run(init_op)
-        # self.__initialize_queue_runners()
-        # print('printing losses')
-        # print(self._session.run([loss_obj, loss_no_obj]))
-        # print(self._session.run([coord_loss, conf_loss, class_loss]))
-        # print(self._session.run([loss_obj, loss_no_obj]))
-        # print(self._session.run([coord_loss, conf_loss, class_loss]))
-        # print(self._session.run([loss_obj, loss_no_obj]))
-        # print(self._session.run([coord_loss, conf_loss, class_loss]))
-
         return total_loss
 
     def __assemble_graph(self):
@@ -6206,23 +4329,6 @@ class ObjectDetectionModel(DPPModel):
                 self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def begin_training(self, return_test_loss=False):
-        """
-        Initialize the network and either run training to the specified max epoch, or load trainable variables.
-        The full test accuracy is calculated immediately afterward. Finally, the trainable parameters are saved and
-        the session is shut down.
-        Before calling this function, the images and labels should be loaded, as well as all relevant hyperparameters.
-        """
-        # if None in [self._train_images, self._test_images,
-        #             self._train_labels, self._test_labels]:
-        #     raise RuntimeError("Images and Labels need to be loaded before you can begin training. " +
-        #                        "Try first using one of the methods starting with 'load_...' such as " +
-        #                        "'DPPModel.load_dataset_from_directory_with_csv_labels()'")
-        # if (len(self._layers) < 1):
-        #     raise RuntimeError("There are no layers currently added to the model when trying to begin training. " +
-        #                        "Add layers first by using functions such as 'DPPModel.add_input_layer()' or " +
-        #                        "'DPPModel.add_convolutional_layer()'. See documentation for a complete list of
-        #                        layers.")
-
         with self._graph.as_default():
             self.__assemble_graph()
             print('assembled the graph')
@@ -6320,8 +4426,6 @@ class ObjectDetectionModel(DPPModel):
                     return
 
     def compute_full_test_accuracy(self):
-        """Returns statistics of the test losses depending on the type of task"""
-
         self.__log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
@@ -6571,14 +4675,6 @@ class ObjectDetectionModel(DPPModel):
         return ap
 
     def forward_pass_with_file_inputs(self, x):
-        """
-        Get network outputs with a list of filenames of images as input.
-        Handles all the loading and batching automatically, so the size of the input can exceed the available memory
-        without any problems.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
         with self._graph.as_default():
             if self._with_patching:
                 # we want the largest multiple of patch height/width that is smaller than the original
@@ -6653,14 +4749,6 @@ class ObjectDetectionModel(DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-        """
-        Performs the forward pass of the network and then interprets the raw outputs into the desired format based on
-        problem type and whether patching is being used.
-
-        :param x: list of strings representing image filenames
-        :return: ndarray representing network outputs corresponding to inputs in the same order
-        """
-
         with self._graph.as_default():
             # check for patching needs
             if self._with_patching:
@@ -6880,14 +4968,6 @@ class ObjectDetectionModel(DPPModel):
         return intersection_area / union_area
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
-        """
-        Add an output layer to the network (affine layer where the number of units equals the number of network outputs)
-
-        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
-         set by set_regularization_coefficient)
-        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
-        use cases such as creating the output layer before loading data.
-        """
         if len(self._layers) < 1:
             raise RuntimeError("An output layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
@@ -7405,16 +5485,12 @@ class ObjectDetectionModel(DPPModel):
             self.__log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
 
         # save into json
-        # with open('/home/nico/yolo_data/yolo_test_imgs/blanche/test_patches_out.json', 'w') as outfile:
-        #     json.dump(img_dict, outfile)
         with open(json_dir_out + 'train_patches.json', 'w') as outfile:
             json.dump(img_dict, outfile)
 
         return new_raw_image_files, new_raw_labels
 
     def load_pascal_voc_labels_from_directory(self, data_dir):
-        """Loads single per-image bounding boxes from XML files in Pascal VOC format."""
-
         super().load_pascal_voc_labels_from_directory(data_dir)
 
         # need to add object-ness flag and one-hot encodings for class
@@ -7473,9 +5549,6 @@ class ObjectDetectionModel(DPPModel):
         self._all_labels = labels_with_one_hot
 
     def load_json_labels_from_file(self, filename):
-        """Loads bounding boxes for multiple images from a single json file."""
-        # these are for jsons in the structure that I got from Blanche's data #
-
         super().load_json_labels_from_file(filename)
 
         if not self._with_patching:
