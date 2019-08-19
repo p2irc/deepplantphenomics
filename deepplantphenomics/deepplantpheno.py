@@ -1,15 +1,15 @@
-from . import layers
-from . import loaders
-from . import definitions
+from . import layers, loaders, definitions
 import numpy as np
 import tensorflow as tf
 import os
 import json
 import datetime
+import time
 import warnings
 import copy
-from abc import ABC, abstractmethod
 import math
+from abc import ABC, abstractmethod
+from tqdm import tqdm
 
 
 class DPPModel(ABC):
@@ -639,7 +639,45 @@ class DPPModel(ABC):
         """
         pass
 
-    @abstractmethod
+    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer):
+        """
+        Calculates and reports mid-training losses and other statistics, both through the console and through writing
+        Tensorboard log files
+        :param batch_num: The batch number for the mid-training results
+        :param start_time: The start time to use for calculating the processing rate
+        :param tqdm_range: A `tqdm` object for displaying training results to the console
+        :param train_writer: A `tf.summary.FileWriter` for writing Tensorboard log files
+        """
+        elapsed = time.time() - start_time
+
+        if self._tb_dir is not None:
+            summary = self._session.run(self._graph_ops['merged'])
+            train_writer.add_summary(summary, batch_num)
+
+        if self._validation:
+            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'], self._graph_ops['val_cost']])
+            samples_per_sec = self._batch_size / elapsed
+
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, Validation Loss: {}, samples/sec: {:.2f}"
+            tqdm_range.set_description(
+                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                batch_num,
+                                batch_num / (self._total_training_samples / self._batch_size),
+                                loss,
+                                epoch_test_loss,
+                                samples_per_sec))
+        else:
+            loss = self._session.run([self._graph_ops['cost']])
+            samples_per_sec = self._batch_size / elapsed
+
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+            tqdm_range.set_description(
+                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                batch_num,
+                                batch_num / (self._total_training_samples / self._batch_size),
+                                loss,
+                                samples_per_sec))
+
     def begin_training(self, return_test_loss=False):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables. The
@@ -647,7 +685,65 @@ class DPPModel(ABC):
         session is shut down. Before calling this function, the images and labels should be loaded, as well as all
         relevant hyper-parameters.
         """
-        pass
+        with self._graph.as_default():
+            self.__assemble_graph()
+            print('assembled the graph')
+
+            # Either load the network parameters from a checkpoint file or start training
+            if self._load_from_saved is not False:
+                self.load_state()
+                self.__initialize_queue_runners()
+                self.compute_full_test_accuracy()
+                self.shut_down()
+            else:
+                if self._tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
+
+                self.__log('Initializing parameters...')
+                init_op = tf.global_variables_initializer()
+                self._session.run(init_op)
+                self.__initialize_queue_runners()
+
+                self.__log('Beginning training...')
+                self.__set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                tqdm_range = tqdm(range(self._maximum_training_batches))
+                for i in tqdm_range:
+                    start_time = time.time()
+
+                    self._global_epoch = i
+                    self._session.run(self._graph_ops['optimizer'])
+                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
+                        self._training_batch_results(i, start_time, tqdm_range, train_writer)
+
+                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
+                            self.save_state(self._save_dir)
+                    else:
+                        loss = self._session.run([self._graph_ops['cost']])
+
+                    if loss == 0.0:
+                        self.__log('Stopping due to zero loss')
+                        break
+
+                    if i == self._maximum_training_batches - 1:
+                        self.__log('Stopping due to maximum epochs')
+
+                self.save_state(self._save_dir)
+
+                final_test_loss = None
+                if self._testing:
+                    final_test_loss = self.compute_full_test_accuracy()
+
+                self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
 
     def begin_training_with_hyperparameter_search(self, l2_reg_limits=None, lr_limits=None, num_steps=3):
         """

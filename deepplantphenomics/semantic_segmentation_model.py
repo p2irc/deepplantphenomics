@@ -2,8 +2,6 @@ from . import layers, definitions, DPPModel
 import numpy as np
 import tensorflow as tf
 import os
-import datetime
-import time
 import warnings
 import copy
 import math
@@ -174,103 +172,6 @@ class SemanticSegmentationModel(DPPModel):
 
             # Epoch summaries for Tensorboard
             self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
-
-    def begin_training(self, return_test_loss=False):
-        with self._graph.as_default():
-            self.__assemble_graph()
-            print('assembled the graph')
-
-            # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
-                self.load_state()
-
-                self.__initialize_queue_runners()
-
-                self.compute_full_test_accuracy()
-
-                self.shut_down()
-            else:
-                if self._tb_dir is not None:
-                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
-
-                self.__log('Initializing parameters...')
-                init_op = tf.global_variables_initializer()
-                self._session.run(init_op)
-
-                self.__initialize_queue_runners()
-
-                self.__log('Beginning training...')
-
-                self.__set_learning_rate()
-
-                # Needed for batch norm
-                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
-
-                # for i in range(self._maximum_training_batches):
-                tqdm_range = tqdm(range(self._maximum_training_batches))
-                for i in tqdm_range:
-                    start_time = time.time()
-
-                    self._global_epoch = i
-                    self._session.run(self._graph_ops['optimizer'])
-                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        elapsed = time.time() - start_time
-
-                        if self._tb_dir is not None:
-                            summary = self._session.run(self._graph_ops['merged'])
-                            train_writer.add_summary(summary, i)
-                        if self._validation:
-                            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
-                                                                       self._graph_ops['val_cost']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                samples_per_sec))
-
-                        else:
-                            loss = self._session.run([self._graph_ops['cost']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                samples_per_sec))
-
-                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
-                            self.save_state(self._save_dir)
-                    else:
-                        loss = self._session.run([self._graph_ops['cost']])
-
-                    if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
-                        break
-
-                    if i == self._maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
-
-                self.save_state(self._save_dir)
-
-                final_test_loss = None
-                if self._testing:
-                    final_test_loss = self.compute_full_test_accuracy()
-
-                self.shut_down()
-
-                if return_test_loss:
-                    return final_test_loss
-                else:
-                    return
 
     def compute_full_test_accuracy(self):
         self.__log('Computing total test accuracy/regression loss...')
