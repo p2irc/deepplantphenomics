@@ -1,4 +1,4 @@
-from . import layers, loaders, definitions, DPPModel
+from . import layers, loaders, definitions, deepplantpheno
 import numpy as np
 import tensorflow as tf
 import os
@@ -10,7 +10,7 @@ from tqdm import tqdm
 import pickle
 
 
-class CountCeptionModel(DPPModel):
+class CountCeptionModel(deepplantpheno.DPPModel):
 
     _problem_type = definitions.ProblemType.OBJECT_COUNTING
     _loss_fn = 'l1'
@@ -28,24 +28,24 @@ class CountCeptionModel(DPPModel):
 
         # Summaries specific to classification problems
         tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
-        tf.summary.histogram('train/class_predictions', self.__class_predictions, collections=['custom_summaries'])
+        tf.summary.histogram('train/class_predictions', self._class_predictions, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
                               collections=['custom_summaries'])
-            tf.summary.histogram('validation/class_predictions', self.__val_class_predictions,
+            tf.summary.histogram('validation/class_predictions', self._val_class_predictions,
                                  collections=['custom_summaries'])
 
-    def __assemble_graph(self):
+    def _assemble_graph(self):
 
         with self._graph.as_default():
 
-            self.__log('Parsing dataset...')
+            self._log('Parsing dataset...')
             self._graph_parse_data()
 
-            self.__log('Creating layer parameters...')
-            self.__add_layers_to_graph()
+            self._log('Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            self.__log('Assembling graph...')
+            self._log('Assembling graph...')
 
             x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
                                           batch_size=self._batch_size,
@@ -120,14 +120,14 @@ class CountCeptionModel(DPPModel):
     def begin_training(self, return_test_loss=False):
 
         with self._graph.as_default():
-            self.__assemble_graph()
+            self._assemble_graph()
             print('assembled the graph')
 
             # Either load the network parameters from a checkpoint file or start training
             if self._load_from_saved is not False:
 
                 self.load_state()
-                self.__initialize_queue_runners()
+                self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
                 self.shut_down()
 
@@ -135,14 +135,14 @@ class CountCeptionModel(DPPModel):
                 if self._tb_dir is not None:
                     train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
 
-                self.__log('Initializing parameters...')
+                self._log('Initializing parameters...')
                 self._session.run(tf.global_variables_initializer())
 
-                self.__initialize_queue_runners()
+                self._initialize_queue_runners()
 
-                self.__log('Beginning training...')
+                self._log('Beginning training...')
 
-                self.__set_learning_rate()
+                self._set_learning_rate()
 
                 # Needed for batch norm
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -202,11 +202,11 @@ class CountCeptionModel(DPPModel):
                         loss = self._session.run([self._graph_ops['cost']])
 
                     if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
+                        self._log('Stopping due to zero loss')
                         break
 
                     if i == self._maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
+                        self._log('Stopping due to maximum epochs')
 
                 self.save_state(self._save_dir)
 
@@ -222,7 +222,7 @@ class CountCeptionModel(DPPModel):
                     return
 
     def compute_full_test_accuracy(self):
-        self.__log('Computing total test accuracy...')
+        self._log('Computing total test accuracy...')
 
         with self._graph.as_default():
             num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
@@ -246,13 +246,13 @@ class CountCeptionModel(DPPModel):
             # implemented)
             loss_mean = (loss_sum / num_batches)
             abs_diff_mean = (abs_diff_sum / num_batches)
-            self.__log('Average test loss: {:.3f}'.format(loss_mean))
-            self.__log('Average test absolute difference: {:.3f}'.format(abs_diff_mean))
+            self._log('Average test loss: {:.3f}'.format(loss_mean))
+            self._log('Average test absolute difference: {:.3f}'.format(abs_diff_mean))
             return 1.0-loss_mean.astype(np.float32), abs_diff_mean
 
     def forward_pass_with_file_inputs(self, x):
         with self._graph.as_default():
-            total_outputs = np.empty([1, self.__last_layer().output_size])
+            total_outputs = np.empty([1, self._last_layer().output_size])
 
             num_batches = len(x) // self._batch_size
             remainder = len(x) % self._batch_size
@@ -263,14 +263,14 @@ class CountCeptionModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -295,7 +295,20 @@ class CountCeptionModel(DPPModel):
         interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
         return interpreted_outputs
 
-    def __parse_dataset(self, train_images, train_labels, train_mf,
+
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        """
+        Add an output layer to the network (no need to do this in the count ception model)
+
+        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
+         set by set_regularization_coefficient)
+        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
+        use cases such as creating the output layer before loading data.
+        """
+        pass
+
+
+    def _parse_dataset(self, train_images, train_labels, train_mf,
                         test_images, test_labels, test_mf,
                         val_images, val_labels, val_mf,
                         image_type='png'):
@@ -310,19 +323,19 @@ class CountCeptionModel(DPPModel):
                 self._total_validation_samples = len(val_images)
 
             # Logging verbosity
-            self.__log('Total training samples is {0}'.format(self._total_training_samples))
-            self.__log('Total validation samples is {0}'.format(self._total_validation_samples))
-            self.__log('Total testing samples is {0}'.format(self._total_testing_samples))
+            self._log('Total training samples is {0}'.format(self._total_training_samples))
+            self._log('Total validation samples is {0}'.format(self._total_validation_samples))
+            self._log('Total testing samples is {0}'.format(self._total_testing_samples))
 
             # Calculate number of batches to run
             batches_per_epoch = self._total_training_samples / float(self._batch_size)
             self._maximum_training_batches = int(self._maximum_training_batches * batches_per_epoch)
 
             if self._batch_size > self._total_training_samples:
-                self.__log('Less than one batch in training set, exiting now')
+                self._log('Less than one batch in training set, exiting now')
                 exit()
-            self.__log('Batches per epoch: {:f}'.format(batches_per_epoch))
-            self.__log('Running to {0} batches'.format(self._maximum_training_batches))
+            self._log('Batches per epoch: {:f}'.format(batches_per_epoch))
+            self._log('Running to {0} batches'.format(self._maximum_training_batches))
 
             # Create input queues
             train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
@@ -359,8 +372,8 @@ class CountCeptionModel(DPPModel):
 
         self._total_raw_samples = len(dataset_x)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         self._raw_image_files = dataset_x
         self._raw_labels = dataset_y
