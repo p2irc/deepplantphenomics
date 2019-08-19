@@ -125,6 +125,7 @@ class DPPModel(ABC):
     _num_layers_fc = 0
     _num_layers_dropout = 0
     _num_layers_batchnorm = 0
+    _num_blocks_paral_conv = 0
 
     # Network options
     _batch_size = 1
@@ -1149,6 +1150,47 @@ class DPPModel(ABC):
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 
         self._layers.append(layer)
+
+    def add_paral_conv_block(self, filter_dimension_1, filter_dimension_2):
+        """
+        Add a layer(block) consisting of two parallel convolutional layers to the network
+
+        :param filter_dimension_1: filter dimenstion for the first convolutional layer.
+        :param filter_dimension_2: filter dimenstion for the second convolutional layer.
+        """
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+
+        def check_filter_dimension(filter_dimension):
+            try:  # try to iterate through filter_dimension, checking it has 4 ints
+                for idx, dim in enumerate(filter_dimension):
+                    if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
+                        raise TypeError()
+                if idx != 3:
+                    raise TypeError()
+            except:
+                raise TypeError("filter_dimension {} is not a list or array of 4 ints".format(filter_dimension))
+
+        check_filter_dimension(filter_dimension_1)
+        check_filter_dimension(filter_dimension_2)
+        filter_dimension_1[2] = self._last_layer().output_size[-1]
+        filter_dimension_2[2] = self._last_layer().output_size[-1]
+
+        self._num_blocks_paral_conv += 1
+        block_name = 'paral_conv_block%d' % self._num_blocks_paral_conv
+        self._log('Adding parallel convolutional block %s...' % block_name)
+
+        with self._graph.as_default():
+            block = layers.paralConvBlock(block_name,
+                                          copy.deepcopy(self._last_layer().output_size),
+                                          filter_dimension_1,
+                                          filter_dimension_2)
+
+        self._log('Filter dimensions: {0}, {1} Outputs: {2}'.format(filter_dimension_1, filter_dimension_2,
+                                                                     block.output_size))
+
+        self._layers.append(block)
 
     @abstractmethod
     def add_output_layer(self, regularization_coefficient=None, output_size=None):

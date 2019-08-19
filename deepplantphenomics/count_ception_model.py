@@ -316,11 +316,13 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         with self._graph.as_default():
 
             # Get the number of samples the normal way
-            self._total_training_samples = len(train_images)
+            self._total_training_samples = int(self._total_raw_samples)
             if self._testing:
-                self._total_testing_samples = len(test_images)
+                self._total_testing_samples = int(self._total_raw_samples * self._test_split)
+                self._total_training_samples = self._total_training_samples - self._total_testing_samples
             if self._validation:
-                self._total_validation_samples = len(val_images)
+                self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
+                self._total_training_samples = self._total_training_samples - self._total_validation_samples
 
             # Logging verbosity
             self._log('Total training samples is {0}'.format(self._total_training_samples))
