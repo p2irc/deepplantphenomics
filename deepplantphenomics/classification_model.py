@@ -68,18 +68,9 @@ class ClassificationModel(DPPModel):
             # Reshape input to the expected image dimensions
             x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            # if using patching we extract a patch of image here
+            # If we are using patching, we extract a random patch from the image here
             if self._with_patching:
-                # Take a slice
-                patch_width = self._patch_width
-                patch_height = self._patch_height
-                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
-                                             self._batch_size)
-                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
-                                             self._batch_size)
-                offsets = [x for x in zip(offset_h, offset_w)]
-                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
-                                             normalized=False, centered=False)
+                x, offsets = self._graph_extract_patch(x)
 
             # Run the network operations
             if self._has_moderation:
@@ -138,18 +129,12 @@ class ClassificationModel(DPPModel):
             if self._validation:
                 x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            # if using patching we need to properly pull patches from the images (object detection patching is different
-            # and is done when data is loaded)
+            # If using patching, we need to properly pull similar patches from the test and validation images
             if self._with_patching:
-                # Take a slice of image. Same size and location (offsets) as the slice from training.
-                patch_width = self._patch_width
-                patch_height = self._patch_height
                 if self._testing:
-                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
-                                                      normalized=False, centered=False)
+                    x_test, _ = self._graph_extract_patch(x_test, offsets)
                 if self._validation:
-                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
-                                                     normalized=False, centered=False)
+                    x_val, _ = self._graph_extract_patch(x_val, offsets)
 
             if self._has_moderation:
                 if self._testing:

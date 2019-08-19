@@ -80,18 +80,9 @@ class RegressionModel(DPPModel):
             # This is a regression problem, so we should deserialize the label
             y = loaders.label_string_to_tensor(y, self._batch_size, self._num_regression_outputs)
 
-            # if using patching we extract a patch of image here
+            # If we are using patching, we extract a random patch from the image here
             if self._with_patching:
-                # Take a slice
-                patch_width = self._patch_width
-                patch_height = self._patch_height
-                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
-                                             self._batch_size)
-                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
-                                             self._batch_size)
-                offsets = [x for x in zip(offset_h, offset_w)]
-                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
-                                             normalized=False, centered=False)
+                x, offsets = self._graph_extract_patch(x)
 
             # Run the network operations
             if self._has_moderation:
@@ -160,26 +151,12 @@ class RegressionModel(DPPModel):
                                                                           self._batch_size,
                                                                           self._num_regression_outputs)
 
-            # if using patching we need to properly pull patches from the images
+            # If using patching, we need to properly pull similar patches from the test and validation images
             if self._with_patching:
-                # Take a slice of image. Same size and location (offsets) as the slice from training.
-                patch_width = self._patch_width
-                patch_height = self._patch_height
                 if self._testing:
-                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
-                                                      normalized=False, centered=False)
+                    x_test, _ = self._graph_extract_patch(x_test, offsets)
                 if self._validation:
-                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
-                                                     normalized=False, centered=False)
-                if self._problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION:
-                    if self._testing:
-                        self._graph_ops['y_test'] = tf.image.extract_glimpse(self._graph_ops['y_test'],
-                                                                             [patch_height, patch_width], offsets,
-                                                                             normalized=False, centered=False)
-                    if self._validation:
-                        self._graph_ops['y_val'] = tf.image.extract_glimpse(self._graph_ops['y_val'],
-                                                                            [patch_height, patch_width], offsets,
-                                                                            normalized=False, centered=False)
+                    x_val, _ = self._graph_extract_patch(x_val, offsets)
 
             if self._has_moderation:
                 if self._testing:

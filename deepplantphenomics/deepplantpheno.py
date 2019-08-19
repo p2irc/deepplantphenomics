@@ -528,6 +528,26 @@ class DPPModel(ABC):
                                  test_images, test_labels, test_mf,
                                  val_images, val_labels, val_mf)
 
+    def _graph_extract_patch(self, x, offsets=None):
+        """
+        Adds graph components to extract patches from input images
+        :param x: Tensor, an image to extract a patch from
+        :param offsets: An optional list of (height, width) tuples for where to extract patches from in the images. When
+        this isn't given, offsets will be generated at random and returned
+        :return: The extracted image patches and the offsets used to get them
+        """
+        if not offsets:
+            offset_h = np.random.randint(self._patch_height // 2,
+                                         self._image_height - (self._patch_height // 2),
+                                         self._batch_size)
+            offset_w = np.random.randint(self._patch_width // 2,
+                                         self._image_width - (self._patch_width // 2),
+                                         self._batch_size)
+            offsets = [x for x in zip(offset_h, offset_w)]
+        x = tf.image.extract_glimpse(x, [self._patch_height, self._patch_width], offsets,
+                                     normalized=False, centered=False)
+        return x, offsets
+
     def _graph_add_optimizer(self):
         """
         Adds graph components for setting and running an optimization operation
