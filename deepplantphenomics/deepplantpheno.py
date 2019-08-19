@@ -1869,37 +1869,12 @@ class DPPModel(ABC):
 
     def __parse_dataset(self, train_images, train_labels, train_mf,
                         test_images, test_labels, test_mf,
-                        val_images, val_labels, val_mf,
-                        image_type='png'):
+                        val_images, val_labels, val_mf):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self._graph.as_default():
 
-            # Try to get the number of samples the normal way
-            if isinstance(train_images, tf.Tensor):
-                self._total_training_samples = train_images.get_shape().as_list()[0]
-                if self._testing:
-                    self._total_testing_samples = test_images.get_shape().as_list()[0]
-                if self._validation:
-                    self._total_validation_samples = val_images.get_shape().as_list()[0]
-            elif isinstance(train_images[0], tf.Tensor):
-                self._total_training_samples = train_images[0].get_shape().as_list()[0]
-            else:
-                self._total_training_samples = len(train_images)
-                if self._testing:
-                    self._total_testing_samples = len(test_images)
-                if self._validation:
-                    self._total_validation_samples = len(val_images)
-
-            # Most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
-            # will have None for its size, so the above won't work and we manually calculate it here
-            if self._total_training_samples is None:
-                self._total_training_samples = int(self._total_raw_samples)
-                if self._testing:
-                    self._total_testing_samples = int(self._total_raw_samples * self._test_split)
-                    self._total_training_samples = self._total_training_samples - self._total_testing_samples
-                if self._validation:
-                    self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
-                    self._total_training_samples = self._total_training_samples - self._total_validation_samples
+            # Get the number of training, testing, and validation samples
+            self._parse_get_sample_counts(test_images, train_images, val_images)
 
             # Logging verbosity
             self.__log('Total training samples is {0}'.format(self._total_training_samples))
@@ -1910,11 +1885,9 @@ class DPPModel(ABC):
             if train_mf is not None:
                 train_moderation_queue = tf.train.slice_input_producer([train_mf], shuffle=False)
                 self._train_moderation_features = tf.cast(train_moderation_queue[0], tf.float32)
-
             if test_mf is not None:
                 test_moderation_queue = tf.train.slice_input_producer([test_mf], shuffle=False)
                 self._test_moderation_features = tf.cast(test_moderation_queue[0], tf.float32)
-
             if val_mf is not None:
                 val_moderation_queue = tf.train.slice_input_producer([val_mf], shuffle=False)
                 self._val_moderation_features = tf.cast(val_moderation_queue[0], tf.float32)
@@ -1936,117 +1909,44 @@ class DPPModel(ABC):
             if self._validation:
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
-            self._train_labels = train_input_queue[1]
-            if self._testing:
-                self._test_labels = test_input_queue[1]
-            if self._validation:
-                self._val_labels = val_input_queue[1]
-
-            # Apply pre-processing for training and testing images
-            if image_type is 'jpg':
-                self._train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
-                                                          channels=self._image_depth)
-                if self._testing:
-                    self._test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
-                                                             channels=self._image_depth)
-                if self._validation:
-                    self._val_images = tf.image.decode_jpeg(tf.read_file(val_input_queue[0]),
-                                                            channels=self._image_depth)
-            else:
-                self._train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
-                                                         channels=self._image_depth)
-                if self._testing:
-                    self._test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]),
-                                                            channels=self._image_depth)
-                if self._validation:
-                    self._val_images = tf.image.decode_png(tf.read_file(val_input_queue[0]),
-                                                           channels=self._image_depth)
-
-            # Convert images to float and normalize to 1.0
-            self._train_images = tf.image.convert_image_dtype(self._train_images, dtype=tf.float32)
-            if self._testing:
-                self._test_images = tf.image.convert_image_dtype(self._test_images, dtype=tf.float32)
-            if self._validation:
-                self._val_images = tf.image.convert_image_dtype(self._val_images, dtype=tf.float32)
-
-            if self._resize_images:
-                self._train_images = tf.image.resize_images(self._train_images,
-                                                            [self._image_height, self._image_width])
-                if self._testing:
-                    self._test_images = tf.image.resize_images(self._test_images,
-                                                               [self._image_height, self._image_width])
-                if self._validation:
-                    self._val_images = tf.image.resize_images(self._val_images,
-                                                              [self._image_height, self._image_width])
+            # Apply pre-processing for training, testing, and validation images and labels
+            self._parse_apply_preprocessing(test_input_queue, train_input_queue, val_input_queue)
 
             # Apply the various augmentations to the images
-            if self._augmentation_crop:
-                # Apply random crops to images
-                self._image_height = int(self._image_height * self._crop_amount)
-                self._image_width = int(self._image_width * self._crop_amount)
+            if self._augmentation_crop:  # Apply random crops to images
+                self._parse_crop_augment()
 
-                self._train_images = tf.random_crop(self._train_images, [self._image_height, self._image_width, 3])
-                if self._testing:
-                    self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                               self._image_width)
-                if self._validation:
-                    self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                              self._image_width)
+            if self._crop_or_pad_images:  # Apply padding or cropping to deal with images of different sizes
+                self._parse_crop_or_pad()
 
-            if self._crop_or_pad_images:
-                # Apply padding or cropping to deal with images of different sizes
-                self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images,
-                                                                            self._image_height,
-                                                                            self._image_width)
-                if self._testing:
-                    self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images,
-                                                                               self._image_height,
-                                                                               self._image_width)
-                if self._validation:
-                    self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images,
-                                                                              self._image_height,
-                                                                              self._image_width)
-
-            if self._augmentation_flip_horizontal:
-                # Apply random horizontal flips
+            if self._augmentation_flip_horizontal:  # Apply random horizontal flips
                 self._train_images = tf.image.random_flip_left_right(self._train_images)
 
-            if self._augmentation_flip_vertical:
-                # Apply random vertical flips
+            if self._augmentation_flip_vertical:  # Apply random vertical flips
                 self._train_images = tf.image.random_flip_up_down(self._train_images)
 
-            if self._augmentation_contrast:
-                # Apply random contrast and brightness adjustments
+            if self._augmentation_contrast:  # Apply random contrast and brightness adjustments
                 self._train_images = tf.image.random_brightness(self._train_images, max_delta=63)
                 self._train_images = tf.image.random_contrast(self._train_images, lower=0.2, upper=1.8)
 
-            if self._augmentation_rotate:
-                # Apply random rotations, then optionally crop out black borders and resize
-                angle = tf.random_uniform([], maxval=2*math.pi)
-                self._train_images = tf.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
-                if self._rotate_crop_borders:
-                    # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
-                    # consistent scale across the images
-                    small_crop_fraction = self.__smallest_crop_fraction()
-                    self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
-                    self._train_images = tf.image.resize_images(self._train_images,
-                                                                [self._image_height, self._image_width])
+            if self._augmentation_rotate:  # Apply random rotations, then optionally crop out black borders and resize
+                self._parse_rotation_augment()
 
-            # mean-center all inputs
+            # Mean-center all inputs
             self._train_images = tf.image.per_image_standardization(self._train_images)
             if self._testing:
                 self._test_images = tf.image.per_image_standardization(self._test_images)
             if self._validation:
                 self._val_images = tf.image.per_image_standardization(self._val_images)
 
-            # define the shape of the image tensors so it matches the shape of the images
+            # Manually set the shape of the image tensors so it matches the shape of the images
             self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
             if self._testing:
                 self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
             if self._validation:
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
-    def __parse_images(self, images, image_type='png'):
+    def __parse_images(self, images):
         """Takes some images as input, creates producer of processed images internally to this instance"""
         with self._graph.as_default():
             input_queue = tf.train.string_input_producer(images, shuffle=False)
@@ -2054,18 +1954,8 @@ class DPPModel(ABC):
             reader = tf.WholeFileReader()
             key, file = reader.read(input_queue)
 
-            # pre-processing for all images
-
-            if image_type is 'jpg':
-                input_images = tf.image.decode_jpeg(file, channels=self._image_depth)
-            else:
-                input_images = tf.image.decode_png(file, channels=self._image_depth)
-
-            # convert images to float and normalize to 1.0
-            input_images = tf.image.convert_image_dtype(input_images, dtype=tf.float32)
-
-            if self._resize_images is True:
-                input_images = tf.image.resize_images(input_images, [self._image_height, self._image_width])
+            # Pre-processing for all images
+            input_images = self._parse_preprocess_images(file, channels=self._image_depth)
 
             if self._augmentation_crop is True:
                 self._image_height = int(self._image_height * self._crop_amount)
@@ -2073,18 +1963,121 @@ class DPPModel(ABC):
                 input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
                                                                       self._image_width)
 
-            if self._crop_or_pad_images is True:
-                # pad or crop to deal with images of different sizes
+            if self._crop_or_pad_images is True:  # Pad or crop to deal with images of different sizes
                 input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
                                                                       self._image_width)
 
-            # mean-center all inputs
+            # Mean-center all inputs
             input_images = tf.image.per_image_standardization(input_images)
 
-            # define the shape of the image tensors so it matches the shape of the images
+            # Manually set the shape of the image tensors so it matches the shape of the images
             input_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
             self._all_images = input_images
+
+    def _parse_get_sample_counts(self, test_images, train_images, val_images):
+        """
+        Determines the number of training, testing, and validation samples in a dataset while parsing it
+        :param test_images: A tensor or list of tensors with the training images
+        :param train_images: A tensor or list of tensors with the testing images
+        :param val_images: A tensor or list of tensors with the validation images
+        """
+        # Try to get the number of samples the normal way
+        if isinstance(train_images, tf.Tensor):
+            self._total_training_samples = train_images.get_shape().as_list()[0]
+            if self._testing:
+                self._total_testing_samples = test_images.get_shape().as_list()[0]
+            if self._validation:
+                self._total_validation_samples = val_images.get_shape().as_list()[0]
+        elif isinstance(train_images[0], tf.Tensor):
+            self._total_training_samples = train_images[0].get_shape().as_list()[0]
+        else:
+            self._total_training_samples = len(train_images)
+            if self._testing:
+                self._total_testing_samples = len(test_images)
+            if self._validation:
+                self._total_validation_samples = len(val_images)
+
+        # Most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
+        # will have None for its size, so the above won't work and we manually calculate it here
+        if self._total_training_samples is None:
+            self._total_training_samples = int(self._total_raw_samples)
+            if self._testing:
+                self._total_testing_samples = int(self._total_raw_samples * self._test_split)
+                self._total_training_samples = self._total_training_samples - self._total_testing_samples
+            if self._validation:
+                self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
+                self._total_training_samples = self._total_training_samples - self._total_validation_samples
+
+    def _parse_preprocess_images(self, images, channels=1):
+        """
+        Preprocess input images during dataset parsing. This involves decoding the images, converting them to 0-1 float
+        images, and resizing them if necessary.
+        :param images: Strings with the names of the images to preprocess
+        :param channels: The number of channels in the image. Defaults to 1
+        :return: The preprocessed versions of the images
+        """
+        images = tf.io.decode_image(images, channels=channels)
+        images = tf.image.convert_image_dtype(images, dtype=tf.float32)
+        if self._resize_images:
+            images = tf.image.resize_images(images, [self._image_height, self._image_width])
+        return images
+
+    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
+        """
+        Applies input preprocessing to images and labels from queues
+        :param test_input_queue: An input queue for training images and labels
+        :param train_input_queue: An input queue for testing images and labels
+        :param val_input_queue: An input queue for validation images and labels
+        """
+        self._train_images = self._parse_preprocess_images(tf.read_file(train_input_queue[0]),
+                                                           channels=self._image_depth)
+        self._test_images = self._parse_preprocess_images(tf.read_file(test_input_queue[0]),
+                                                          channels=self._image_depth)
+        self._val_images = self._parse_preprocess_images(tf.read_file(val_input_queue[0]),
+                                                         channels=self._image_depth)
+
+        self._train_labels = train_input_queue[1]
+        if self._testing:
+            self._test_labels = test_input_queue[1]
+        if self._validation:
+            self._val_labels = val_input_queue[1]
+
+    def _parse_crop_augment(self):
+        """Applies random cropping augmentation to input images during dataset parsing"""
+        self._image_height = int(self._image_height * self._crop_amount)
+        self._image_width = int(self._image_width * self._crop_amount)
+
+        self._train_images = tf.random_crop(self._train_images, [self._image_height, self._image_width, 3])
+        if self._testing:
+            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
+                                                                       self._image_width)
+        if self._validation:
+            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
+                                                                      self._image_width)
+
+    def _parse_crop_or_pad(self):
+        """Applies a crop/pad resizing to input images to standardize their size during dataset parsing"""
+        self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,
+                                                                    self._image_width)
+        if self._testing:
+            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
+                                                                       self._image_width)
+        if self._validation:
+            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
+                                                                      self._image_width)
+
+    def _parse_rotation_augment(self):
+        """Applies random rotation augmentation to input images during dataset parsing"""
+        angle = tf.random_uniform([], maxval=2 * math.pi)
+        self._train_images = tf.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
+        if self._rotate_crop_borders:
+            # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
+            # consistent scale across the images
+            small_crop_fraction = self.__smallest_crop_fraction()
+            self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
+            self._train_images = tf.image.resize_images(self._train_images,
+                                                        [self._image_height, self._image_width])
 
     def __smallest_crop_fraction(self):
         """
@@ -2097,7 +2090,7 @@ class DPPModel(ABC):
 
         # Regardless of the aspect ratio, the smallest crop fraction always corresponds to the required crop for a 45
         # degree or pi/4 radian rotation
-        angle = math.pi/4
+        angle = math.pi / 4
 
         # Determine which sides of the original image are the shorter and longer sides
         width_is_longer = self._image_width >= self._image_height
