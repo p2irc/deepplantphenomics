@@ -500,11 +500,72 @@ class DPPModel(ABC):
         Adds the layers in self.layers to the computational graph.
 
         Currently __assemble_graph is doing too many things, so this is needed as a separate function so that other
-        functions such as load_state can add layers to the graph without performing everything else in asseble_graph
+        functions such as load_state can add layers to the graph without performing everything else in assemble_graph
         """
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
                 layer.add_to_graph()
+
+    def _graph_parse_data(self):
+        """
+        Add graph components that parse the input images and labels into tensors and split them into training,
+        validation, and testing sets
+        """
+        if self._raw_test_labels is not None:
+            # currently think of moderation features as None so they are passed in hard-coded
+            self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                 self._raw_test_image_files, self._raw_test_labels, None,
+                                 self._raw_val_image_files, self._raw_val_labels, None)
+        elif self._images_only:
+            self.__parse_images(self._raw_image_files)
+        else:
+            # Split the data into training, validation, and testing sets. If there is no validation set or no moderation
+            # features being used they will be returned as 0 (for validation) or None (for moderation features)
+            train_images, train_labels, train_mf, \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
+                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                           self._validation_split, self._all_moderation_features,
+                                           self._training_augmentation_images, self._training_augmentation_labels,
+                                           self._split_labels)
+            # Parse the images and set the appropriate environment variables
+            self.__parse_dataset(train_images, train_labels, train_mf,
+                                 test_images, test_labels, test_mf,
+                                 val_images, val_labels, val_mf)
+
+    def _graph_add_optimizer(self):
+        """
+        Adds graph components for setting and running an optimization operation
+        :return: The optimizer's gradients, variables, and the global_grad_norm
+        """
+        # Identify which optimizer we are using
+        if self._optimizer == 'adagrad':
+            self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
+            self.__log('Using Adagrad optimizer')
+        elif self._optimizer == 'adadelta':
+            self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
+            self.__log('Using adadelta optimizer')
+        elif self._optimizer == 'sgd':
+            self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
+            self.__log('Using SGD optimizer')
+        elif self._optimizer == 'adam':
+            self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
+            self.__log('Using Adam optimizer')
+        elif self._optimizer == 'sgd_momentum':
+            self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
+            self.__log('Using SGD with momentum optimizer')
+        else:
+            warnings.warn('Unrecognized optimizer requested')
+            exit()
+
+        # Compute gradients, clip them, the apply the clipped gradients
+        # This is broken up so that we can add gradients to tensorboard
+        # need to make the 5.0 an adjustable hyperparameter
+        gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+        gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
+        self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+
+        return gradients, variables, global_grad_norm
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
@@ -1986,31 +2047,9 @@ class ClassificationModel(DPPModel):
         with self._graph.as_default():
 
             self.__log('Parsing dataset...')
-
-            if self._raw_test_labels is not None:
-                # currently think of moderation features as None so they are passed in hard-coded
-                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                     self._raw_test_image_files, self._raw_test_labels, None,
-                                     self._raw_val_image_files, self._raw_val_labels, None)
-            elif self._images_only:
-                self.__parse_images(self._raw_image_files)
-            else:
-                # split the data into train/val/test sets, if there is no validation set or no moderation features
-                # being used they will be returned as 0 (val) or None (moderation features)
-                train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
-                # parse the images and set the appropriate environment variables
-                self.__parse_dataset(train_images, train_labels, train_mf,
-                                     test_images, test_labels, test_mf,
-                                     val_images, val_labels, val_mf)
+            self._graph_parse_data()
 
             self.__log('Creating layer parameters...')
-
             self.__add_layers_to_graph()
 
             self.__log('Assembling graph...')
@@ -2065,32 +2104,8 @@ class ClassificationModel(DPPModel):
                 sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
             self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
 
-            # Identify which optimizer we are using
-            if self._optimizer == 'adagrad':
-                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
-                self.__log('Using Adagrad optimizer')
-            elif self._optimizer == 'adadelta':
-                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-                self.__log('Using adadelta optimizer')
-            elif self._optimizer == 'sgd':
-                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
-                self.__log('Using SGD optimizer')
-            elif self._optimizer == 'adam':
-                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
-                self.__log('Using Adam optimizer')
-            elif self._optimizer == 'sgd_momentum':
-                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
-                self.__log('Using SGD with momentum optimizer')
-            else:
-                warnings.warn('Unrecognized optimizer requested')
-                exit()
-
-            # Compute gradients, clip them, the apply the clipped gradients
-            # This is broken up so that we can add gradients to tensorboard
-            # need to make the 5.0 an adjustable hyperparameter
-            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
-            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+            # Set the optimizer and get the gradients from it
+            gradients, variables, global_grad_norm = self._graph_add_optimizer()
 
             # for classification problems we will compute the training accuracy, this is also used for tensorboard
             self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
@@ -2461,31 +2476,9 @@ class RegressionModel(DPPModel):
         with self._graph.as_default():
 
             self.__log('Parsing dataset...')
-
-            if self._raw_test_labels is not None:
-                # currently think of moderation features as None so they are passed in hard-coded
-                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                     self._raw_test_image_files, self._raw_test_labels, None,
-                                     self._raw_val_image_files, self._raw_val_labels, None)
-            elif self._images_only:
-                self.__parse_images(self._raw_image_files)
-            else:
-                # split the data into train/val/test sets, if there is no validation set or no moderation features
-                # being used they will be returned as 0 (val) or None (moderation features)
-                train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
-                # parse the images and set the appropriate environment variables
-                self.__parse_dataset(train_images, train_labels, train_mf,
-                                     test_images, test_labels, test_mf,
-                                     val_images, val_labels, val_mf)
+            self._graph_parse_data()
 
             self.__log('Creating layer parameters...')
-
             self.__add_layers_to_graph()
 
             self.__log('Assembling graph...')
@@ -2549,32 +2542,8 @@ class RegressionModel(DPPModel):
                 self._regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
             self._graph_ops['cost'] = tf.add(self._regression_loss, l2_cost)
 
-            # Identify which optimizer we are using
-            if self._optimizer == 'adagrad':
-                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
-                self.__log('Using Adagrad optimizer')
-            elif self._optimizer == 'adadelta':
-                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-                self.__log('Using adadelta optimizer')
-            elif self._optimizer == 'sgd':
-                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
-                self.__log('Using SGD optimizer')
-            elif self._optimizer == 'adam':
-                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
-                self.__log('Using Adam optimizer')
-            elif self._optimizer == 'sgd_momentum':
-                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
-                self.__log('Using SGD with momentum optimizer')
-            else:
-                warnings.warn('Unrecognized optimizer requested')
-                exit()
-
-            # Compute gradients, clip them, the apply the clipped gradients
-            # This is broken up so that we can add gradients to tensorboard
-            # need to make the 5.0 an adjustable hyperparameter
-            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
-            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+            # Set the optimizer and get the gradients from it
+            gradients, variables, global_grad_norm = self._graph_add_optimizer()
 
             # Calculate test accuracy
             if self._has_moderation:
@@ -3053,31 +3022,9 @@ class SemanticSegmentationModel(DPPModel):
         with self._graph.as_default():
 
             self.__log('Parsing dataset...')
-
-            if self._raw_test_labels is not None:
-                # currently think of moderation features as None so they are passed in hard-coded
-                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                     self._raw_test_image_files, self._raw_test_labels, None,
-                                     self._raw_val_image_files, self._raw_val_labels, None)
-            elif self._images_only:
-                self.__parse_images(self._raw_image_files)
-            else:
-                # split the data into train/val/test sets, if there is no validation set or no moderation features
-                # being used they will be returned as 0 (val) or None (moderation features)
-                train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
-                # parse the images and set the appropriate environment variables
-                self.__parse_dataset(train_images, train_labels, train_mf,
-                                     test_images, test_labels, test_mf,
-                                     val_images, val_labels, val_mf)
+            self._graph_parse_data()
 
             self.__log('Creating layer parameters...')
-
             self.__add_layers_to_graph()
 
             self.__log('Assembling graph...')
@@ -3136,32 +3083,8 @@ class SemanticSegmentationModel(DPPModel):
                 pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
             self._graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
 
-            # Identify which optimizer we are using
-            if self._optimizer == 'adagrad':
-                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
-                self.__log('Using Adagrad optimizer')
-            elif self._optimizer == 'adadelta':
-                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-                self.__log('Using adadelta optimizer')
-            elif self._optimizer == 'sgd':
-                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
-                self.__log('Using SGD optimizer')
-            elif self._optimizer == 'adam':
-                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
-                self.__log('Using Adam optimizer')
-            elif self._optimizer == 'sgd_momentum':
-                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
-                self.__log('Using SGD with momentum optimizer')
-            else:
-                warnings.warn('Unrecognized optimizer requested')
-                exit()
-
-            # Compute gradients, clip them, the apply the clipped gradients
-            # This is broken up so that we can add gradients to tensorboard
-            # need to make the 5.0 an adjustable hyperparameter
-            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
-            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+            # Set the optimizer and get the gradients from it
+            gradients, variables, global_grad_norm = self._graph_add_optimizer()
 
             # Calculate test accuracy
             if self._has_moderation:
@@ -4067,37 +3990,15 @@ class ObjectDetectionModel(DPPModel):
         tf.summary.scalar('train/yolo_loss', self._yolo_loss, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
-                              collections=['custom_sumamries'])
+                              collections=['custom_summaries'])
 
     def __assemble_graph(self):
         with self._graph.as_default():
 
             self.__log('Parsing dataset...')
-
-            if self._raw_test_labels is not None:
-                # currently think of moderation features as None so they are passed in hard-coded
-                self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                     self._raw_test_image_files, self._raw_test_labels, None,
-                                     self._raw_val_image_files, self._raw_val_labels, None)
-            elif self._images_only:
-                self.__parse_images(self._raw_image_files)
-            else:
-                # split the data into train/val/test sets, if there is no validation set or no moderation features
-                # being used they will be returned as 0 (val) or None (moderation features)
-                train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
-                # parse the images and set the appropriate environment variables
-                self.__parse_dataset(train_images, train_labels, train_mf,
-                                     test_images, test_labels, test_mf,
-                                     val_images, val_labels, val_mf)
+            self._graph_parse_data()
 
             self.__log('Creating layer parameters...')
-
             self.__add_layers_to_graph()
 
             self.__log('Assembling graph...')
@@ -4147,32 +4048,8 @@ class ObjectDetectionModel(DPPModel):
                                        self._NUM_BOXES * 5 + self._NUM_CLASSES]))
             self._graph_ops['cost'] = tf.squeeze(tf.add(self._yolo_loss, l2_cost))
 
-            # Identify which optimizer we are using
-            if self._optimizer == 'adagrad':
-                self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
-                self.__log('Using Adagrad optimizer')
-            elif self._optimizer == 'adadelta':
-                self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-                self.__log('Using adadelta optimizer')
-            elif self._optimizer == 'sgd':
-                self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
-                self.__log('Using SGD optimizer')
-            elif self._optimizer == 'adam':
-                self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
-                self.__log('Using Adam optimizer')
-            elif self._optimizer == 'sgd_momentum':
-                self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
-                self.__log('Using SGD with momentum optimizer')
-            else:
-                warnings.warn('Unrecognized optimizer requested')
-                exit()
-
-            # Compute gradients, clip them, the apply the clipped gradients
-            # This is broken up so that we can add gradients to tensorboard
-            # need to make the 5.0 an adjustable hyperparameter
-            gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
-            gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-            self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
+            # Set the optimizer and get the gradients from it
+            gradients, variables, global_grad_norm = self._graph_add_optimizer()
 
             # Calculate test accuracy
             if self._has_moderation:
