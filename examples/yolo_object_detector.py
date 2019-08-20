@@ -4,19 +4,18 @@
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, save_checkpoints=False, tensorboard_dir='tensor_logs', report_rate=20)
+model = dpp.ObjectDetectionModel(debug=True, save_checkpoints=False, tensorboard_dir='tensor_logs', report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
-# Setup and hyperparameters
+# Setup and hyper-parameters
 model.set_batch_size(1)
 model.set_number_of_threads(4)
-model.set_image_dimensions(448,448, channels)
+model.set_image_dimensions(448, 448, channels)
 model.set_resize_images(False)
 model.set_patch_size(448, 448)
 
-model.set_problem_type('object_detection')
 # model.set_yolo_parameters() is not called here because we are using all of the default values
 model.set_test_split(0.1)
 model.set_validation_split(0)

@@ -1,5 +1,6 @@
 import os
 
+
 class boundingBoxRegressor(object):
     model = None
 
@@ -23,7 +24,7 @@ class boundingBoxRegressor(object):
 
         import deepplantphenomics as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
+        self.model = dpp.RegressionModel(debug=False, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
         self.model.set_batch_size(batch_size)
@@ -32,7 +33,6 @@ class boundingBoxRegressor(object):
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
 
-        self.model.set_problem_type('regression')
         self.model.set_num_regression_outputs(4)
 
         # Define a model architecture
@@ -65,7 +65,6 @@ class boundingBoxRegressor(object):
         y[:, 1] = y[:, 1] * width_ratio
         y[:, 2] = y[:, 2] * height_ratio
         y[:, 3] = y[:, 3] * height_ratio
-
         return y
 
     def shut_down(self):
@@ -88,15 +87,13 @@ class rosetteLeafRegressor(object):
 
         import deepplantphenomics as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
+        self.model = dpp.RegressionModel(debug=False, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
         self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
-
-        self.model.set_problem_type('regression')
 
         self.model.set_augmentation_crop(True, crop_ratio=0.9)
 
@@ -119,11 +116,9 @@ class rosetteLeafRegressor(object):
 
         self.model.add_output_layer()
 
-
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
-
-        return y[:,0]
+        return y[:, 0]
 
     def shut_down(self):
         self.model.shut_down()
@@ -145,10 +140,9 @@ class vegetationSegmentationNetwork(object):
 
         import deepplantphenomics as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved=checkpoint_path)
+        self.model = dpp.SemanticSegmentationModel(debug=False, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
-        self.model.set_problem_type('semantic_segmentation')
         self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
@@ -157,7 +151,7 @@ class vegetationSegmentationNetwork(object):
         # Define a model architecture
         self.model.add_input_layer()
 
-        self.model.add_convolutional_layer(filter_dimension=[3, 3, 3, 16], stride_length=1,activation_function='relu')
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 3, 16], stride_length=1, activation_function='relu')
         self.model.add_convolutional_layer(filter_dimension=[3, 3, 16, 32], stride_length=1, activation_function='relu')
         self.model.add_convolutional_layer(filter_dimension=[5, 5, 32, 32], stride_length=1, activation_function='relu')
 
@@ -165,7 +159,6 @@ class vegetationSegmentationNetwork(object):
 
     def forward_pass(self, x):
         y = self.model.forward_pass_with_file_inputs(x)
-
         return y
 
     def shut_down(self):

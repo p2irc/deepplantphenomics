@@ -228,25 +228,6 @@ class DPPModel(ABC):
         self._batch_size = size
         self._queue_capacity = size * 5
 
-    def set_train_test_split(self, ratio):
-        """DEPRECATED
-        Set a ratio for the total number of samples to use as a training set, using the rest of the samples for testing
-        (i.e. no validation samples)"""
-        if not isinstance(ratio, float) and ratio != 1:
-            raise TypeError("ratio must be a float or 1")
-        if ratio <= 0 or ratio > 1:
-            raise ValueError("ratio must be between 0 and 1")
-        warnings.warn("set_train_test_split() is deprecated and will be removed soon. " +
-                      "Use set_test_split() and set_validation_split() instead. See docs for more information.")
-
-        self._test_split = 1 - ratio
-        if ratio == 1 or ratio is None:
-            self._testing = False
-        else:
-            self._testing = True
-        self._validation = False
-        self._validation_split = 0
-
     def set_test_split(self, ratio):
         """Set a ratio for the total number of samples to use as a testing set"""
         if not isinstance(ratio, float) and ratio != 0:

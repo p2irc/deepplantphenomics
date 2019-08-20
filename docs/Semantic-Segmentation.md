@@ -11,18 +11,18 @@ Here is a simple fully convolutional network for binary segmentation of images.
 ```python
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=20)
+model = dpp.SemanticSegmentationModel(debug=True, save_checkpoints=False, report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
-# Setup and hyperparameters
+# Setup and hyper-parameters
 model.set_batch_size(4)
 model.set_image_dimensions(256, 256, channels)
 model.set_resize_images(True)
 
-model.set_problem_type('semantic_segmentation')
-model.set_train_test_split(0.8)
+model.set_test_split(0.2)
+model.set_validation_split(0.0)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('normal')
 model.set_maximum_training_epochs(100)
@@ -46,7 +46,7 @@ model.add_output_layer()
 model.begin_training()
 ```
 
-The crucial part here is ``model.set_problem_type('semantic_segmentation')``. This will automatically make the output layer into a convolutional layer, which is what you need to output masks instead of scalar values. Also important is the use of ``model.load_dataset_from_directory_with_segmentation_masks()``, which loads binary images of ground-truth segmentations as the labels, instead of something like numbers from a csv file. These ground-truth images are `.png` files, with the value 0 in every channel for negative pixels, and the value 255 in every channel for positive pixels.
+The crucial part here is that you create a `SemanticSegmentationModel` specifically. This will automatically make the output layer into a convolutional layer, which is what you need to output masks instead of scalar values. Also important is the use of ``model.load_dataset_from_directory_with_segmentation_masks()``, which loads binary images of ground-truth segmentations as the labels, instead of something like numbers from a csv file. These ground-truth images are `.png` files, with the value 0 in every channel for negative pixels, and the value 255 in every channel for positive pixels.
 
 The only augmentation strategy currently compatible with fully convolutional networks is the brightness and contrast option.
 
