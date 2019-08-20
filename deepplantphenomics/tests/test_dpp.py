@@ -2,9 +2,13 @@ import pytest
 import numpy as np
 import os.path
 import tensorflow as tf
-from deepplantphenomics import deepplantpheno as dpp
-from deepplantphenomics import definitions
 from deepplantphenomics import layers
+from deepplantphenomics.classification_model import ClassificationModel
+from deepplantphenomics.regression_model import RegressionModel
+from deepplantphenomics.semantic_segmentation_model import SemanticSegmentationModel
+from deepplantphenomics.object_detection_model import ObjectDetectionModel
+from deepplantphenomics.count_ception_model import CountCeptionModel
+from deepplantphenomics.tests.mock_dpp_model import MockDPPModel
 
 # public setters and adders, mostly testing for type and value errors
 @pytest.fixture(scope="module")
@@ -14,7 +18,7 @@ def test_data_dir():
 
 @pytest.fixture()
 def model():
-    model = dpp.DPPModel()
+    model = MockDPPModel()
     model.set_image_dimensions(1, 1, 1)
     return model
 
@@ -38,10 +42,9 @@ def test_set_batch_size(model):
         model.set_batch_size(-1)
 
 
-def test_set_num_regression_outputs(model):
-    with pytest.raises(RuntimeError):
-        model.set_num_regression_outputs(1)
-    model.set_problem_type('regression')
+def test_set_num_regression_outputs():
+    model = RegressionModel()
+
     with pytest.raises(TypeError):
         model.set_num_regression_outputs(5.0)
     with pytest.raises(ValueError):
@@ -64,11 +67,11 @@ def test_set_learning_rate(model):
 
     # Ensure a good value sets the rate properly
     model.set_learning_rate(0.01)
-    assert model._DPPModel__learning_rate == 0.01
+    assert model._learning_rate == 0.01
 
     # Ensure that the internal learning rate setter doesn't touch it (due to no decay settings)
-    model._DPPModel__set_learning_rate()
-    assert model._DPPModel__learning_rate == 0.01
+    model._set_learning_rate()
+    assert model._learning_rate == 0.01
 
 
 def test_set_crop_or_pad_images(model):
@@ -81,70 +84,76 @@ def test_set_resize_images(model):
         model.set_resize_images("True")
 
 
-def test_set_augmentation_flip_horizontal(model):
+def test_set_augmentation_flip_horizontal():
+    model1 = RegressionModel()
+    model2 = SemanticSegmentationModel()
+
     with pytest.raises(TypeError):
-        model.set_augmentation_flip_horizontal("True")
+        model1.set_augmentation_flip_horizontal("True")
     with pytest.raises(RuntimeError):
-        model.set_problem_type("semantic_segmentation")
-        model.set_augmentation_flip_horizontal(True)
-    model.set_problem_type("regression")
-    model.set_augmentation_flip_horizontal(True)
+        model2.set_augmentation_flip_horizontal(True)
+    model1.set_augmentation_flip_horizontal(True)
 
 
-def test_set_augmentation_flip_vertical(model):
+def test_set_augmentation_flip_vertical():
+    model1 = RegressionModel()
+    model2 = SemanticSegmentationModel()
+
     with pytest.raises(TypeError):
-        model.set_augmentation_flip_vertical("True")
+        model1.set_augmentation_flip_vertical("True")
     with pytest.raises(RuntimeError):
-        model.set_problem_type("semantic_segmentation")
-        model.set_augmentation_flip_horizontal(True)
-    model.set_problem_type("regression")
-    model.set_augmentation_flip_vertical(True)
+        model2.set_augmentation_flip_vertical(True)
+    model1.set_augmentation_flip_vertical(True)
 
 
-def test_set_augmentation_crop(model):
+def test_set_augmentation_crop():
+    model1 = RegressionModel()
+    model2 = SemanticSegmentationModel()
+
     with pytest.raises(TypeError):
-        model.set_augmentation_crop("True", 0.5)
+        model1.set_augmentation_crop("True", 0.5)
     with pytest.raises(TypeError):
-        model.set_augmentation_crop(True, "5")
+        model1.set_augmentation_crop(True, "5")
     with pytest.raises(ValueError):
-        model.set_augmentation_crop(False, -1.0)
+        model1.set_augmentation_crop(False, -1.0)
     with pytest.raises(RuntimeError):
-        model.set_problem_type("semantic_segmentation")
-        model.set_augmentation_crop(True)
-    model.set_problem_type("regression")
-    model.set_augmentation_crop(True)
+        model2.set_augmentation_crop(True)
+    model1.set_augmentation_crop(True)
 
 
-def test_set_augmentation_brightness_and_contrast(model):
+def test_set_augmentation_brightness_and_contrast():
+    model1 = RegressionModel()
+    model2 = MockDPPModel()
+    model2._valid_augmentations = []
+
     with pytest.raises(TypeError):
-        model.set_augmentation_crop("True")
-    model.set_problem_type("regression")
-    model.set_augmentation_brightness_and_contrast(True)
+        model1.set_augmentation_crop("True")
+    with pytest.raises(RuntimeError):
+        model2.set_augmentation_brightness_and_contrast(True)
+    model1.set_augmentation_brightness_and_contrast(True)
 
-    model.set_augmentation_brightness_and_contrast(False)
-    model.set_problem_type("semantic_segmentation")
-    model.set_augmentation_brightness_and_contrast(True)
 
-def test_set_augmentation_rotation(model):
+def test_set_augmentation_rotation():
+    model1 = RegressionModel()
+    model2 = SemanticSegmentationModel()
+
     # Check the type-checking
     with pytest.raises(TypeError):
-        model.set_augmentation_rotation("True")
+        model1.set_augmentation_rotation("True")
     with pytest.raises(TypeError):
-        model.set_augmentation_rotation(True, crop_borders="False")
+        model1.set_augmentation_rotation(True, crop_borders="False")
     with pytest.raises(RuntimeError):
-        model.set_problem_type("semantic_segmentation")
-        model.set_augmentation_rotation(True)
+        model2.set_augmentation_rotation(True)
 
     # Check that rotation augmentation can be turned on the simple way
-    model.set_problem_type("regression")
-    model.set_augmentation_rotation(True)
-    assert model._DPPModel__augmentation_rotate is True
-    assert model._DPPModel__rotate_crop_borders is False
+    model1.set_augmentation_rotation(True)
+    assert model1._augmentation_rotate is True
+    assert model1._rotate_crop_borders is False
 
     # Check that it can be turned on with a border cropping setting
-    model.set_augmentation_rotation(False, crop_borders=True)
-    assert model._DPPModel__augmentation_rotate is False
-    assert model._DPPModel__rotate_crop_borders is True
+    model1.set_augmentation_rotation(False, crop_borders=True)
+    assert model1._augmentation_rotate is False
+    assert model1._rotate_crop_borders is True
 
 
 def test_set_regularization_coefficient(model):
@@ -167,20 +176,20 @@ def test_set_learning_rate_decay(model):
 
     # Ensure that a good set of inputs sets model parameters properly
     model.set_learning_rate_decay(0.01, 100)
-    assert model._DPPModel__lr_decay_factor == 0.01
-    assert model._DPPModel__epochs_per_decay == 100
-    assert model._DPPModel__lr_decay_epochs is None
+    assert model._lr_decay_factor == 0.01
+    assert model._epochs_per_decay == 100
+    assert model._lr_decay_epochs is None
 
     # Ensure that the internal learning rate setter handles decay properly
-    model._DPPModel__total_training_samples = 100
-    model._DPPModel__test_split = 0.20
-    model._DPPModel__learning_rate = 0.1
-    model._DPPModel__global_epoch = 0
-    model._DPPModel__set_learning_rate()
-    assert model._DPPModel__lr_decay_epochs == 8000
-    assert isinstance(model._DPPModel__learning_rate, tf.Tensor)
+    model._total_training_samples = 100
+    model._test_split = 0.20
+    model._learning_rate = 0.1
+    model._global_epoch = 0
+    model._set_learning_rate()
+    assert model._lr_decay_epochs == 8000
+    assert isinstance(model._learning_rate, tf.Tensor)
     with tf.Session() as sess:
-        assert sess.run(model._DPPModel__learning_rate) == pytest.approx(0.1)
+        assert sess.run(model._learning_rate) == pytest.approx(0.1)
 
 
 def test_set_optimizer(model):
@@ -189,17 +198,17 @@ def test_set_optimizer(model):
     with pytest.raises(ValueError):
         model.set_optimizer('Nico')
     model.set_optimizer('adam')
-    assert model._DPPModel__optimizer == 'adam'
+    assert model._optimizer == 'adam'
     model.set_optimizer('Adam')
-    assert model._DPPModel__optimizer == 'adam'
+    assert model._optimizer == 'adam'
     model.set_optimizer('ADAM')
-    assert model._DPPModel__optimizer == 'adam'
+    assert model._optimizer == 'adam'
     model.set_optimizer('SGD')
-    assert model._DPPModel__optimizer == 'sgd'
+    assert model._optimizer == 'sgd'
     model.set_optimizer('sgd')
-    assert model._DPPModel__optimizer == 'sgd'
+    assert model._optimizer == 'sgd'
     model.set_optimizer('sGd')
-    assert model._DPPModel__optimizer == 'sgd'
+    assert model._optimizer == 'sgd'
 
 
 def test_set_weight_initializer(model):
@@ -208,11 +217,11 @@ def test_set_weight_initializer(model):
     with pytest.raises(ValueError):
         model.set_weight_initializer('Nico')
     model.set_weight_initializer('normal')
-    assert model._DPPModel__weight_initializer == 'normal'
+    assert model._weight_initializer == 'normal'
     model.set_weight_initializer('Normal')
-    assert model._DPPModel__weight_initializer == 'normal'
+    assert model._weight_initializer == 'normal'
     model.set_weight_initializer('NORMAL')
-    assert model._DPPModel__weight_initializer == 'normal'
+    assert model._weight_initializer == 'normal'
 
 
 def test_set_image_dimensions(model):
@@ -252,25 +261,13 @@ def test_set_patch_size(model):
         model.set_patch_size(1, -1)
 
 
-def test_set_problem_type(model):
-    with pytest.raises(TypeError):
-        model.set_problem_type(5)
-    with pytest.raises(ValueError):
-        model.set_problem_type('Nico')
-    model.set_problem_type('classification')
-    assert model._DPPModel__problem_type == definitions.ProblemType.CLASSIFICATION
-    model.set_problem_type('regression')
-    assert model._DPPModel__problem_type == definitions.ProblemType.REGRESSION
-    model.set_problem_type('semantic_segmentation')
-    assert model._DPPModel__problem_type == definitions.ProblemType.SEMANTIC_SEGMETNATION
-
-
-@pytest.mark.parametrize("prob_type,bad_loss,good_loss", [('classification', 'l2', 'softmax cross entropy'),
-                                                          ('regression', 'softmax cross entropy', 'l2'),
-                                                          ('semantic_segmentation', 'l2', 'sigmoid cross entropy'),
-                                                          ('object_detection', 'l2', 'yolo')])
-def test_set_loss_function(model, prob_type, bad_loss, good_loss):
-    model.set_problem_type(prob_type)
+@pytest.mark.parametrize("model,bad_loss,good_loss",
+                         [(ClassificationModel(), 'l2', 'softmax cross entropy'),
+                          (RegressionModel(), 'softmax cross entropy', 'l2'),
+                          (SemanticSegmentationModel(), 'l2', 'sigmoid cross entropy'),
+                          (ObjectDetectionModel(), 'l2', 'yolo'),
+                          (CountCeptionModel(), 'l2', 'l1')])
+def test_set_loss_function(model, bad_loss, good_loss):
     with pytest.raises(TypeError):
         model.set_loss_function(0)
     with pytest.raises(ValueError):
@@ -279,7 +276,7 @@ def test_set_loss_function(model, prob_type, bad_loss, good_loss):
 
 
 def test_set_yolo_parameters():
-    model = dpp.DPPModel()
+    model = ObjectDetectionModel()
     with pytest.raises(RuntimeError):
         model.set_yolo_parameters()
     model.set_image_dimensions(448, 448, 3)
@@ -311,7 +308,7 @@ def test_add_input_layer(model):
     model.set_batch_size(1)
     model.set_image_dimensions(1, 1, 1)
     model.add_input_layer()
-    assert isinstance(model._DPPModel__last_layer(), layers.inputLayer)
+    assert isinstance(model._last_layer(), layers.inputLayer)
     with pytest.raises(RuntimeError):
         model.add_input_layer()
 
@@ -344,7 +341,7 @@ def test_add_convolutional_layer(model):
     with pytest.raises(ValueError):
         model.add_convolutional_layer([1, 2, 3, 4], 1, 'Nico')
     model.add_convolutional_layer(np.array([1, 1, 1, 1]), 1, 'relu')
-    assert isinstance(model._DPPModel__last_layer(), layers.convLayer)
+    assert isinstance(model._last_layer(), layers.convLayer)
 
 
 def test_add_pooling_layer(model):
@@ -364,7 +361,7 @@ def test_add_pooling_layer(model):
     with pytest.raises(ValueError):
         model.add_pooling_layer(1, 1, 'Nico')
     model.add_pooling_layer(1, 1, 'avg')
-    assert isinstance(model._DPPModel__last_layer(), layers.poolingLayer)
+    assert isinstance(model._last_layer(), layers.poolingLayer)
 
 
 @pytest.mark.parametrize("kernel_size,stride,output_size", [(2, 2, 3), (3, 3, 2), (2, 1, 5)])
@@ -372,7 +369,7 @@ def test_pooling_layer_output_size(model, kernel_size, stride, output_size):
     model.set_image_dimensions(5, 5, 1)
     model.add_input_layer()
     model.add_pooling_layer(kernel_size, stride)
-    assert model._DPPModel__last_layer().output_size == [1, output_size, output_size, 1]
+    assert model._last_layer().output_size == [1, output_size, output_size, 1]
 
 
 def test_add_normalization_layer(model):
@@ -380,7 +377,7 @@ def test_add_normalization_layer(model):
         model.add_normalization_layer()
     model.add_input_layer()
     model.add_normalization_layer()
-    assert isinstance(model._DPPModel__last_layer(), layers.normLayer)
+    assert isinstance(model._last_layer(), layers.normLayer)
 
 
 def test_add_dropout_layer(model):
@@ -392,7 +389,7 @@ def test_add_dropout_layer(model):
     with pytest.raises(ValueError):
         model.add_dropout_layer(1.5)
     model.add_dropout_layer(0.4)
-    assert isinstance(model._DPPModel__last_layer(), layers.dropoutLayer)
+    assert isinstance(model._last_layer(), layers.dropoutLayer)
 
 
 def test_add_batch_norm_layer(model):
@@ -400,7 +397,7 @@ def test_add_batch_norm_layer(model):
         model.add_batch_norm_layer()
     model.add_input_layer()
     model.add_batch_norm_layer()
-    assert isinstance(model._DPPModel__last_layer(), layers.batchNormLayer)
+    assert isinstance(model._last_layer(), layers.batchNormLayer)
 
 
 def test_add_fully_connected_layer(model):
@@ -420,27 +417,32 @@ def test_add_fully_connected_layer(model):
     with pytest.raises(ValueError):
         model.add_fully_connected_layer(3, 'relu', -1.5)
     model.add_fully_connected_layer(1, 'tanh', 0.3)
-    assert isinstance(model._DPPModel__last_layer(), layers.fullyConnectedLayer)
+    assert isinstance(model._last_layer(), layers.fullyConnectedLayer)
 
 
-def test_add_output_layer(model):
+def test_add_output_layer():
+    model1 = ClassificationModel()
+    model2 = SemanticSegmentationModel()
+
     with pytest.raises(RuntimeError):
-        model.add_output_layer(2.5, 3)
-    model.add_input_layer()
+        model1.add_output_layer(2.5, 3)
+    model1.add_input_layer()
+    model2.add_input_layer()
     with pytest.raises(TypeError):
-        model.add_output_layer("2")
+        model1.add_output_layer("2")
     with pytest.raises(ValueError):
-        model.add_output_layer(-0.4)
+        model1.add_output_layer(-0.4)
     with pytest.raises(TypeError):
-        model.add_output_layer(2.0, 3.4)
+        model1.add_output_layer(2.0, 3.4)
     with pytest.raises(ValueError):
-        model.add_output_layer(2.0, -4)
-    model.set_problem_type('semantic_segmentation')  # needed for following runtime error to occur
+        model1.add_output_layer(2.0, -4)
     with pytest.raises(RuntimeError):
-        model.add_output_layer(2.0, 3)
-    model.set_problem_type('classification')
-    model.add_output_layer(2.5, 3)
-    assert isinstance(model._DPPModel__last_layer(), layers.fullyConnectedLayer)
+        model2.add_output_layer(2.0, 3)  # Semantic segmentation needed for following runtime error to occur
+
+    model1.add_output_layer(2.5, 3)
+    assert isinstance(model1._last_layer(), layers.fullyConnectedLayer)
+    model2.add_output_layer(2.0)
+    assert isinstance(model2._last_layer(), layers.convLayer)
 
 
 # having issue with not being able to create a new model, they all seem to inherit the fixture model
@@ -479,12 +481,11 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
     data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
 
     # forgetting to set image dimensions
-    model = dpp.DPPModel(debug=False, save_checkpoints=False, report_rate=20)
+    model = RegressionModel(debug=False, save_checkpoints=False, report_rate=20)
     # channels = 3
     model.set_batch_size(4)
     # model.set_image_dimensions(128, 128, channels)
     model.set_resize_images(True)
-    model.set_problem_type('regression')
     model.set_num_regression_outputs(1)
     model.set_test_split(0.1)
     model.set_weight_initializer('xavier')
@@ -494,12 +495,11 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
         model.load_ippn_leaf_count_dataset_from_directory(data_path)
 
     # forgetting to set num epochs
-    model = dpp.DPPModel(debug=False, save_checkpoints=False, report_rate=20)
+    model = RegressionModel(debug=False, save_checkpoints=False, report_rate=20)
     channels = 3
     model.set_batch_size(4)
     model.set_image_dimensions(128, 128, channels)
     model.set_resize_images(True)
-    model.set_problem_type('regression')
     model.set_num_regression_outputs(1)
     model.set_test_split(0.1)
     model.set_weight_initializer('xavier')
@@ -510,12 +510,11 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
 
     # the following shouldn't raise any issues since there should be defaults for
     # batch_size, train_test_split, and learning_rate
-    model = dpp.DPPModel(debug=False, save_checkpoints=False, report_rate=20)
+    model = RegressionModel(debug=False, save_checkpoints=False, report_rate=20)
     channels = 3
     # model.set_batch_size(4)
     model.set_image_dimensions(128, 128, channels)
     model.set_resize_images(True)
-    model.set_problem_type('regression')
     model.set_num_regression_outputs(1)
     # model.set_train_test_split(0.8)
     model.set_weight_initializer('xavier')
