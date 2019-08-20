@@ -4,6 +4,6 @@ Copyright Jordan Ubbens, all rights reserved
 """
 
 from .deepplantpheno import *
-from .count_ception_model import *
+from .countception_object_counter_model import *
 from .tools import *
 from .networks import *
