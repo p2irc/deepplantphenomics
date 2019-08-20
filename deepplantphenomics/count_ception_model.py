@@ -13,7 +13,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
     _problem_type = definitions.ProblemType.OBJECT_COUNTING
     _loss_fn = 'l1'
     _supported_loss_fns = ['l1']
-    _valid_augmentations = []
+    _supported_augmentations = []
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):

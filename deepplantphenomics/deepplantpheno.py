@@ -18,38 +18,10 @@ class DPPModel(ABC):
     provides common functionality and parameters for models of all problem types. Subclasses of DPPModel implement any
     changes and extra methods required to support that particular problem.
     """
-
+    # Class variables to be shared by instances or overridden by subclasses
     # Operation settings
     _problem_type = definitions.ProblemType.CLASSIFICATION
     _loss_fn = 'softmax cross entropy'
-    _with_patching = False
-    _has_trained = False
-    _save_checkpoints = None
-    _save_dir = None
-    _validation = True
-    _testing = True
-    _hyper_param_search = False
-
-    # Input options
-    _total_classes = 0
-    _total_raw_samples = 0
-    _total_training_samples = 0
-    _total_validation_samples = 0
-    _total_testing_samples = 0
-
-    _image_width = None
-    _image_height = None
-    _image_width_original = None
-    _image_height_original = None
-    _image_depth = None
-    _patch_height = None
-    _patch_width = None
-    _resize_bbox_coords = False
-
-    _crop_or_pad_images = False
-    _resize_images = False
-
-    _processed_images_dir = './DPP-Processed'
 
     # Supported implementations for various network components
     _supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
@@ -59,99 +31,11 @@ class DPPModel(ABC):
     _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
                            'yolo']
     _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
-
-    # Augmentation options
-    _augmentation_flip_horizontal = False
-    _augmentation_flip_vertical = False
-    _augmentation_crop = False
-    _crop_amount = 0.75
-    _augmentation_contrast = False
-    _augmentation_rotate = False
-    _rotate_crop_borders = False
-    # The list of valid augmentations defaults to including all possible augmentations
-    _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
-                            definitions.AugmentationType.FLIP_VER,
-                            definitions.AugmentationType.CROP,
-                            definitions.AugmentationType.CONTRAST_BRIGHT,
-                            definitions.AugmentationType.ROTATE]
-
-    # Dataset storage
-    _all_ids = None
-
-    _all_images = None
-    _train_images = None
-    _test_images = None
-    _val_images = None
-
-    _all_labels = None
-    _train_labels = None
-    _test_labels = None
-    _val_labels = None
-    _split_labels = True
-
-    _images_only = False
-
-    _raw_image_files = None
-    _raw_labels = None
-
-    _raw_test_image_files = None
-    _raw_train_image_files = None
-    _raw_val_image_files = None
-    _raw_test_labels = None
-    _raw_train_labels = None
-    _raw_val_labels = None
-
-    _all_moderation_features = None
-    _has_moderation = False
-    _moderation_features_size = None
-    _train_moderation_features = None
-    _test_moderation_features = None
-    _val_moderation_features = None
-
-    _training_augmentation_images = None
-    _training_augmentation_labels = None
-
-    # Network internal representation
-    _session = None
-    _graph = None
-    _graph_ops = {}
-    _layers = []
-    _global_epoch = 0
-
-    _num_layers_norm = 0
-    _num_layers_conv = 0
-    _num_layers_upsample = 0
-    _num_layers_pool = 0
-    _num_layers_fc = 0
-    _num_layers_dropout = 0
-    _num_layers_batchnorm = 0
-    _num_blocks_paral_conv = 0
-
-    # Network options
-    _batch_size = 1
-    _test_split = 0.10
-    _validation_split = 0.10
-    _maximum_training_batches = None
-    _reg_coeff = None
-    _optimizer = 'adam'
-    _weight_initializer = 'xavier'
-
-    _learning_rate = 0.001
-    _lr_decay_factor = None
-    _epochs_per_decay = None
-    _lr_decay_epochs = None
-
-    # Wrapper options
-    _debug = None
-    _load_from_saved = None
-    _tb_dir = None
-    _queue_capacity = 50
-    _report_rate = None
-
-    # Multi-threading
-    _num_threads = 1
-    _coord = None
-    _threads = None
+    _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
+                                definitions.AugmentationType.FLIP_VER,
+                                definitions.AugmentationType.CROP,
+                                definitions.AugmentationType.CONTRAST_BRIGHT,
+                                definitions.AugmentationType.ROTATE]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -166,20 +50,130 @@ class DPPModel(ABC):
         :param report_rate: Set the frequency at which progress is reported during training (also the rate at which new
         timepoints are recorded to Tensorboard).
         """
+        # Set instance variables, which is most of them since models shouldn't share most of their attributes
+        # Operation settings
+        self._with_patching = False
+        self._has_trained = False
+        self._save_checkpoints = save_checkpoints
+        self._save_dir = save_dir
+        self._validation = True
+        self._testing = True
+        self._hyper_param_search = False
+        self._processed_images_dir = './DPP-Processed'
+
+        # Input options
+        self._total_classes = 0
+        self._total_raw_samples = 0
+        self._total_training_samples = 0
+        self._total_validation_samples = 0
+        self._total_testing_samples = 0
+
+        self._image_width = None
+        self._image_height = None
+        self._image_width_original = None
+        self._image_height_original = None
+        self._image_depth = None
+        self._patch_height = None
+        self._patch_width = None
+        self._resize_bbox_coords = False
+
+        self._crop_or_pad_images = False
+        self._resize_images = False
+
+        # Augmentation options
+        self._augmentation_flip_horizontal = False
+        self._augmentation_flip_vertical = False
+        self._augmentation_crop = False
+        self._crop_amount = 0.75
+        self._augmentation_contrast = False
+        self._augmentation_rotate = False
+        self._rotate_crop_borders = False
+
+        # Dataset storage
+        self._all_ids = None
+
+        self._all_images = None
+        self._train_images = None
+        self._test_images = None
+        self._val_images = None
+
+        self._all_labels = None
+        self._train_labels = None
+        self._test_labels = None
+        self._val_labels = None
+        self._split_labels = True
+
+        self._images_only = False
+
+        self._raw_image_files = None
+        self._raw_test_image_files = None
+        self._raw_train_image_files = None
+        self._raw_val_image_files = None
+
+        self._raw_labels = None
+        self._raw_test_labels = None
+        self._raw_train_labels = None
+        self._raw_val_labels = None
+
+        self._all_moderation_features = None
+        self._has_moderation = False
+        self._moderation_features_size = None
+        self._train_moderation_features = None
+        self._test_moderation_features = None
+        self._val_moderation_features = None
+
+        self._training_augmentation_images = None
+        self._training_augmentation_labels = None
+
+        # Network internal representation
+        self._session = None
+        self._graph = None
+        self._graph_ops = {}
+        self._layers = []
+        self._global_epoch = 0
+
+        self._num_layers_norm = 0
+        self._num_layers_conv = 0
+        self._num_layers_upsample = 0
+        self._num_layers_pool = 0
+        self._num_layers_fc = 0
+        self._num_layers_dropout = 0
+        self._num_layers_batchnorm = 0
+        self._num_blocks_paral_conv = 0
+
+        # Network options
+        self._batch_size = 1
+        self._test_split = 0.10
+        self._validation_split = 0.10
+        self._maximum_training_batches = None
+        self._reg_coeff = None
+        self._optimizer = 'adam'
+        self._weight_initializer = 'xavier'
+
+        self._learning_rate = 0.001
+        self._lr_decay_factor = None
+        self._epochs_per_decay = None
+        self._lr_decay_epochs = None
+
+        # Wrapper options
         self._debug = debug
         self._load_from_saved = load_from_saved
         self._tb_dir = tensorboard_dir
+        self._queue_capacity = 50
         self._report_rate = report_rate
-        self._save_checkpoints = save_checkpoints
-        self._save_dir = save_dir
 
+        # Multi-threading
+        self._num_threads = 1
+        self._coord = None
+        self._threads = None
+
+        # Now do actual initialization stuff
         # Add the run level to the tensorboard path
         if self._tb_dir is not None:
             self._tb_dir = "{0}/{1}".format(self._tb_dir, datetime.datetime.now().strftime("%d%B%Y%I:%M%p"))
 
         if initialize:
             self._log('TensorFlow loaded...')
-
             self._reset_graph()
             self._reset_session()
 
@@ -325,7 +319,7 @@ class DPPModel(ABC):
         """Randomly flip training images horizontally"""
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
-        if definitions.AugmentationType.FLIP_HOR not in self._valid_augmentations:
+        if definitions.AugmentationType.FLIP_HOR not in self._supported_augmentations:
             raise RuntimeError("Flip augmentations are incompatible with the current problem type")
 
         self._augmentation_flip_horizontal = flip
@@ -334,7 +328,7 @@ class DPPModel(ABC):
         """Randomly flip training images vertically"""
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
-        if definitions.AugmentationType.FLIP_VER not in self._valid_augmentations:
+        if definitions.AugmentationType.FLIP_VER not in self._supported_augmentations:
             raise RuntimeError("Flip augmentations are incompatible with the current problem type")
 
         self._augmentation_flip_vertical = flip
@@ -347,7 +341,7 @@ class DPPModel(ABC):
             raise TypeError("crop_ratio must be a float")
         if crop_ratio <= 0 or crop_ratio > 1:
             raise ValueError("crop_ratio must be in (0, 1]")
-        if definitions.AugmentationType.CROP not in self._valid_augmentations:
+        if definitions.AugmentationType.CROP not in self._supported_augmentations:
             raise RuntimeError("Crop augmentations are incompatible with the current problem type")
 
         self._augmentation_crop = resize
@@ -357,7 +351,7 @@ class DPPModel(ABC):
         """Randomly adjust contrast and/or brightness on training images"""
         if not isinstance(contr, bool):
             raise TypeError("contr must be a bool")
-        if definitions.AugmentationType.CONTRAST_BRIGHT not in self._valid_augmentations:
+        if definitions.AugmentationType.CONTRAST_BRIGHT not in self._supported_augmentations:
             raise RuntimeError("Contrast and brightness augmentations are incompatible with the current problem type")
 
         self._augmentation_contrast = contr
@@ -368,7 +362,7 @@ class DPPModel(ABC):
             raise TypeError("rot must be a bool")
         if not isinstance(crop_borders, bool):
             raise TypeError("crop_borders must be a bool")
-        if definitions.AugmentationType.ROTATE not in self._valid_augmentations:
+        if definitions.AugmentationType.ROTATE not in self._supported_augmentations:
             raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
 
         self._augmentation_rotate = rot

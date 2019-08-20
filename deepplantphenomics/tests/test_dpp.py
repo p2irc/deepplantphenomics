@@ -124,7 +124,7 @@ def test_set_augmentation_crop():
 def test_set_augmentation_brightness_and_contrast():
     model1 = RegressionModel()
     model2 = MockDPPModel()
-    model2._valid_augmentations = []
+    model2._supported_augmentations = []
 
     with pytest.raises(TypeError):
         model1.set_augmentation_crop("True")

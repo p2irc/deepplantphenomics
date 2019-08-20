@@ -11,11 +11,11 @@ class RegressionModel(DPPModel):
     _problem_type = definitions.ProblemType.REGRESSION
     _loss_fn = 'l2'
     _supported_loss_fns = ['l2', 'l1', 'smooth l1', 'log loss']
-    _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
-                            definitions.AugmentationType.FLIP_VER,
-                            definitions.AugmentationType.CROP,
-                            definitions.AugmentationType.CONTRAST_BRIGHT,
-                            definitions.AugmentationType.ROTATE]
+    _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
+                                definitions.AugmentationType.FLIP_VER,
+                                definitions.AugmentationType.CROP,
+                                definitions.AugmentationType.CONTRAST_BRIGHT,
+                                definitions.AugmentationType.ROTATE]
     _num_regression_outputs = 1
 
     # State variables specific to regression for constructing the graph and passing to Tensorboard
