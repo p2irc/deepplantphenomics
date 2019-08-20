@@ -238,7 +238,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             # Main test loop
             for _ in tqdm(range(num_batches)):
                 batch_loss, batch_abs_diff = self._session.run(
-                    [self._graph_ops['test_losses'], self._graph_ops['test_aacuracy']])
+                    [self._graph_ops['test_losses'], self._graph_ops['test_accuracy']])
                 loss_sum = loss_sum + batch_loss
                 abs_diff_sum = abs_diff_sum + batch_abs_diff
 
@@ -251,8 +251,10 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             return 1.0-loss_mean.astype(np.float32), abs_diff_mean
 
     def forward_pass_with_file_inputs(self, x):
+
         with self._graph.as_default():
-            total_outputs = np.empty([1, self._last_layer().output_size])
+
+            total_outputs = []
 
             num_batches = len(x) // self._batch_size
             remainder = len(x) % self._batch_size
@@ -261,9 +263,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 num_batches += 1
                 remainder = self._batch_size - remainder
 
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self._parse_images(images)
+            self._parse_images(images, image_type='jpg', standadization=False)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
@@ -271,16 +272,14 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             if self._load_from_saved:
                 self.load_state()
             self._initialize_queue_runners()
+
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
                 for img in np.array_split(xx, self._batch_size):
-                    total_outputs = np.append(total_outputs, img, axis=0)
-
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
+                    total_outputs.append(img)
 
             # delete any outputs which are overruns from the last batch
             if remainder != 0:
@@ -290,9 +289,12 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-        # Perform forward pass of the network to get raw outputs and apply a softmax
+
         xx = self.forward_pass_with_file_inputs(x)
-        interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
+
+        # Get the predicted count
+        patch_size = 32
+        interpreted_outputs = np.sum(xx / (patch_size ** 2.0), axis=[1,2,3])
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):

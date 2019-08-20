@@ -869,7 +869,7 @@ class DPPModel(ABC):
             os.mkdir(state_dir)
 
         with self._graph.as_default():
-            saver = tf.train.Saver(tf.trainable_variables())
+            saver = tf.train.Saver(tf.global_variables())
             saver.save(self._session, state_dir + '/tfhSaved')
 
         self._has_trained = True
@@ -886,7 +886,7 @@ class DPPModel(ABC):
             self._log('Loading from checkpoint file...')
 
             with self._graph.as_default():
-                saver = tf.train.Saver(tf.trainable_variables())
+                saver = tf.train.Saver(tf.global_variables())
                 saver.restore(self._session, tf.train.latest_checkpoint(self._load_from_saved))
 
             self._has_trained = True
@@ -1986,7 +1986,8 @@ class DPPModel(ABC):
             if self._validation:
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
-    def _parse_images(self, images):
+
+    def _parse_images(self, images, image_type='png', standadization=True):
         """Takes some images as input, creates producer of processed images internally to this instance"""
         with self._graph.as_default():
             input_queue = tf.train.string_input_producer(images, shuffle=False)
@@ -2006,9 +2007,9 @@ class DPPModel(ABC):
             if self._crop_or_pad_images is True:  # Pad or crop to deal with images of different sizes
                 input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
                                                                       self._image_width)
-
-            # Mean-center all inputs
-            input_images = tf.image.per_image_standardization(input_images)
+            if standadization:
+                # mean-center all inputs
+                input_images = tf.image.per_image_standardization(input_images)
 
             # Manually set the shape of the image tensors so it matches the shape of the images
             input_images.set_shape([self._image_height, self._image_width, self._image_depth])

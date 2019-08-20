@@ -38,3 +38,15 @@ class tools(object):
         _, predictions = cv2.threshold(predictions.astype(np.float32), 0.5, 1.0, cv2.THRESH_BINARY)
 
         return predictions
+
+    def count_flowers(x, batch_size=8, image_height=300, image_width=300, image_depth=3):
+
+        net = networks.countCeptionCounter(
+            batch_size=batch_size, image_height=image_height, image_width=image_width, image_depth=image_depth)
+        predictions = net.forward_pass(x)
+        net.shut_down()
+
+        # round for leaf counts
+        predictions = np.round(predictions)
+
+        return predictions

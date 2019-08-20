@@ -173,21 +173,21 @@ class countCeptionCounter(object):
 
     __dir_name = 'countception-counter'
 
-    def __init__(self, batch_size=2):
+    def __init__(self, batch_size=2, image_height=300, image_width=300, image_depth=3):
         """A network which counts flowers in plant images"""
 
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
 
-        import deepplantphenomics as dpp
+        from . import countception_object_counter_model as cc
 
-        self.model = dpp.CountCeptionModel(debug=False, load_from_saved=checkpoint_path)
+        self.model = cc.CountCeptionModel(debug=False, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
         self.model.set_loss_function('l1')
         self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(4)
-        self.model.set_image_dimensions(300, 300, 3)
+        self.model.set_image_dimensions(image_height, image_width, image_depth)
 
         # Define a model architecture
         self.model.add_input_layer()
@@ -247,7 +247,7 @@ class countCeptionCounter(object):
                                       decay=0.9)
 
     def forward_pass(self, x):
-        y = self.model.forward_pass_with_file_inputs(x)
+        y = self.model.forward_pass_with_interpreted_outputs(x)
         return y
 
     def shut_down(self):
