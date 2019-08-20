@@ -1,4 +1,4 @@
-from . import layers, loaders, definitions, deepplantpheno
+from . import layers, definitions, deepplantpheno
 import numpy as np
 import tensorflow as tf
 import datetime
@@ -110,7 +110,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                     gt_val = tf.reduce_sum(self._graph_ops['y_val'], axis=[1, 2, 3]) / (32 ** 2.0)
                     pr_val = tf.reduce_sum(self._graph_ops['x_val_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
                     self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
-
 
             # Epoch summaries for Tensorboard
             self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
@@ -296,7 +295,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         interpreted_outputs = np.exp(xx) / np.sum(np.exp(xx), axis=1, keepdims=True)
         return interpreted_outputs
 
-
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         """
         Add an output layer to the network (no need to do this in the count ception model)
@@ -308,11 +306,10 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         """
         pass
 
-
     def _parse_dataset(self, train_images, train_labels, train_mf,
-                        test_images, test_labels, test_mf,
-                        val_images, val_labels, val_mf,
-                        image_type='png'):
+                       test_images, test_labels, test_mf,
+                       val_images, val_labels, val_mf,
+                       image_type='png'):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self._graph.as_default():
 
@@ -382,4 +379,3 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._raw_labels = dataset_y
 
         self._split_labels = False
-

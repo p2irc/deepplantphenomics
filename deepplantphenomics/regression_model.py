@@ -46,16 +46,16 @@ class RegressionModel(DPPModel):
                 tf.summary.histogram('validation/batch_losses', self._graph_ops['val_losses'],
                                      collections=['custom_summaries'])
 
-    def __assemble_graph(self):
+    def _assemble_graph(self):
         with self._graph.as_default():
 
-            self.__log('Parsing dataset...')
+            self._log('Parsing dataset...')
             self._graph_parse_data()
 
-            self.__log('Creating layer parameters...')
-            self.__add_layers_to_graph()
+            self._log('Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            self.__log('Assembling graph...')
+            self._log('Assembling graph...')
 
             # Define batches
             if self._has_moderation:
@@ -190,7 +190,7 @@ class RegressionModel(DPPModel):
             self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def compute_full_test_accuracy(self):
-        self.__log('Computing total test accuracy/regression loss...')
+        self._log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
             num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
@@ -240,13 +240,13 @@ class RegressionModel(DPPModel):
 
             hist, _ = np.histogram(all_losses, bins=100)
 
-            self.__log('Mean loss: {}'.format(mean))
-            self.__log('Loss standard deviation: {}'.format(std))
-            self.__log('Mean absolute loss: {}'.format(abs_mean))
-            self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-            self.__log('Min error: {}'.format(loss_min))
-            self.__log('Max error: {}'.format(loss_max))
-            self.__log('MSE: {}'.format(mse))
+            self._log('Mean loss: {}'.format(mean))
+            self._log('Loss standard deviation: {}'.format(std))
+            self._log('Mean absolute loss: {}'.format(abs_mean))
+            self._log('Absolute loss standard deviation: {}'.format(abs_std))
+            self._log('Min error: {}'.format(loss_min))
+            self._log('Max error: {}'.format(loss_max))
+            self._log('MSE: {}'.format(mse))
 
             all_y_mean = np.mean(all_y)
             total_error = np.sum(np.square(all_y - all_y_mean))
@@ -257,15 +257,15 @@ class RegressionModel(DPPModel):
             else:
                 r2 = 1. - (unexplained_error / total_error)
 
-            self.__log('R^2: {}'.format(r2))
-            self.__log('All test labels:')
-            self.__log(all_y)
+            self._log('R^2: {}'.format(r2))
+            self._log('All test labels:')
+            self._log(all_y)
 
-            self.__log('All predictions:')
-            self.__log(all_predictions)
+            self._log('All predictions:')
+            self._log(all_predictions)
 
-            self.__log('Histogram of {} losses:'.format(self._loss_fn))
-            self.__log(hist)
+            self._log('Histogram of {} losses:'.format(self._loss_fn))
+            self._log(hist)
 
             return abs_mean.astype(np.float32)
 
@@ -282,14 +282,14 @@ class RegressionModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -387,9 +387,9 @@ class RegressionModel(DPPModel):
             if output_size <= 0:
                 raise ValueError("output_size must be positive")
 
-        self.__log('Adding output layer...')
+        self._log('Adding output layer...')
 
-        reshape = self.__last_layer_outputs_volume()
+        reshape = self._last_layer_outputs_volume()
 
         if regularization_coefficient is None and self._reg_coeff is not None:
             regularization_coefficient = self._reg_coeff
@@ -403,7 +403,7 @@ class RegressionModel(DPPModel):
 
         with self._graph.as_default():
             layer = layers.fullyConnectedLayer('output',
-                                               copy.deepcopy(self.__last_layer().output_size),
+                                               copy.deepcopy(self._last_layer().output_size),
                                                num_out,
                                                reshape,
                                                self._batch_size,
@@ -411,7 +411,7 @@ class RegressionModel(DPPModel):
                                                self._weight_initializer,
                                                regularization_coefficient)
 
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
@@ -435,7 +435,7 @@ class RegressionModel(DPPModel):
 
         labels = [[label] for label in labels]
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
 
         self._raw_image_files = image_files
         self._raw_labels = labels

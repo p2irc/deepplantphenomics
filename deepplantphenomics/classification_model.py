@@ -39,16 +39,16 @@ class ClassificationModel(DPPModel):
             tf.summary.histogram('validation/class_predictions', self.__val_class_predictions,
                                  collections=['custom_summaries'])
 
-    def __assemble_graph(self):
+    def _assemble_graph(self):
         with self._graph.as_default():
 
-            self.__log('Parsing dataset...')
+            self._log('Parsing dataset...')
             self._graph_parse_data()
 
-            self.__log('Creating layer parameters...')
-            self.__add_layers_to_graph()
+            self._log('Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            self.__log('Assembling graph...')
+            self._log('Assembling graph...')
 
             # Define batches
             if self._has_moderation:
@@ -206,7 +206,7 @@ class ClassificationModel(DPPModel):
                                 samples_per_sec))
 
     def compute_full_test_accuracy(self):
-        self.__log('Computing total test accuracy/regression loss...')
+        self._log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
             num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
@@ -226,12 +226,12 @@ class ClassificationModel(DPPModel):
             # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix (not
             # implemented)
             mean = (loss_sum / num_batches)
-            self.__log('Average test accuracy: {:.5f}'.format(mean))
+            self._log('Average test accuracy: {:.5f}'.format(mean))
             return 1.0-mean.astype(np.float32)
 
     def forward_pass_with_file_inputs(self, x):
         with self._graph.as_default():
-            total_outputs = np.empty([1, self.__last_layer().output_size])
+            total_outputs = np.empty([1, self._last_layer().output_size])
 
             num_batches = len(x) // self._batch_size
             remainder = len(x) % self._batch_size
@@ -242,14 +242,14 @@ class ClassificationModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -289,9 +289,9 @@ class ClassificationModel(DPPModel):
             if output_size <= 0:
                 raise ValueError("output_size must be positive")
 
-        self.__log('Adding output layer...')
+        self._log('Adding output layer...')
 
-        reshape = self.__last_layer_outputs_volume()
+        reshape = self._last_layer_outputs_volume()
 
         if regularization_coefficient is None and self._reg_coeff is not None:
             regularization_coefficient = self._reg_coeff
@@ -305,7 +305,7 @@ class ClassificationModel(DPPModel):
 
         with self._graph.as_default():
             layer = layers.fullyConnectedLayer('output',
-                                               copy.deepcopy(self.__last_layer().output_size),
+                                               copy.deepcopy(self._last_layer().output_size),
                                                num_out,
                                                reshape,
                                                self._batch_size,
@@ -313,7 +313,7 @@ class ClassificationModel(DPPModel):
                                                self._weight_initializer,
                                                regularization_coefficient)
 
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
@@ -342,8 +342,8 @@ class ClassificationModel(DPPModel):
             labels = loaders.string_labels_to_sequential(labels)
             labels = tf.one_hot(labels, self._total_classes)
 
-        self.__log('Total classes is %d' % self._total_classes)
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total classes is %d' % self._total_classes)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
 
         self._raw_image_files = image_files
         self._raw_labels = labels

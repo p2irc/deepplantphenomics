@@ -26,28 +26,28 @@ class SemanticSegmentationModel(DPPModel):
         # Summaries specific to semantic segmentation
         # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
         # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-        train_images_summary = self.__get_weights_as_image(
+        train_images_summary = self._get_weights_as_image(
             tf.transpose(tf.expand_dims(self._graph_forward_pass, -1), (1, 2, 3, 0)),
             self._layers[-1].output_size)
         tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
                               collections=['custom_summaries'])
-            val_images_summary = self.__get_weights_as_image(
+            val_images_summary = self._get_weights_as_image(
                 tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
                 self._layers[-1].output_size)
             tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
-    def __assemble_graph(self):
+    def _assemble_graph(self):
         with self._graph.as_default():
 
-            self.__log('Parsing dataset...')
+            self._log('Parsing dataset...')
             self._graph_parse_data()
 
-            self.__log('Creating layer parameters...')
-            self.__add_layers_to_graph()
+            self._log('Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            self.__log('Assembling graph...')
+            self._log('Assembling graph...')
 
             # Define batches
             if self._has_moderation:
@@ -173,7 +173,7 @@ class SemanticSegmentationModel(DPPModel):
             self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def compute_full_test_accuracy(self):
-        self.__log('Computing total test accuracy/regression loss...')
+        self._log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
             num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
@@ -215,16 +215,16 @@ class SemanticSegmentationModel(DPPModel):
 
             hist, _ = np.histogram(all_losses, bins=100)
 
-            self.__log('Mean loss: {}'.format(mean))
-            self.__log('Loss standard deviation: {}'.format(std))
-            self.__log('Mean absolute loss: {}'.format(abs_mean))
-            self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-            self.__log('Min error: {}'.format(loss_min))
-            self.__log('Max error: {}'.format(loss_max))
-            self.__log('MSE: {}'.format(mse))
+            self._log('Mean loss: {}'.format(mean))
+            self._log('Loss standard deviation: {}'.format(std))
+            self._log('Mean absolute loss: {}'.format(abs_mean))
+            self._log('Absolute loss standard deviation: {}'.format(abs_std))
+            self._log('Min error: {}'.format(loss_min))
+            self._log('Max error: {}'.format(loss_max))
+            self._log('MSE: {}'.format(mse))
 
-            self.__log('Histogram of {} losses:'.format(self._loss_fn))
-            self.__log(hist)
+            self._log('Histogram of {} losses:'.format(self._loss_fn))
+            self._log(hist)
 
             return abs_mean.astype(np.float32)
 
@@ -255,7 +255,7 @@ class SemanticSegmentationModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
@@ -270,7 +270,7 @@ class SemanticSegmentationModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -350,7 +350,7 @@ class SemanticSegmentationModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             # set up and then initialize the queue
             x_test = tf.train.batch(
@@ -369,7 +369,7 @@ class SemanticSegmentationModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             # check if we need to perform patching
@@ -439,19 +439,19 @@ class SemanticSegmentationModel(DPPModel):
         if output_size is not None:
             raise RuntimeError("output_size should be None for semantic segmentation")
 
-        self.__log('Adding output layer...')
+        self._log('Adding output layer...')
 
-        filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
+        filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
 
         with self._graph.as_default():
             layer = layers.convLayer('output',
-                                     copy.deepcopy(self.__last_layer().output_size),
+                                     copy.deepcopy(self._last_layer().output_size),
                                      filter_dimension,
                                      1,
                                      None,
                                      self._weight_initializer)
 
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
@@ -471,7 +471,7 @@ class SemanticSegmentationModel(DPPModel):
 
         self._total_raw_samples = len(image_files)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
 
         self._raw_image_files = image_files
         self._raw_labels = seg_files

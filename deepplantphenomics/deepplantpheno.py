@@ -1933,8 +1933,8 @@ class DPPModel(ABC):
             self._all_labels.append(boxes)
 
     def _parse_dataset(self, train_images, train_labels, train_mf,
-                        test_images, test_labels, test_mf,
-                        val_images, val_labels, val_mf):
+                       test_images, test_labels, test_mf,
+                       val_images, val_labels, val_mf):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self._graph.as_default():
 
