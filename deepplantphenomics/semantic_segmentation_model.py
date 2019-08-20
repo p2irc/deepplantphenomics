@@ -2,11 +2,8 @@ from . import layers, definitions, DPPModel
 import numpy as np
 import tensorflow as tf
 import os
-import datetime
-import time
 import warnings
 import copy
-import math
 from tqdm import tqdm
 
 
@@ -29,28 +26,28 @@ class SemanticSegmentationModel(DPPModel):
         # Summaries specific to semantic segmentation
         # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
         # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-        train_images_summary = self.__get_weights_as_image(
+        train_images_summary = self._get_weights_as_image(
             tf.transpose(tf.expand_dims(self._graph_forward_pass, -1), (1, 2, 3, 0)),
             self._layers[-1].output_size)
         tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
                               collections=['custom_summaries'])
-            val_images_summary = self.__get_weights_as_image(
+            val_images_summary = self._get_weights_as_image(
                 tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
                 self._layers[-1].output_size)
             tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
-    def __assemble_graph(self):
+    def _assemble_graph(self):
         with self._graph.as_default():
 
-            self.__log('Parsing dataset...')
+            self._log('Parsing dataset...')
             self._graph_parse_data()
 
-            self.__log('Creating layer parameters...')
-            self.__add_layers_to_graph()
+            self._log('Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            self.__log('Assembling graph...')
+            self._log('Assembling graph...')
 
             # Define batches
             if self._has_moderation:
@@ -71,20 +68,9 @@ class SemanticSegmentationModel(DPPModel):
             x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
             y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
 
-            # if using patching we extract a patch of image and its label here
+            # If we are using patching, we extract a random patch from the image here
             if self._with_patching:
-                # Take a slice
-                patch_width = self._patch_width
-                patch_height = self._patch_height
-                offset_h = np.random.randint(patch_height // 2, self._image_height - (patch_height // 2),
-                                             self._batch_size)
-                offset_w = np.random.randint(patch_width // 2, self._image_width - (patch_width // 2),
-                                             self._batch_size)
-                offsets = [x for x in zip(offset_h, offset_w)]
-                x = tf.image.extract_glimpse(x, [patch_height, patch_width], offsets,
-                                             normalized=False, centered=False)
-                y = tf.image.extract_glimpse(y, [patch_height, patch_width], offsets,
-                                             normalized=False, centered=False)
+                x, offsets = self._graph_extract_patch(x)
 
             # Run the network operations
             if self._has_moderation:
@@ -143,23 +129,15 @@ class SemanticSegmentationModel(DPPModel):
                 self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
                                                       shape=[-1, self._image_height, self._image_width, 1])
 
-            # if using patching we need to properly pull patches from the images and labels
+            # If using patching, we need to properly pull similar patches from the test and validation images (and
+            # labels)
             if self._with_patching:
-                # Take a slice of image. Same size and location (offsets) as the slice from training.
-                patch_width = self._patch_width
-                patch_height = self._patch_height
                 if self._testing:
-                    x_test = tf.image.extract_glimpse(x_test, [patch_height, patch_width], offsets,
-                                                      normalized=False, centered=False)
-                    self._graph_ops['y_test'] = tf.image.extract_glimpse(self._graph_ops['y_test'],
-                                                                         [patch_height, patch_width], offsets,
-                                                                         normalized=False, centered=False)
+                    x_test, _ = self._graph_extract_patch(x_test, offsets)
+                    self._graph_ops['y_test'], _ = self._graph_extract_patch(self._graph_ops['y_test'], offsets)
                 if self._validation:
-                    x_val = tf.image.extract_glimpse(x_val, [patch_height, patch_width], offsets,
-                                                     normalized=False, centered=False)
-                    self._graph_ops['y_val'] = tf.image.extract_glimpse(self._graph_ops['y_val'],
-                                                                        [patch_height, patch_width], offsets,
-                                                                        normalized=False, centered=False)
+                    x_val, _ = self._graph_extract_patch(x_val, offsets)
+                    self._graph_ops['y_val'], _ = self._graph_extract_patch(self._graph_ops['y_val'], offsets)
 
             if self._has_moderation:
                 if self._testing:
@@ -194,105 +172,8 @@ class SemanticSegmentationModel(DPPModel):
             # Epoch summaries for Tensorboard
             self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
-    def begin_training(self, return_test_loss=False):
-        with self._graph.as_default():
-            self.__assemble_graph()
-            print('assembled the graph')
-
-            # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
-                self.load_state()
-
-                self.__initialize_queue_runners()
-
-                self.compute_full_test_accuracy()
-
-                self.shut_down()
-            else:
-                if self._tb_dir is not None:
-                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
-
-                self.__log('Initializing parameters...')
-                init_op = tf.global_variables_initializer()
-                self._session.run(init_op)
-
-                self.__initialize_queue_runners()
-
-                self.__log('Beginning training...')
-
-                self.__set_learning_rate()
-
-                # Needed for batch norm
-                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
-
-                # for i in range(self._maximum_training_batches):
-                tqdm_range = tqdm(range(self._maximum_training_batches))
-                for i in tqdm_range:
-                    start_time = time.time()
-
-                    self._global_epoch = i
-                    self._session.run(self._graph_ops['optimizer'])
-                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        elapsed = time.time() - start_time
-
-                        if self._tb_dir is not None:
-                            summary = self._session.run(self._graph_ops['merged'])
-                            train_writer.add_summary(summary, i)
-                        if self._validation:
-                            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
-                                                                       self._graph_ops['val_cost']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                samples_per_sec))
-
-                        else:
-                            loss = self._session.run([self._graph_ops['cost']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                samples_per_sec))
-
-                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
-                            self.save_state(self._save_dir)
-                    else:
-                        loss = self._session.run([self._graph_ops['cost']])
-
-                    if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
-                        break
-
-                    if i == self._maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
-
-                self.save_state(self._save_dir)
-
-                final_test_loss = None
-                if self._testing:
-                    final_test_loss = self.compute_full_test_accuracy()
-
-                self.shut_down()
-
-                if return_test_loss:
-                    return final_test_loss
-                else:
-                    return
-
     def compute_full_test_accuracy(self):
-        self.__log('Computing total test accuracy/regression loss...')
+        self._log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
             num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
@@ -334,16 +215,16 @@ class SemanticSegmentationModel(DPPModel):
 
             hist, _ = np.histogram(all_losses, bins=100)
 
-            self.__log('Mean loss: {}'.format(mean))
-            self.__log('Loss standard deviation: {}'.format(std))
-            self.__log('Mean absolute loss: {}'.format(abs_mean))
-            self.__log('Absolute loss standard deviation: {}'.format(abs_std))
-            self.__log('Min error: {}'.format(loss_min))
-            self.__log('Max error: {}'.format(loss_max))
-            self.__log('MSE: {}'.format(mse))
+            self._log('Mean loss: {}'.format(mean))
+            self._log('Loss standard deviation: {}'.format(std))
+            self._log('Mean absolute loss: {}'.format(abs_mean))
+            self._log('Absolute loss standard deviation: {}'.format(abs_std))
+            self._log('Min error: {}'.format(loss_min))
+            self._log('Max error: {}'.format(loss_max))
+            self._log('MSE: {}'.format(mse))
 
-            self.__log('Histogram of {} losses:'.format(self._loss_fn))
-            self.__log(hist)
+            self._log('Histogram of {} losses:'.format(self._loss_fn))
+            self._log(hist)
 
             return abs_mean.astype(np.float32)
 
@@ -374,7 +255,7 @@ class SemanticSegmentationModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
@@ -389,7 +270,7 @@ class SemanticSegmentationModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -469,7 +350,7 @@ class SemanticSegmentationModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             # set up and then initialize the queue
             x_test = tf.train.batch(
@@ -488,7 +369,7 @@ class SemanticSegmentationModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             # check if we need to perform patching
@@ -558,19 +439,19 @@ class SemanticSegmentationModel(DPPModel):
         if output_size is not None:
             raise RuntimeError("output_size should be None for semantic segmentation")
 
-        self.__log('Adding output layer...')
+        self._log('Adding output layer...')
 
-        filter_dimension = [1, 1, copy.deepcopy(self.__last_layer().output_size[3]), 1]
+        filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
 
         with self._graph.as_default():
             layer = layers.convLayer('output',
-                                     copy.deepcopy(self.__last_layer().output_size),
+                                     copy.deepcopy(self._last_layer().output_size),
                                      filter_dimension,
                                      1,
                                      None,
                                      self._weight_initializer)
 
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
@@ -590,219 +471,42 @@ class SemanticSegmentationModel(DPPModel):
 
         self._total_raw_samples = len(image_files)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
 
         self._raw_image_files = image_files
         self._raw_labels = seg_files
         self._split_labels = False  # Band-aid fix
 
-    def __parse_dataset(self, train_images, train_labels, train_mf,
-                        test_images, test_labels, test_mf,
-                        val_images, val_labels, val_mf,
-                        image_type='png'):
-        """Takes training and testing images and labels, creates input queues internally to this instance"""
-        with self._graph.as_default():
-
-            # Try to get the number of samples the normal way
-            if isinstance(train_images, tf.Tensor):
-                self._total_training_samples = train_images.get_shape().as_list()[0]
-                if self._testing:
-                    self._total_testing_samples = test_images.get_shape().as_list()[0]
-                if self._validation:
-                    self._total_validation_samples = val_images.get_shape().as_list()[0]
-            elif isinstance(train_images[0], tf.Tensor):
-                self._total_training_samples = train_images[0].get_shape().as_list()[0]
-            else:
-                self._total_training_samples = len(train_images)
-                if self._testing:
-                    self._total_testing_samples = len(test_images)
-                if self._validation:
-                    self._total_validation_samples = len(val_images)
-
-            # Most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
-            # will have None for its size, so the above won't work and we manually calculate it here
-            if self._total_training_samples is None:
-                self._total_training_samples = int(self._total_raw_samples)
-                if self._testing:
-                    self._total_testing_samples = int(self._total_raw_samples * self._test_split)
-                    self._total_training_samples = self._total_training_samples - self._total_testing_samples
-                if self._validation:
-                    self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
-                    self._total_training_samples = self._total_training_samples - self._total_validation_samples
-
-            # Logging verbosity
-            self.__log('Total training samples is {0}'.format(self._total_training_samples))
-            self.__log('Total validation samples is {0}'.format(self._total_validation_samples))
-            self.__log('Total testing samples is {0}'.format(self._total_testing_samples))
-
-            # Create moderation features queues
-            if train_mf is not None:
-                train_moderation_queue = tf.train.slice_input_producer([train_mf], shuffle=False)
-                self._train_moderation_features = tf.cast(train_moderation_queue[0], tf.float32)
-
-            if test_mf is not None:
-                test_moderation_queue = tf.train.slice_input_producer([test_mf], shuffle=False)
-                self._test_moderation_features = tf.cast(test_moderation_queue[0], tf.float32)
-
-            if val_mf is not None:
-                val_moderation_queue = tf.train.slice_input_producer([val_mf], shuffle=False)
-                self._val_moderation_features = tf.cast(val_moderation_queue[0], tf.float32)
-
-            # Calculate number of batches to run
-            batches_per_epoch = self._total_training_samples / float(self._batch_size)
-            self._maximum_training_batches = int(self._maximum_training_batches * batches_per_epoch)
-
-            if self._batch_size > self._total_training_samples:
-                self.__log('Less than one batch in training set, exiting now')
-                exit()
-            self.__log('Batches per epoch: {:f}'.format(batches_per_epoch))
-            self.__log('Running to {0} batches'.format(self._maximum_training_batches))
-
-            # Create input queues
-            train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
-            if self._testing:
-                test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
-            if self._validation:
-                val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
-
-            # Apply pre-processing to the image labels (which are images for semantic segmentation)
-            self._train_labels = tf.image.decode_png(tf.read_file(train_input_queue[1]), channels=1)
-            # normalize to 1.0
-            self._train_labels = tf.image.convert_image_dtype(self._train_labels, dtype=tf.float32)
-            # resize if we are using that
-            if self._resize_images:
-                self._train_labels = tf.image.resize_images(self._train_labels,
-                                                            [self._image_height, self._image_width])
-                # make into a binary mask
-                self._train_labels = tf.reduce_mean(self._train_labels, axis=2)
-
-            # if using testing and/or validation, do all the above for testing as well
-            if self._testing:
-                self._test_labels = tf.image.decode_png(tf.read_file(test_input_queue[1]), channels=1)
-                self._test_labels = tf.image.convert_image_dtype(self._test_labels, dtype=tf.float32)
-                if self._resize_images:
-                    self._test_labels = tf.image.resize_images(self._test_labels,
-                                                               [self._image_height, self._image_width])
-                    self._test_labels = tf.reduce_mean(self._test_labels, axis=2)
-            if self._validation:
-                self._val_labels = tf.image.decode_png(tf.read_file(val_input_queue[1]),
-                                                       channels=1)
-                self._val_labels = tf.image.convert_image_dtype(self._val_labels, dtype=tf.float32)
-                if self._resize_images:
-                    self._val_labels = tf.image.resize_images(self._val_labels,
-                                                              [self._image_height, self._image_width])
-                    self._val_labels = tf.reduce_mean(self._val_labels, axis=2)
-
-            # Apply pre-processing for training and testing images
-            if image_type is 'jpg':
-                self._train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
-                                                          channels=self._image_depth)
-                if self._testing:
-                    self._test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
-                                                             channels=self._image_depth)
-                if self._validation:
-                    self._val_images = tf.image.decode_jpeg(tf.read_file(val_input_queue[0]),
-                                                            channels=self._image_depth)
-            else:
-                self._train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
-                                                         channels=self._image_depth)
-                if self._testing:
-                    self._test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]),
-                                                            channels=self._image_depth)
-                if self._validation:
-                    self._val_images = tf.image.decode_png(tf.read_file(val_input_queue[0]),
+    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
+        self._train_images = self._parse_preprocess_images(tf.read_file(train_input_queue[0]),
                                                            channels=self._image_depth)
+        self._test_images = self._parse_preprocess_images(tf.read_file(test_input_queue[0]),
+                                                          channels=self._image_depth)
+        self._val_images = self._parse_preprocess_images(tf.read_file(val_input_queue[0]),
+                                                         channels=self._image_depth)
 
-            # Convert images to float and normalize to 1.0
-            self._train_images = tf.image.convert_image_dtype(self._train_images, dtype=tf.float32)
-            if self._testing:
-                self._test_images = tf.image.convert_image_dtype(self._test_images, dtype=tf.float32)
-            if self._validation:
-                self._val_images = tf.image.convert_image_dtype(self._val_images, dtype=tf.float32)
+        # Apply pre-processing to the image labels (which are images for semantic segmentation), then convert them
+        # back to binary masks if they were resized
+        self._train_labels = self._parse_preprocess_images(tf.read_file(train_input_queue[1]), channels=1)
+        self._test_labels = self._parse_preprocess_images(tf.read_file(train_input_queue[1]), channels=1)
+        self._val_labels = self._parse_preprocess_images(tf.read_file(train_input_queue[1]), channels=1)
+        if self._resize_images:
+            self._train_labels = tf.reduce_mean(self._train_labels, axis=2)
+            self._test_labels = tf.reduce_mean(self._test_labels, axis=2)
+            self._val_labels = tf.reduce_mean(self._val_labels, axis=2)
 
-            if self._resize_images:
-                self._train_images = tf.image.resize_images(self._train_images,
-                                                            [self._image_height, self._image_width])
-                if self._testing:
-                    self._test_images = tf.image.resize_images(self._test_images,
-                                                               [self._image_height, self._image_width])
-                if self._validation:
-                    self._val_images = tf.image.resize_images(self._val_images,
-                                                              [self._image_height, self._image_width])
-
-            # Apply the various augmentations to the images
-            if self._augmentation_crop:
-                # Apply random crops to images
-                self._image_height = int(self._image_height * self._crop_amount)
-                self._image_width = int(self._image_width * self._crop_amount)
-
-                self._train_images = tf.random_crop(self._train_images, [self._image_height, self._image_width, 3])
-                if self._testing:
-                    self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                               self._image_width)
-                if self._validation:
-                    self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                              self._image_width)
-
-            if self._crop_or_pad_images:
-                # Apply padding or cropping to deal with images of different sizes. For semantic segmentation, the
-                # corresponding mask would also need to be cropped/padded
-                self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images,
-                                                                            self._image_height,
-                                                                            self._image_width)
-                self._train_labels = tf.image.resize_image_with_crop_or_pad(self._train_labels,
-                                                                            self._image_height,
-                                                                            self._image_width)
-                if self._testing:
-                    self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images,
-                                                                               self._image_height,
-                                                                               self._image_width)
-                    self._test_labels = tf.image.resize_image_with_crop_or_pad(self._test_labels,
-                                                                               self._image_height,
-                                                                               self._image_width)
-                if self._validation:
-                    self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images,
-                                                                              self._image_height,
-                                                                              self._image_width)
-                    self._val_labels = tf.image.resize_image_with_crop_or_pad(self._val_labels,
-                                                                              self._image_height,
-                                                                              self._image_width)
-
-            if self._augmentation_flip_horizontal:
-                # Apply random horizontal flips
-                self._train_images = tf.image.random_flip_left_right(self._train_images)
-
-            if self._augmentation_flip_vertical:
-                # Apply random vertical flips
-                self._train_images = tf.image.random_flip_up_down(self._train_images)
-
-            if self._augmentation_contrast:
-                # Apply random contrast and brightness adjustments
-                self._train_images = tf.image.random_brightness(self._train_images, max_delta=63)
-                self._train_images = tf.image.random_contrast(self._train_images, lower=0.2, upper=1.8)
-
-            if self._augmentation_rotate:
-                # Apply random rotations, then optionally crop out black borders and resize
-                angle = tf.random_uniform([], maxval=2*math.pi)
-                self._train_images = tf.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
-                if self._rotate_crop_borders:
-                    # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
-                    # consistent scale across the images
-                    small_crop_fraction = self.__smallest_crop_fraction()
-                    self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
-                    self._train_images = tf.image.resize_images(self._train_images,
-                                                                [self._image_height, self._image_width])
-
-            # mean-center all inputs
-            self._train_images = tf.image.per_image_standardization(self._train_images)
-            if self._testing:
-                self._test_images = tf.image.per_image_standardization(self._test_images)
-            if self._validation:
-                self._val_images = tf.image.per_image_standardization(self._val_images)
-
-            # define the shape of the image tensors so it matches the shape of the images
-            self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            if self._testing:
-                self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+    def _parse_crop_or_pad(self):
+        self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,
+                                                                    self._image_width)
+        self._train_labels = tf.image.resize_image_with_crop_or_pad(self._train_labels, self._image_height,
+                                                                    self._image_width)
+        if self._testing:
+            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
+                                                                       self._image_width)
+            self._test_labels = tf.image.resize_image_with_crop_or_pad(self._test_labels, self._image_height,
+                                                                       self._image_width)
+        if self._validation:
+            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
+                                                                      self._image_width)
+            self._val_labels = tf.image.resize_image_with_crop_or_pad(self._val_labels, self._image_height,
+                                                                      self._image_width)

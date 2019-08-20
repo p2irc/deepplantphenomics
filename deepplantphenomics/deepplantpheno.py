@@ -1,15 +1,15 @@
-from . import layers
-from . import loaders
-from . import definitions
+from . import layers, loaders, definitions
 import numpy as np
 import tensorflow as tf
 import os
 import json
 import datetime
+import time
 import warnings
 import copy
-from abc import ABC, abstractmethod
 import math
+from abc import ABC, abstractmethod
+from tqdm import tqdm
 
 
 class DPPModel(ABC):
@@ -510,8 +510,8 @@ class DPPModel(ABC):
         if self._raw_test_labels is not None:
             # currently think of moderation features as None so they are passed in hard-coded
             self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                 self._raw_test_image_files, self._raw_test_labels, None,
-                                 self._raw_val_image_files, self._raw_val_labels, None)
+                                self._raw_test_image_files, self._raw_test_labels, None,
+                                self._raw_val_image_files, self._raw_val_labels, None)
         elif self._images_only:
             self._parse_images(self._raw_image_files)
         else:
@@ -526,8 +526,28 @@ class DPPModel(ABC):
                                            self._split_labels)
             # Parse the images and set the appropriate environment variables
             self._parse_dataset(train_images, train_labels, train_mf,
-                                 test_images, test_labels, test_mf,
-                                 val_images, val_labels, val_mf)
+                                test_images, test_labels, test_mf,
+                                val_images, val_labels, val_mf)
+
+    def _graph_extract_patch(self, x, offsets=None):
+        """
+        Adds graph components to extract patches from input images
+        :param x: Tensor, an image to extract a patch from
+        :param offsets: An optional list of (height, width) tuples for where to extract patches from in the images. When
+        this isn't given, offsets will be generated at random and returned
+        :return: The extracted image patches and the offsets used to get them
+        """
+        if not offsets:
+            offset_h = np.random.randint(self._patch_height // 2,
+                                         self._image_height - (self._patch_height // 2),
+                                         self._batch_size)
+            offset_w = np.random.randint(self._patch_width // 2,
+                                         self._image_width - (self._patch_width // 2),
+                                         self._batch_size)
+            offsets = [x for x in zip(offset_h, offset_w)]
+        x = tf.image.extract_glimpse(x, [self._patch_height, self._patch_width], offsets,
+                                     normalized=False, centered=False)
+        return x, offsets
 
     def _graph_add_optimizer(self):
         """
@@ -620,7 +640,45 @@ class DPPModel(ABC):
         """
         pass
 
-    @abstractmethod
+    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer):
+        """
+        Calculates and reports mid-training losses and other statistics, both through the console and through writing
+        Tensorboard log files
+        :param batch_num: The batch number for the mid-training results
+        :param start_time: The start time to use for calculating the processing rate
+        :param tqdm_range: A `tqdm` object for displaying training results to the console
+        :param train_writer: A `tf.summary.FileWriter` for writing Tensorboard log files
+        """
+        elapsed = time.time() - start_time
+
+        if self._tb_dir is not None:
+            summary = self._session.run(self._graph_ops['merged'])
+            train_writer.add_summary(summary, batch_num)
+
+        if self._validation:
+            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'], self._graph_ops['val_cost']])
+            samples_per_sec = self._batch_size / elapsed
+
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, Validation Loss: {}, samples/sec: {:.2f}"
+            tqdm_range.set_description(
+                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                batch_num,
+                                batch_num / (self._total_training_samples / self._batch_size),
+                                loss,
+                                epoch_test_loss,
+                                samples_per_sec))
+        else:
+            loss = self._session.run([self._graph_ops['cost']])
+            samples_per_sec = self._batch_size / elapsed
+
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
+            tqdm_range.set_description(
+                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                batch_num,
+                                batch_num / (self._total_training_samples / self._batch_size),
+                                loss,
+                                samples_per_sec))
+
     def begin_training(self, return_test_loss=False):
         """
         Initialize the network and either run training to the specified max epoch, or load trainable variables. The
@@ -628,7 +686,65 @@ class DPPModel(ABC):
         session is shut down. Before calling this function, the images and labels should be loaded, as well as all
         relevant hyper-parameters.
         """
-        pass
+        with self._graph.as_default():
+            self._assemble_graph()
+            print('assembled the graph')
+
+            # Either load the network parameters from a checkpoint file or start training
+            if self._load_from_saved is not False:
+                self.load_state()
+                self._initialize_queue_runners()
+                self.compute_full_test_accuracy()
+                self.shut_down()
+            else:
+                if self._tb_dir is not None:
+                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
+
+                self._log('Initializing parameters...')
+                init_op = tf.global_variables_initializer()
+                self._session.run(init_op)
+                self._initialize_queue_runners()
+
+                self._log('Beginning training...')
+                self._set_learning_rate()
+
+                # Needed for batch norm
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                tqdm_range = tqdm(range(self._maximum_training_batches))
+                for i in tqdm_range:
+                    start_time = time.time()
+
+                    self._global_epoch = i
+                    self._session.run(self._graph_ops['optimizer'])
+                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
+                        self._training_batch_results(i, start_time, tqdm_range, train_writer)
+
+                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
+                            self.save_state(self._save_dir)
+                    else:
+                        loss = self._session.run([self._graph_ops['cost']])
+
+                    if loss == 0.0:
+                        self._log('Stopping due to zero loss')
+                        break
+
+                    if i == self._maximum_training_batches - 1:
+                        self._log('Stopping due to maximum epochs')
+
+                self.save_state(self._save_dir)
+
+                final_test_loss = None
+                if self._testing:
+                    final_test_loss = self.compute_full_test_accuracy()
+
+                self.shut_down()
+
+                if return_test_loss:
+                    return final_test_loss
+                else:
+                    return
 
     def begin_training_with_hyperparameter_search(self, l2_reg_limits=None, lr_limits=None, num_steps=3):
         """
@@ -905,13 +1021,15 @@ class DPPModel(ABC):
         if len(self._layers) < 1:
             raise RuntimeError("A convolutional layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
-        try:  # try to iterate through filter_dimension, checking it has 4 ints
+        try:
+            # try to iterate through filter_dimension, checking it has 4 ints
+            idx = 0
             for idx, dim in enumerate(filter_dimension):
                 if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
                     raise TypeError()
             if idx != 3:
                 raise TypeError()
-        except:
+        except Exception:
             raise TypeError("filter_dimension must be a list or array of 4 ints")
         if not isinstance(stride_length, int):
             raise TypeError("stride_length must be an int")
@@ -920,7 +1038,7 @@ class DPPModel(ABC):
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
         activation_function = activation_function.lower()
-        if not activation_function in self._supported_activation_functions:
+        if activation_function not in self._supported_activation_functions:
             raise ValueError(
                 "'" + activation_function + "' is not one of the currently supported activation functions." +
                 " Choose one of: " +
@@ -1163,13 +1281,15 @@ class DPPModel(ABC):
                                "Add an input layer with DPPModel.add_input_layer() first.")
 
         def check_filter_dimension(filter_dimension):
-            try:  # try to iterate through filter_dimension, checking it has 4 ints
+            try:
+                # try to iterate through filter_dimension, checking it has 4 ints
+                idx = 0
                 for idx, dim in enumerate(filter_dimension):
                     if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
                         raise TypeError()
                 if idx != 3:
                     raise TypeError()
-            except:
+            except Exception:
                 raise TypeError("filter_dimension {} is not a list or array of 4 ints".format(filter_dimension))
 
         check_filter_dimension(filter_dimension_1)
@@ -1188,7 +1308,7 @@ class DPPModel(ABC):
                                           filter_dimension_2)
 
         self._log('Filter dimensions: {0}, {1} Outputs: {2}'.format(filter_dimension_1, filter_dimension_2,
-                                                                     block.output_size))
+                                                                    block.output_size))
 
         self._layers.append(block)
 
@@ -1813,38 +1933,13 @@ class DPPModel(ABC):
             self._all_labels.append(boxes)
 
     def _parse_dataset(self, train_images, train_labels, train_mf,
-                        test_images, test_labels, test_mf,
-                        val_images, val_labels, val_mf,
-                        image_type='png'):
+                       test_images, test_labels, test_mf,
+                       val_images, val_labels, val_mf):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self._graph.as_default():
 
-            # Try to get the number of samples the normal way
-            if isinstance(train_images, tf.Tensor):
-                self._total_training_samples = train_images.get_shape().as_list()[0]
-                if self._testing:
-                    self._total_testing_samples = test_images.get_shape().as_list()[0]
-                if self._validation:
-                    self._total_validation_samples = val_images.get_shape().as_list()[0]
-            elif isinstance(train_images[0], tf.Tensor):
-                self._total_training_samples = train_images[0].get_shape().as_list()[0]
-            else:
-                self._total_training_samples = len(train_images)
-                if self._testing:
-                    self._total_testing_samples = len(test_images)
-                if self._validation:
-                    self._total_validation_samples = len(val_images)
-
-            # Most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
-            # will have None for its size, so the above won't work and we manually calculate it here
-            if self._total_training_samples is None:
-                self._total_training_samples = int(self._total_raw_samples)
-                if self._testing:
-                    self._total_testing_samples = int(self._total_raw_samples * self._test_split)
-                    self._total_training_samples = self._total_training_samples - self._total_testing_samples
-                if self._validation:
-                    self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
-                    self._total_training_samples = self._total_training_samples - self._total_validation_samples
+            # Get the number of training, testing, and validation samples
+            self._parse_get_sample_counts(test_images, train_images, val_images)
 
             # Logging verbosity
             self._log('Total training samples is {0}'.format(self._total_training_samples))
@@ -1855,11 +1950,9 @@ class DPPModel(ABC):
             if train_mf is not None:
                 train_moderation_queue = tf.train.slice_input_producer([train_mf], shuffle=False)
                 self._train_moderation_features = tf.cast(train_moderation_queue[0], tf.float32)
-
             if test_mf is not None:
                 test_moderation_queue = tf.train.slice_input_producer([test_mf], shuffle=False)
                 self._test_moderation_features = tf.cast(test_moderation_queue[0], tf.float32)
-
             if val_mf is not None:
                 val_moderation_queue = tf.train.slice_input_producer([val_mf], shuffle=False)
                 self._val_moderation_features = tf.cast(val_moderation_queue[0], tf.float32)
@@ -1881,115 +1974,43 @@ class DPPModel(ABC):
             if self._validation:
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
-            self._train_labels = train_input_queue[1]
-            if self._testing:
-                self._test_labels = test_input_queue[1]
-            if self._validation:
-                self._val_labels = val_input_queue[1]
-
-            # Apply pre-processing for training and testing images
-            if image_type is 'jpg':
-                self._train_images = tf.image.decode_jpeg(tf.read_file(train_input_queue[0]),
-                                                          channels=self._image_depth)
-                if self._testing:
-                    self._test_images = tf.image.decode_jpeg(tf.read_file(test_input_queue[0]),
-                                                             channels=self._image_depth)
-                if self._validation:
-                    self._val_images = tf.image.decode_jpeg(tf.read_file(val_input_queue[0]),
-                                                            channels=self._image_depth)
-            else:
-                self._train_images = tf.image.decode_png(tf.read_file(train_input_queue[0]),
-                                                         channels=self._image_depth)
-                if self._testing:
-                    self._test_images = tf.image.decode_png(tf.read_file(test_input_queue[0]),
-                                                            channels=self._image_depth)
-                if self._validation:
-                    self._val_images = tf.image.decode_png(tf.read_file(val_input_queue[0]),
-                                                           channels=self._image_depth)
-
-            # Convert images to float and normalize to 1.0
-            self._train_images = tf.image.convert_image_dtype(self._train_images, dtype=tf.float32)
-            if self._testing:
-                self._test_images = tf.image.convert_image_dtype(self._test_images, dtype=tf.float32)
-            if self._validation:
-                self._val_images = tf.image.convert_image_dtype(self._val_images, dtype=tf.float32)
-
-            if self._resize_images:
-                self._train_images = tf.image.resize_images(self._train_images,
-                                                            [self._image_height, self._image_width])
-                if self._testing:
-                    self._test_images = tf.image.resize_images(self._test_images,
-                                                               [self._image_height, self._image_width])
-                if self._validation:
-                    self._val_images = tf.image.resize_images(self._val_images,
-                                                              [self._image_height, self._image_width])
+            # Apply pre-processing for training, testing, and validation images and labels
+            self._parse_apply_preprocessing(test_input_queue, train_input_queue, val_input_queue)
 
             # Apply the various augmentations to the images
-            if self._augmentation_crop:
-                # Apply random crops to images
-                self._image_height = int(self._image_height * self._crop_amount)
-                self._image_width = int(self._image_width * self._crop_amount)
+            if self._augmentation_crop:  # Apply random crops to images
+                self._parse_crop_augment()
 
-                self._train_images = tf.random_crop(self._train_images, [self._image_height, self._image_width, 3])
-                if self._testing:
-                    self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                               self._image_width)
-                if self._validation:
-                    self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                              self._image_width)
+            if self._crop_or_pad_images:  # Apply padding or cropping to deal with images of different sizes
+                self._parse_crop_or_pad()
 
-            if self._crop_or_pad_images:
-                # Apply padding or cropping to deal with images of different sizes
-                self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images,
-                                                                            self._image_height,
-                                                                            self._image_width)
-                if self._testing:
-                    self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images,
-                                                                               self._image_height,
-                                                                               self._image_width)
-                if self._validation:
-                    self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images,
-                                                                              self._image_height,
-                                                                              self._image_width)
-
-            if self._augmentation_flip_horizontal:
-                # Apply random horizontal flips
+            if self._augmentation_flip_horizontal:  # Apply random horizontal flips
                 self._train_images = tf.image.random_flip_left_right(self._train_images)
 
-            if self._augmentation_flip_vertical:
-                # Apply random vertical flips
+            if self._augmentation_flip_vertical:  # Apply random vertical flips
                 self._train_images = tf.image.random_flip_up_down(self._train_images)
 
-            if self._augmentation_contrast:
-                # Apply random contrast and brightness adjustments
+            if self._augmentation_contrast:  # Apply random contrast and brightness adjustments
                 self._train_images = tf.image.random_brightness(self._train_images, max_delta=63)
                 self._train_images = tf.image.random_contrast(self._train_images, lower=0.2, upper=1.8)
 
-            if self._augmentation_rotate:
-                # Apply random rotations, then optionally crop out black borders and resize
-                angle = tf.random_uniform([], maxval=2*math.pi)
-                self._train_images = tf.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
-                if self._rotate_crop_borders:
-                    # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
-                    # consistent scale across the images
-                    small_crop_fraction = self._smallest_crop_fraction()
-                    self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
-                    self._train_images = tf.image.resize_images(self._train_images,
-                                                                [self._image_height, self._image_width])
+            if self._augmentation_rotate:  # Apply random rotations, then optionally crop out black borders and resize
+                self._parse_rotation_augment()
 
-            # mean-center all inputs
+            # Mean-center all inputs
             self._train_images = tf.image.per_image_standardization(self._train_images)
             if self._testing:
                 self._test_images = tf.image.per_image_standardization(self._test_images)
             if self._validation:
                 self._val_images = tf.image.per_image_standardization(self._val_images)
 
-            # define the shape of the image tensors so it matches the shape of the images
+            # Manually set the shape of the image tensors so it matches the shape of the images
             self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
             if self._testing:
                 self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
             if self._validation:
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+
 
     def _parse_images(self, images, image_type='png', standadization=True):
         """Takes some images as input, creates producer of processed images internally to this instance"""
@@ -1999,18 +2020,8 @@ class DPPModel(ABC):
             reader = tf.WholeFileReader()
             key, file = reader.read(input_queue)
 
-            # pre-processing for all images
-
-            if image_type is 'jpg':
-                input_images = tf.image.decode_jpeg(file, channels=self._image_depth)
-            else:
-                input_images = tf.image.decode_png(file, channels=self._image_depth)
-
-            # convert images to float and normalize to 1.0
-            input_images = tf.image.convert_image_dtype(input_images, dtype=tf.float32)
-
-            if self._resize_images is True:
-                input_images = tf.image.resize_images(input_images, [self._image_height, self._image_width])
+            # Pre-processing for all images
+            input_images = self._parse_preprocess_images(file, channels=self._image_depth)
 
             if self._augmentation_crop is True:
                 self._image_height = int(self._image_height * self._crop_amount)
@@ -2018,18 +2029,121 @@ class DPPModel(ABC):
                 input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
                                                                       self._image_width)
 
-            if self._crop_or_pad_images is True:
-                # pad or crop to deal with images of different sizes
+            if self._crop_or_pad_images is True:  # Pad or crop to deal with images of different sizes
                 input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
                                                                       self._image_width)
             if standadization:
                 # mean-center all inputs
                 input_images = tf.image.per_image_standardization(input_images)
 
-            # define the shape of the image tensors so it matches the shape of the images
+            # Manually set the shape of the image tensors so it matches the shape of the images
             input_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
             self._all_images = input_images
+
+    def _parse_get_sample_counts(self, test_images, train_images, val_images):
+        """
+        Determines the number of training, testing, and validation samples in a dataset while parsing it
+        :param test_images: A tensor or list of tensors with the training images
+        :param train_images: A tensor or list of tensors with the testing images
+        :param val_images: A tensor or list of tensors with the validation images
+        """
+        # Try to get the number of samples the normal way
+        if isinstance(train_images, tf.Tensor):
+            self._total_training_samples = train_images.get_shape().as_list()[0]
+            if self._testing:
+                self._total_testing_samples = test_images.get_shape().as_list()[0]
+            if self._validation:
+                self._total_validation_samples = val_images.get_shape().as_list()[0]
+        elif isinstance(train_images[0], tf.Tensor):
+            self._total_training_samples = train_images[0].get_shape().as_list()[0]
+        else:
+            self._total_training_samples = len(train_images)
+            if self._testing:
+                self._total_testing_samples = len(test_images)
+            if self._validation:
+                self._total_validation_samples = len(val_images)
+
+        # Most often train/test/val_images will be a tensor with shape (?,), from tf.dynamic_partition, which
+        # will have None for its size, so the above won't work and we manually calculate it here
+        if self._total_training_samples is None:
+            self._total_training_samples = int(self._total_raw_samples)
+            if self._testing:
+                self._total_testing_samples = int(self._total_raw_samples * self._test_split)
+                self._total_training_samples = self._total_training_samples - self._total_testing_samples
+            if self._validation:
+                self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
+                self._total_training_samples = self._total_training_samples - self._total_validation_samples
+
+    def _parse_preprocess_images(self, images, channels=1):
+        """
+        Preprocess input images during dataset parsing. This involves decoding the images, converting them to 0-1 float
+        images, and resizing them if necessary.
+        :param images: Strings with the names of the images to preprocess
+        :param channels: The number of channels in the image. Defaults to 1
+        :return: The preprocessed versions of the images
+        """
+        images = tf.io.decode_image(images, channels=channels)
+        images = tf.image.convert_image_dtype(images, dtype=tf.float32)
+        if self._resize_images:
+            images = tf.image.resize_images(images, [self._image_height, self._image_width])
+        return images
+
+    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
+        """
+        Applies input preprocessing to images and labels from queues
+        :param test_input_queue: An input queue for training images and labels
+        :param train_input_queue: An input queue for testing images and labels
+        :param val_input_queue: An input queue for validation images and labels
+        """
+        self._train_images = self._parse_preprocess_images(tf.read_file(train_input_queue[0]),
+                                                           channels=self._image_depth)
+        self._test_images = self._parse_preprocess_images(tf.read_file(test_input_queue[0]),
+                                                          channels=self._image_depth)
+        self._val_images = self._parse_preprocess_images(tf.read_file(val_input_queue[0]),
+                                                         channels=self._image_depth)
+
+        self._train_labels = train_input_queue[1]
+        if self._testing:
+            self._test_labels = test_input_queue[1]
+        if self._validation:
+            self._val_labels = val_input_queue[1]
+
+    def _parse_crop_augment(self):
+        """Applies random cropping augmentation to input images during dataset parsing"""
+        self._image_height = int(self._image_height * self._crop_amount)
+        self._image_width = int(self._image_width * self._crop_amount)
+
+        self._train_images = tf.random_crop(self._train_images, [self._image_height, self._image_width, 3])
+        if self._testing:
+            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
+                                                                       self._image_width)
+        if self._validation:
+            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
+                                                                      self._image_width)
+
+    def _parse_crop_or_pad(self):
+        """Applies a crop/pad resizing to input images to standardize their size during dataset parsing"""
+        self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,
+                                                                    self._image_width)
+        if self._testing:
+            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
+                                                                       self._image_width)
+        if self._validation:
+            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
+                                                                      self._image_width)
+
+    def _parse_rotation_augment(self):
+        """Applies random rotation augmentation to input images during dataset parsing"""
+        angle = tf.random_uniform([], maxval=2 * math.pi)
+        self._train_images = tf.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
+        if self._rotate_crop_borders:
+            # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
+            # consistent scale across the images
+            small_crop_fraction = self._smallest_crop_fraction()
+            self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
+            self._train_images = tf.image.resize_images(self._train_images,
+                                                        [self._image_height, self._image_width])
 
     def _smallest_crop_fraction(self):
         """
@@ -2042,7 +2156,7 @@ class DPPModel(ABC):
 
         # Regardless of the aspect ratio, the smallest crop fraction always corresponds to the required crop for a 45
         # degree or pi/4 radian rotation
-        angle = math.pi/4
+        angle = math.pi / 4
 
         # Determine which sides of the original image are the shorter and longer sides
         width_is_longer = self._image_width >= self._image_height

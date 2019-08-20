@@ -3,8 +3,6 @@ import numpy as np
 import tensorflow as tf
 import os
 import json
-import datetime
-import time
 import warnings
 import copy
 from collections.abc import Sequence
@@ -220,16 +218,16 @@ class ObjectDetectionModel(DPPModel):
             tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
                               collections=['custom_summaries'])
 
-    def __assemble_graph(self):
+    def _assemble_graph(self):
         with self._graph.as_default():
 
-            self.__log('Parsing dataset...')
+            self._log('Parsing dataset...')
             self._graph_parse_data()
 
-            self.__log('Creating layer parameters...')
-            self.__add_layers_to_graph()
+            self._log('Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            self.__log('Assembling graph...')
+            self._log('Assembling graph...')
 
             # Define batches
             if self._has_moderation:
@@ -361,105 +359,8 @@ class ObjectDetectionModel(DPPModel):
             # Epoch summaries for Tensorboard
             self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
-    def begin_training(self, return_test_loss=False):
-        with self._graph.as_default():
-            self.__assemble_graph()
-            print('assembled the graph')
-
-            # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
-                self.load_state()
-
-                self.__initialize_queue_runners()
-
-                self.compute_full_test_accuracy()
-
-                self.shut_down()
-            else:
-                if self._tb_dir is not None:
-                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
-
-                self.__log('Initializing parameters...')
-                init_op = tf.global_variables_initializer()
-                self._session.run(init_op)
-
-                self.__initialize_queue_runners()
-
-                self.__log('Beginning training...')
-
-                self.__set_learning_rate()
-
-                # Needed for batch norm
-                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
-
-                # for i in range(self._maximum_training_batches):
-                tqdm_range = tqdm(range(self._maximum_training_batches))
-                for i in tqdm_range:
-                    start_time = time.time()
-
-                    self._global_epoch = i
-                    self._session.run(self._graph_ops['optimizer'])
-                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        elapsed = time.time() - start_time
-
-                        if self._tb_dir is not None:
-                            summary = self._session.run(self._graph_ops['merged'])
-                            train_writer.add_summary(summary, i)
-                        if self._validation:
-                            loss, epoch_test_loss = self._session.run([self._graph_ops['cost'],
-                                                                       self._graph_ops['val_cost']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                samples_per_sec))
-
-                        else:
-                            loss = self._session.run([self._graph_ops['cost']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) - Loss: {}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                samples_per_sec))
-
-                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
-                            self.save_state(self._save_dir)
-                    else:
-                        loss = self._session.run([self._graph_ops['cost']])
-
-                    if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
-                        break
-
-                    if i == self._maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
-
-                self.save_state(self._save_dir)
-
-                final_test_loss = None
-                if self._testing:
-                    final_test_loss = self.compute_full_test_accuracy()
-
-                self.shut_down()
-
-                if return_test_loss:
-                    return final_test_loss
-                else:
-                    return
-
     def compute_full_test_accuracy(self):
-        self.__log('Computing total test accuracy/regression loss...')
+        self._log('Computing total test accuracy/regression loss...')
 
         with self._graph.as_default():
             num_test = self._total_raw_samples - self._total_training_samples
@@ -520,7 +421,7 @@ class ObjectDetectionModel(DPPModel):
 
             # Get and log the map
             yolo_map = self.__yolo_map(test_labels, test_preds)
-            self.__log('Yolo mAP: {}'.format(yolo_map))
+            self._log('Yolo mAP: {}'.format(yolo_map))
             return yolo_map.astype(np.float32)
 
     def __yolo_coord_convert(self, labels, preds):
@@ -739,7 +640,7 @@ class ObjectDetectionModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
@@ -754,7 +655,7 @@ class ObjectDetectionModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -813,7 +714,7 @@ class ObjectDetectionModel(DPPModel):
 
             # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
             images = x
-            self.__parse_images(images)
+            self._parse_images(images)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size,
                                     num_threads=self._num_threads)
@@ -830,7 +731,7 @@ class ObjectDetectionModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self.__initialize_queue_runners()
+            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -1010,22 +911,22 @@ class ObjectDetectionModel(DPPModel):
             if output_size is not None:
                 raise RuntimeError("output_size should be None for object detection")
 
-        self.__log('Adding output layer...')
+        self._log('Adding output layer...')
 
         filter_dimension = [1, 1,
-                            copy.deepcopy(self.__last_layer().output_size[3]),
+                            copy.deepcopy(self._last_layer().output_size[3]),
                             (5 * self._NUM_BOXES + self._NUM_CLASSES)]
 
         with self._graph.as_default():
             if self._problem_type is definitions.ProblemType.OBJECT_DETECTION:
                 layer = layers.convLayer('output',
-                                         copy.deepcopy(self.__last_layer().output_size),
+                                         copy.deepcopy(self._last_layer().output_size),
                                          filter_dimension,
                                          1,
                                          None,
                                          self._weight_initializer)
 
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
     def load_ippn_tray_dataset_from_directory(self, dirname):
@@ -1090,8 +991,8 @@ class ObjectDetectionModel(DPPModel):
             labels_with_one_hot.append(curr_img_labels)
         self._raw_labels = labels_with_one_hot
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         self._raw_image_files = images
         self._raw_labels = self._all_labels
@@ -1136,7 +1037,7 @@ class ObjectDetectionModel(DPPModel):
             self.__convert_labels_to_yolo_format()
             self._raw_labels = self._all_labels
             self._total_raw_samples = len(self._raw_image_files)
-            self.__log('Total raw patch examples is %d' % self._total_raw_samples)
+            self._log('Total raw patch examples is %d' % self._total_raw_samples)
 
     def __object_detection_patching_and_augmentation(self, patch_dir=None):
         # make the below a function
@@ -1166,7 +1067,7 @@ class ObjectDetectionModel(DPPModel):
 
         # first add images such that each grid cell has a plant in it
         # should add num_images*grid many images (e.g. 27(images)*49(7x7grid))
-        self.__log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
+        self._log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
         for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
             img_num += 1
             img = np.array(Image.open(img_name))
@@ -1256,11 +1157,11 @@ class ObjectDetectionModel(DPPModel):
                     if failed:
                         break
 
-            self.__log(str(img_num) + '/' + str(len(self._all_labels)))
-        self.__log('Completed baseline train patches set. Total images: ' + str(img_name_idx))
+            self._log(str(img_num) + '/' + str(len(self._all_labels)))
+        self._log('Completed baseline train patches set. Total images: ' + str(img_name_idx))
 
         # augmentation images: rotations, brightness, flips
-        self.__log('Beginning creating of augmentation patches')
+        self._log('Beginning creating of augmentation patches')
         for i in range(self._grid_h * self._grid_w):
             for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
                 img = np.array(Image.open(img_name))
@@ -1446,12 +1347,12 @@ class ObjectDetectionModel(DPPModel):
                                                                                 img_name_idx) + '.png',
                                                                             "plants": flip_boxes}
                                 img_name_idx += 1
-            self.__log(str(i + 1) + '/' + str(self._grid_w * self._grid_h))
-        self.__log('Completed augmentation set. Total images: ' + str(img_name_idx))
+            self._log(str(i + 1) + '/' + str(self._grid_w * self._grid_h))
+        self._log('Completed augmentation set. Total images: ' + str(img_name_idx))
 
         # rest are just random patches
         num_patches = img_name_idx // len(self._raw_image_files)
-        self.__log('Generating random patches')
+        self._log('Generating random patches')
         img_num = 0
         random_imgs = 0
         for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
@@ -1515,7 +1416,7 @@ class ObjectDetectionModel(DPPModel):
 
             # verbose
             random_imgs += 1
-            self.__log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
+            self._log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
 
         # save into json
         with open(json_dir_out + 'train_patches.json', 'w') as outfile:
