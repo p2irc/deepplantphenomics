@@ -125,6 +125,7 @@ class DPPModel(ABC):
     _num_layers_fc = 0
     _num_layers_dropout = 0
     _num_layers_batchnorm = 0
+    _num_blocks_paral_conv = 0
 
     # Network options
     _batch_size = 1
@@ -177,33 +178,33 @@ class DPPModel(ABC):
             self._tb_dir = "{0}/{1}".format(self._tb_dir, datetime.datetime.now().strftime("%d%B%Y%I:%M%p"))
 
         if initialize:
-            self.__log('TensorFlow loaded...')
+            self._log('TensorFlow loaded...')
 
-            self.__reset_graph()
-            self.__reset_session()
+            self._reset_graph()
+            self._reset_session()
 
-    def __log(self, message):
+    def _log(self, message):
         if self._debug:
             print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), message))
 
-    def __last_layer(self):
+    def _last_layer(self):
         return self._layers[-1]
 
-    def __last_layer_outputs_volume(self):
-        return isinstance(self.__last_layer().output_size, (list,))
+    def _last_layer_outputs_volume(self):
+        return isinstance(self._last_layer().output_size, (list,))
 
-    def __first_layer(self):
+    def _first_layer(self):
         return next(layer for layer in self._layers if
                     isinstance(layer, layers.convLayer) or isinstance(layer, layers.fullyConnectedLayer))
 
-    def __reset_session(self):
+    def _reset_session(self):
         self._session = tf.Session(graph=self._graph)
 
-    def __reset_graph(self):
+    def _reset_graph(self):
         self._graph = tf.Graph()
 
-    def __initialize_queue_runners(self):
-        self.__log('Initializing queue runners...')
+    def _initialize_queue_runners(self):
+        self._log('Initializing queue runners...')
         self._coord = tf.train.Coordinator()
         self._threads = tf.train.start_queue_runners(sess=self._session, coord=self._coord)
 
@@ -490,11 +491,11 @@ class DPPModel(ABC):
         self._patch_width = width
         self._with_patching = True
 
-    def __add_layers_to_graph(self):
+    def _add_layers_to_graph(self):
         """
         Adds the layers in self.layers to the computational graph.
 
-        Currently __assemble_graph is doing too many things, so this is needed as a separate function so that other
+        Currently _assemble_graph is doing too many things, so this is needed as a separate function so that other
         functions such as load_state can add layers to the graph without performing everything else in assemble_graph
         """
         for layer in self._layers:
@@ -508,11 +509,11 @@ class DPPModel(ABC):
         """
         if self._raw_test_labels is not None:
             # currently think of moderation features as None so they are passed in hard-coded
-            self.__parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                 self._raw_test_image_files, self._raw_test_labels, None,
-                                 self._raw_val_image_files, self._raw_val_labels, None)
+            self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                self._raw_test_image_files, self._raw_test_labels, None,
+                                self._raw_val_image_files, self._raw_val_labels, None)
         elif self._images_only:
-            self.__parse_images(self._raw_image_files)
+            self._parse_images(self._raw_image_files)
         else:
             # Split the data into training, validation, and testing sets. If there is no validation set or no moderation
             # features being used they will be returned as 0 (for validation) or None (for moderation features)
@@ -524,9 +525,9 @@ class DPPModel(ABC):
                                            self._training_augmentation_images, self._training_augmentation_labels,
                                            self._split_labels)
             # Parse the images and set the appropriate environment variables
-            self.__parse_dataset(train_images, train_labels, train_mf,
-                                 test_images, test_labels, test_mf,
-                                 val_images, val_labels, val_mf)
+            self._parse_dataset(train_images, train_labels, train_mf,
+                                test_images, test_labels, test_mf,
+                                val_images, val_labels, val_mf)
 
     def _graph_extract_patch(self, x, offsets=None):
         """
@@ -556,19 +557,19 @@ class DPPModel(ABC):
         # Identify which optimizer we are using
         if self._optimizer == 'adagrad':
             self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
-            self.__log('Using Adagrad optimizer')
+            self._log('Using Adagrad optimizer')
         elif self._optimizer == 'adadelta':
             self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-            self.__log('Using adadelta optimizer')
+            self._log('Using adadelta optimizer')
         elif self._optimizer == 'sgd':
             self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
-            self.__log('Using SGD optimizer')
+            self._log('Using SGD optimizer')
         elif self._optimizer == 'adam':
             self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
-            self.__log('Using Adam optimizer')
+            self._log('Using Adam optimizer')
         elif self._optimizer == 'sgd_momentum':
             self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
-            self.__log('Using SGD with momentum optimizer')
+            self._log('Using SGD with momentum optimizer')
         else:
             warnings.warn('Unrecognized optimizer requested')
             exit()
@@ -591,13 +592,13 @@ class DPPModel(ABC):
         :param global_grad_norm: ...
         """
         if self._tb_dir is not None:
-            self.__log('Creating Tensorboard summaries...')
+            self._log('Creating Tensorboard summaries...')
 
             # Summaries for any problem type
             tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
             tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
             tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-            filter_summary = self.__get_weights_as_image(self.__first_layer().weights)
+            filter_summary = self._get_weights_as_image(self._first_layer().weights)
             tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
 
             # Summaries for each layer
@@ -629,7 +630,7 @@ class DPPModel(ABC):
             self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     @abstractmethod
-    def __assemble_graph(self):
+    def _assemble_graph(self):
         """
         Constructs the Tensorflow graph that defines the network. This includes splitting the input data into
         train/validation/test partitions, parsing it into Tensors, performing the forward pass and optimization steps,
@@ -686,26 +687,26 @@ class DPPModel(ABC):
         relevant hyper-parameters.
         """
         with self._graph.as_default():
-            self.__assemble_graph()
+            self._assemble_graph()
             print('assembled the graph')
 
             # Either load the network parameters from a checkpoint file or start training
             if self._load_from_saved is not False:
                 self.load_state()
-                self.__initialize_queue_runners()
+                self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
                 self.shut_down()
             else:
                 if self._tb_dir is not None:
                     train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
 
-                self.__log('Initializing parameters...')
+                self._log('Initializing parameters...')
                 init_op = tf.global_variables_initializer()
                 self._session.run(init_op)
-                self.__initialize_queue_runners()
+                self._initialize_queue_runners()
 
-                self.__log('Beginning training...')
-                self.__set_learning_rate()
+                self._log('Beginning training...')
+                self._set_learning_rate()
 
                 # Needed for batch norm
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -726,11 +727,11 @@ class DPPModel(ABC):
                         loss = self._session.run([self._graph_ops['cost']])
 
                     if loss == 0.0:
-                        self.__log('Stopping due to zero loss')
+                        self._log('Stopping due to zero loss')
                         break
 
                     if i == self._maximum_training_batches - 1:
-                        self.__log('Stopping due to maximum epochs')
+                        self._log('Stopping due to maximum epochs')
 
                 self.save_state(self._save_dir)
 
@@ -779,11 +780,11 @@ class DPPModel(ABC):
 
         for i, current_l2 in enumerate(all_l2_reg):
             for j, current_lr in enumerate(all_lr):
-                self.__log('HYPERPARAMETER SEARCH: Doing l2reg=%f, lr=%f' % (current_l2, current_lr))
+                self._log('HYPERPARAMETER SEARCH: Doing l2reg=%f, lr=%f' % (current_l2, current_lr))
 
                 # Make a new graph, associate a new session with it.
-                self.__reset_graph()
-                self.__reset_session()
+                self._reset_graph()
+                self._reset_session()
 
                 self._learning_rate = current_lr
                 self._reg_coeff = current_l2
@@ -806,17 +807,17 @@ class DPPModel(ABC):
                     current_loss = self.begin_training(return_test_loss=True)
                     all_loss_results[i][j] = current_loss
                 except Exception as e:
-                    self.__log('HYPERPARAMETER SEARCH: Run threw an exception, this result will be NaN.')
+                    self._log('HYPERPARAMETER SEARCH: Run threw an exception, this result will be NaN.')
                     print("Exception message: "+str(e))
                     all_loss_results[i][j] = np.nan
 
-        self.__log('Finished hyperparameter search, failed runs will appear as NaN.')
-        self.__log('All l2 coef. tested:')
-        self.__log('\n'+np.array2string(np.transpose(all_l2_reg)))
-        self.__log('All learning rates tested:')
-        self.__log('\n'+np.array2string(all_lr))
-        self.__log('Loss/error grid:')
-        self.__log('\n'+np.array2string(all_loss_results, precision=4))
+        self._log('Finished hyperparameter search, failed runs will appear as NaN.')
+        self._log('All l2 coef. tested:')
+        self._log('\n'+np.array2string(np.transpose(all_l2_reg)))
+        self._log('All learning rates tested:')
+        self._log('\n'+np.array2string(all_lr))
+        self._log('Loss/error grid:')
+        self._log('\n'+np.array2string(all_loss_results, precision=4))
 
     @abstractmethod
     def compute_full_test_accuracy(self):
@@ -828,14 +829,14 @@ class DPPModel(ABC):
 
     def shut_down(self):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
-        self.__log('Shutdown requested, ending session...')
+        self._log('Shutdown requested, ending session...')
 
         self._coord.request_stop()
         self._coord.join(self._threads)
 
         self._session.close()
 
-    def __get_weights_as_image(self, kernel, size=None):
+    def _get_weights_as_image(self, kernel, size=None):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
         with self._graph.as_default():
             pad = 1
@@ -882,7 +883,7 @@ class DPPModel(ABC):
 
     def save_state(self, directory=None):
         """Save all trainable variables as a checkpoint in the current working path"""
-        self.__log('Saving parameters...')
+        self._log('Saving parameters...')
 
         if directory is None:
             state_dir = './saved_state'
@@ -904,10 +905,10 @@ class DPPModel(ABC):
         class constructor.
         """
         if not self._has_trained:
-            self.__add_layers_to_graph()
+            self._add_layers_to_graph()
 
         if self._load_from_saved is not False:
-            self.__log('Loading from checkpoint file...')
+            self._log('Loading from checkpoint file...')
 
             with self._graph.as_default():
                 saver = tf.train.Saver(tf.trainable_variables())
@@ -918,7 +919,7 @@ class DPPModel(ABC):
             warnings.warn('Tried to load state with no file given. Make sure load_from_saved is set in constructor.')
             exit()
 
-    def __set_learning_rate(self):
+    def _set_learning_rate(self):
         if self._lr_decay_factor is not None:
             # needs to be reexamined
             self._lr_decay_epochs = self._epochs_per_decay * (self._total_training_samples * (1 - self._test_split))
@@ -976,7 +977,7 @@ class DPPModel(ABC):
             raise RuntimeError("Trying to add an input layer to a model that already contains other layers. " +
                                " The input layer need to be the first layer added to the model.")
 
-        self.__log('Adding the input layer...')
+        self._log('Adding the input layer...')
 
         apply_crop = (self._augmentation_crop and self._all_images is None and self._train_images is None)
 
@@ -996,19 +997,20 @@ class DPPModel(ABC):
 
     def add_moderation_layer(self):
         """Add a moderation layer to the network"""
-        self.__log('Adding moderation layer...')
+        self._log('Adding moderation layer...')
 
-        reshape = self.__last_layer_outputs_volume()
+        reshape = self._last_layer_outputs_volume()
 
         feat_size = self._moderation_features_size
 
         with self._graph.as_default():
             layer = layers.moderationLayer(copy.deepcopy(
-                self.__last_layer().output_size), feat_size, reshape, self._batch_size)
+                self._last_layer().output_size), feat_size, reshape, self._batch_size)
 
         self._layers.append(layer)
 
-    def add_convolutional_layer(self, filter_dimension, stride_length, activation_function):
+    def add_convolutional_layer(self, filter_dimension, stride_length, activation_function,
+                                padding=None, batch_norm=False, epsilon=1e-5, decay=0.9):
         """
         Add a convolutional layer to the model.
 
@@ -1029,7 +1031,6 @@ class DPPModel(ABC):
                 raise TypeError()
         except Exception:
             raise TypeError("filter_dimension must be a list or array of 4 ints")
-
         if not isinstance(stride_length, int):
             raise TypeError("stride_length must be an int")
         if stride_length <= 0:
@@ -1038,23 +1039,44 @@ class DPPModel(ABC):
             raise TypeError("activation_function must be a str")
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
-            raise ValueError("'" + activation_function + "' is not one of the currently supported activation " +
-                             "functions. Choose one of: " +
-                             " ".join("'"+x+"'" for x in self._supported_activation_functions))
+            raise ValueError(
+                "'" + activation_function + "' is not one of the currently supported activation functions." +
+                " Choose one of: " +
+                " ".join("'" + x + "'" for x in self._supported_activation_functions))
+        if padding is not None:
+            if not isinstance(padding, int):
+                raise TypeError("padding must be an int")
+            if padding < 0:
+                raise ValueError("padding can't be negative")
+        if not isinstance(batch_norm, bool):
+            raise TypeError("batch_norm must be a boolean")
+        if not isinstance(epsilon, float):
+            raise TypeError("epsilon must be a float")
+        if epsilon < 0:
+            raise TypeError("epsilon can't be negative")
+        if not isinstance(decay, float):
+            raise TypeError("decay must be a float")
+        if decay < 0 or decay > 1:
+            raise TypeError("decay must be between 0 and 1")
 
         self._num_layers_conv += 1
         layer_name = 'conv%d' % self._num_layers_conv
-        self.__log('Adding convolutional layer %s...' % layer_name)
+        self._log('Adding convolutional layer %s...' % layer_name)
 
         with self._graph.as_default():
+            filter_dimension[2] = self._last_layer().output_size[-1]
             layer = layers.convLayer(layer_name,
-                                     copy.deepcopy(self.__last_layer().output_size),
+                                     copy.deepcopy(self._last_layer().output_size),
                                      filter_dimension,
                                      stride_length,
                                      activation_function,
-                                     self._weight_initializer)
+                                     self._weight_initializer,
+                                     padding,
+                                     batch_norm,
+                                     epsilon,
+                                     decay)
 
-        self.__log('Filter dimensions: {0} Outputs: {1}'.format(filter_dimension, layer.output_size))
+        self._log('Filter dimensions: {0} Outputs: {1}'.format(filter_dimension, layer.output_size))
 
         self._layers.append(layer)
 
@@ -1072,7 +1094,7 @@ class DPPModel(ABC):
         """
         self._num_layers_upsample += 1
         layer_name = 'upsample%d' % self._num_layers_upsample
-        self.__log('Adding upsampling layer %s...' % layer_name)
+        self._log('Adding upsampling layer %s...' % layer_name)
 
         if regularization_coefficient is None and self._reg_coeff is not None:
             regularization_coefficient = self._reg_coeff
@@ -1086,7 +1108,7 @@ class DPPModel(ABC):
         else:
             batch_multiplier = 1
 
-        last_layer_dims = copy.deepcopy(self.__last_layer().output_size)
+        last_layer_dims = copy.deepcopy(self._last_layer().output_size)
         with self._graph.as_default():
             layer = layers.upsampleLayer(layer_name,
                                          last_layer_dims,
@@ -1098,7 +1120,7 @@ class DPPModel(ABC):
                                          self._weight_initializer,
                                          regularization_coefficient)
 
-        self.__log('Filter dimensions: {0} Outputs: {1}'.format(layer.weights_shape, layer.output_size))
+        self._log('Filter dimensions: {0} Outputs: {1}'.format(layer.weights_shape, layer.output_size))
 
         self._layers.append(layer)
 
@@ -1131,13 +1153,13 @@ class DPPModel(ABC):
 
         self._num_layers_pool += 1
         layer_name = 'pool%d' % self._num_layers_pool
-        self.__log('Adding pooling layer %s...' % layer_name)
+        self._log('Adding pooling layer %s...' % layer_name)
 
         with self._graph.as_default():
             layer = layers.poolingLayer(copy.deepcopy(
-                self.__last_layer().output_size), kernel_size, stride_length, pooling_type)
+                self._last_layer().output_size), kernel_size, stride_length, pooling_type)
 
-        self.__log('Outputs: %s' % layer.output_size)
+        self._log('Outputs: %s' % layer.output_size)
 
         self._layers.append(layer)
 
@@ -1149,10 +1171,10 @@ class DPPModel(ABC):
 
         self._num_layers_norm += 1
         layer_name = 'norm%d' % self._num_layers_pool
-        self.__log('Adding pooling layer %s...' % layer_name)
+        self._log('Adding pooling layer %s...' % layer_name)
 
         with self._graph.as_default():
-            layer = layers.normLayer(copy.deepcopy(self.__last_layer().output_size))
+            layer = layers.normLayer(copy.deepcopy(self._last_layer().output_size))
 
         self._layers.append(layer)
 
@@ -1172,10 +1194,10 @@ class DPPModel(ABC):
 
         self._num_layers_dropout += 1
         layer_name = 'drop%d' % self._num_layers_dropout
-        self.__log('Adding dropout layer %s...' % layer_name)
+        self._log('Adding dropout layer %s...' % layer_name)
 
         with self._graph.as_default():
-            layer = layers.dropoutLayer(copy.deepcopy(self.__last_layer().output_size), p)
+            layer = layers.dropoutLayer(copy.deepcopy(self._last_layer().output_size), p)
 
         self._layers.append(layer)
 
@@ -1186,10 +1208,10 @@ class DPPModel(ABC):
 
         self._num_layers_batchnorm += 1
         layer_name = 'bn%d' % self._num_layers_batchnorm
-        self.__log('Adding batch norm layer %s...' % layer_name)
+        self._log('Adding batch norm layer %s...' % layer_name)
 
         with self._graph.as_default():
-            layer = layers.batchNormLayer(layer_name, copy.deepcopy(self.__last_layer().output_size))
+            layer = layers.batchNormLayer(layer_name, copy.deepcopy(self._last_layer().output_size))
 
         self._layers.append(layer)
 
@@ -1224,9 +1246,9 @@ class DPPModel(ABC):
 
         self._num_layers_fc += 1
         layer_name = 'fc%d' % self._num_layers_fc
-        self.__log('Adding fully connected layer %s...' % layer_name)
+        self._log('Adding fully connected layer %s...' % layer_name)
 
-        reshape = self.__last_layer_outputs_volume()
+        reshape = self._last_layer_outputs_volume()
 
         if regularization_coefficient is None and self._reg_coeff is not None:
             regularization_coefficient = self._reg_coeff
@@ -1235,7 +1257,7 @@ class DPPModel(ABC):
 
         with self._graph.as_default():
             layer = layers.fullyConnectedLayer(layer_name,
-                                               copy.deepcopy(self.__last_layer().output_size),
+                                               copy.deepcopy(self._last_layer().output_size),
                                                output_size,
                                                reshape,
                                                self._batch_size,
@@ -1243,9 +1265,52 @@ class DPPModel(ABC):
                                                self._weight_initializer,
                                                regularization_coefficient)
 
-        self.__log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 
         self._layers.append(layer)
+
+    def add_paral_conv_block(self, filter_dimension_1, filter_dimension_2):
+        """
+        Add a layer(block) consisting of two parallel convolutional layers to the network
+
+        :param filter_dimension_1: filter dimenstion for the first convolutional layer.
+        :param filter_dimension_2: filter dimenstion for the second convolutional layer.
+        """
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+
+        def check_filter_dimension(filter_dimension):
+            try:
+                # try to iterate through filter_dimension, checking it has 4 ints
+                idx = 0
+                for idx, dim in enumerate(filter_dimension):
+                    if not (isinstance(dim, int) or isinstance(dim, np.int64)):  # np.int64 numpy default int
+                        raise TypeError()
+                if idx != 3:
+                    raise TypeError()
+            except Exception:
+                raise TypeError("filter_dimension {} is not a list or array of 4 ints".format(filter_dimension))
+
+        check_filter_dimension(filter_dimension_1)
+        check_filter_dimension(filter_dimension_2)
+        filter_dimension_1[2] = self._last_layer().output_size[-1]
+        filter_dimension_2[2] = self._last_layer().output_size[-1]
+
+        self._num_blocks_paral_conv += 1
+        block_name = 'paral_conv_block%d' % self._num_blocks_paral_conv
+        self._log('Adding parallel convolutional block %s...' % block_name)
+
+        with self._graph.as_default():
+            block = layers.paralConvBlock(block_name,
+                                          copy.deepcopy(self._last_layer().output_size),
+                                          filter_dimension_1,
+                                          filter_dimension_2)
+
+        self._log('Filter dimensions: {0}, {1} Outputs: {2}'.format(filter_dimension_1, filter_dimension_2,
+                                                                    block.output_size))
+
+        self._layers.append(block)
 
     @abstractmethod
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
@@ -1517,8 +1582,8 @@ class DPPModel(ABC):
         self._total_raw_samples = len(image_files)
         self._total_classes = len(set(labels))
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Total classes is %d' % self._total_classes)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total classes is %d' % self._total_classes)
 
         self._raw_image_files = image_files
         self._raw_labels = labels
@@ -1549,8 +1614,8 @@ class DPPModel(ABC):
 
         self._total_raw_samples = len(images)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         self._raw_image_files = images
         self._raw_labels = self._all_labels
@@ -1573,8 +1638,8 @@ class DPPModel(ABC):
 
         self._total_raw_samples = len(image_files)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         self._raw_image_files = image_files
         self._raw_labels = labels
@@ -1597,9 +1662,9 @@ class DPPModel(ABC):
         labels = loaders.string_labels_to_sequential(labels)
         labels = tf.one_hot(labels, self._total_classes)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Total classes is %d' % self._total_classes)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total classes is %d' % self._total_classes)
+        self._log('Parsing dataset...')
 
         self._raw_image_files = image_files
         self._raw_labels = labels
@@ -1635,8 +1700,8 @@ class DPPModel(ABC):
         self._total_raw_samples = len(train_images) + len(test_images)
         self._test_split = len(test_images) / self._total_raw_samples
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Total classes is %d' % self._total_classes)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total classes is %d' % self._total_classes)
 
         self._raw_test_image_files = test_images
         self._raw_train_image_files = train_images
@@ -1682,9 +1747,9 @@ class DPPModel(ABC):
 
         self._total_raw_samples = len(image_files)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Total classes is %d' % self._total_classes)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total classes is %d' % self._total_classes)
+        self._log('Parsing dataset...')
 
         self._raw_image_files = image_files
         self._raw_labels = labels
@@ -1721,8 +1786,8 @@ class DPPModel(ABC):
 
         self._total_raw_samples = len(sorted_paths)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         images = sorted_paths
 
@@ -1741,8 +1806,8 @@ class DPPModel(ABC):
 
         self._total_raw_samples = len(image_files)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         images = image_files
 
@@ -1780,8 +1845,8 @@ class DPPModel(ABC):
 
         self._total_raw_samples = len(sorted_paths)
 
-        self.__log('Total raw examples is %d' % self._total_raw_samples)
-        self.__log('Parsing dataset...')
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Parsing dataset...')
 
         processed_images = sorted_paths
 
@@ -1867,7 +1932,7 @@ class DPPModel(ABC):
                 boxes.append([x_min, x_max, y_min, y_max])
             self._all_labels.append(boxes)
 
-    def __parse_dataset(self, train_images, train_labels, train_mf,
+    def _parse_dataset(self, train_images, train_labels, train_mf,
                         test_images, test_labels, test_mf,
                         val_images, val_labels, val_mf):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
@@ -1877,9 +1942,9 @@ class DPPModel(ABC):
             self._parse_get_sample_counts(test_images, train_images, val_images)
 
             # Logging verbosity
-            self.__log('Total training samples is {0}'.format(self._total_training_samples))
-            self.__log('Total validation samples is {0}'.format(self._total_validation_samples))
-            self.__log('Total testing samples is {0}'.format(self._total_testing_samples))
+            self._log('Total training samples is {0}'.format(self._total_training_samples))
+            self._log('Total validation samples is {0}'.format(self._total_validation_samples))
+            self._log('Total testing samples is {0}'.format(self._total_testing_samples))
 
             # Create moderation features queues
             if train_mf is not None:
@@ -1897,10 +1962,10 @@ class DPPModel(ABC):
             self._maximum_training_batches = int(self._maximum_training_batches * batches_per_epoch)
 
             if self._batch_size > self._total_training_samples:
-                self.__log('Less than one batch in training set, exiting now')
+                self._log('Less than one batch in training set, exiting now')
                 exit()
-            self.__log('Batches per epoch: {:f}'.format(batches_per_epoch))
-            self.__log('Running to {0} batches'.format(self._maximum_training_batches))
+            self._log('Batches per epoch: {:f}'.format(batches_per_epoch))
+            self._log('Running to {0} batches'.format(self._maximum_training_batches))
 
             # Create input queues
             train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
@@ -1946,7 +2011,7 @@ class DPPModel(ABC):
             if self._validation:
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
-    def __parse_images(self, images):
+    def _parse_images(self, images):
         """Takes some images as input, creates producer of processed images internally to this instance"""
         with self._graph.as_default():
             input_queue = tf.train.string_input_producer(images, shuffle=False)
@@ -2074,12 +2139,12 @@ class DPPModel(ABC):
         if self._rotate_crop_borders:
             # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
             # consistent scale across the images
-            small_crop_fraction = self.__smallest_crop_fraction()
+            small_crop_fraction = self._smallest_crop_fraction()
             self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
             self._train_images = tf.image.resize_images(self._train_images,
                                                         [self._image_height, self._image_width])
 
-    def __smallest_crop_fraction(self):
+    def _smallest_crop_fraction(self):
         """
         Determine the angle and crop fraction for rotated images that gives the maximum border-less crop area for a
         given angle but the smallest such area among all angles from 0-90 degrees. This is used during rotation

@@ -170,3 +170,92 @@ class vegetationSegmentationNetwork(object):
 
     def shut_down(self):
         self.model.shut_down()
+
+
+class countCeptionCounter(object):
+
+    model = None
+
+    patch_size = 32
+
+    __dir_name = 'countception-counter'
+
+    def __init__(self, batch_size=2):
+        """A network which counts flowers in plant images"""
+
+        m_path, _ = os.path.split(__file__)
+        checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
+
+        import deepplantphenomics as dpp
+
+        self.model = dpp.CountCeptionModel(debug=False, load_from_saved=checkpoint_path)
+
+        # Define model hyperparameters
+        self.model.set_loss_function('l1')
+        self.model.set_batch_size(batch_size)
+        self.model.set_number_of_threads(4)
+        self.model.set_image_dimensions(300, 300, 3)
+
+        # Define a model architecture
+        self.model.add_input_layer()
+        self.model.add_convolutional_layer(filter_dimension=[3, 3, 3, 64],
+                                      stride_length=1,
+                                      activation_function='lrelu',
+                                      padding=self.patch_size,
+                                      batch_norm=True,
+                                      epsilon=1e-5,
+                                      decay=0.9)
+        self.model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 16],
+                                   filter_dimension_2=[3, 3, 0, 16])
+        self.model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 16],
+                                   filter_dimension_2=[3, 3, 0, 32])
+        self.model.add_convolutional_layer(filter_dimension=[14, 14, 0, 16],
+                                      stride_length=1,
+                                      activation_function='lrelu',
+                                      padding=0,
+                                      batch_norm=True,
+                                      epsilon=1e-5,
+                                      decay=0.9)
+        self.model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 112],
+                                   filter_dimension_2=[3, 3, 0, 48])
+        self.model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 64],
+                                   filter_dimension_2=[3, 3, 0, 32])
+        self.model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 40],
+                                   filter_dimension_2=[3, 3, 0, 40])
+        self.model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 32],
+                                   filter_dimension_2=[3, 3, 0, 96])
+        self.model.add_convolutional_layer(filter_dimension=[18, 18, 0, 32],
+                                      stride_length=1,
+                                      activation_function='lrelu',
+                                      padding=0,
+                                      batch_norm=True,
+                                      epsilon=1e-5,
+                                      decay=0.9)
+        self.model.add_convolutional_layer(filter_dimension=[1, 1, 0, 64],
+                                      stride_length=1,
+                                      activation_function='lrelu',
+                                      padding=0,
+                                      batch_norm=True,
+                                      epsilon=1e-5,
+                                      decay=0.9)
+        self.model.add_convolutional_layer(filter_dimension=[1, 1, 0, 64],
+                                      stride_length=1,
+                                      activation_function='lrelu',
+                                      padding=0,
+                                      batch_norm=True,
+                                      epsilon=1e-5,
+                                      decay=0.9)
+        self.model.add_convolutional_layer(filter_dimension=[1, 1, 0, 1],
+                                      stride_length=1,
+                                      activation_function='lrelu',
+                                      padding=0,
+                                      batch_norm=True,
+                                      epsilon=1e-5,
+                                      decay=0.9)
+
+    def forward_pass(self, x):
+        y = self.model.forward_pass_with_file_inputs(x)
+        return y
+
+    def shut_down(self):
+        self.model.shut_down()

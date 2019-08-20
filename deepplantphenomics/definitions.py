@@ -6,6 +6,7 @@ class ProblemType(Enum):
     REGRESSION = 2
     SEMANTIC_SEGMETNATION = 3
     OBJECT_DETECTION = 4
+    OBJECT_COUNTING = 5
 
 
 class AugmentationType(Enum):
