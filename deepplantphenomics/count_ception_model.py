@@ -1,11 +1,9 @@
 from . import layers, loaders, definitions, deepplantpheno
 import numpy as np
 import tensorflow as tf
-import os
 import datetime
 import time
 import warnings
-import copy
 from tqdm import tqdm
 import pickle
 
@@ -27,13 +25,13 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to classification problems
+        tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
         tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
-        tf.summary.histogram('train/class_predictions', self._class_predictions, collections=['custom_summaries'])
         if self._validation:
+            tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
+                              collections=['custom_summaries'])
             tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
                               collections=['custom_summaries'])
-            tf.summary.histogram('validation/class_predictions', self._val_class_predictions,
-                                 collections=['custom_summaries'])
 
     def _assemble_graph(self):
 
@@ -178,6 +176,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                                                 loss,
                                                 epoch_accuracy,
                                                 samples_per_sec))
+                            self._log('Batch {}, train_loss {:.3f}, train_accu {:.3f}, val_accu {:.3f}'
+                                      .format(i, loss, epoch_accuracy, epoch_val_accuracy))
 
                         else:
                             loss, epoch_accuracy = self._session.run(
@@ -195,6 +195,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                                                 loss,
                                                 epoch_accuracy,
                                                 samples_per_sec))
+                            self._log('Batch {}, train_loss {:.3f}, train_accu {:.3f}'.format(i, loss, epoch_accuracy))
 
                         if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
                             self.save_state(self._save_dir)
