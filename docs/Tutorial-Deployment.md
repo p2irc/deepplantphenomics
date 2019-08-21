@@ -20,17 +20,15 @@ class rosetteLeafRegressor(object):
     def __init__(self, batch_size=8):
         """A network which predicts rosette leaf count via a convolutional neural net"""
 
-        import deepplantpheno as dpp
+        import deepplantphenomics as dpp
 
-        self.model = dpp.DPPModel(debug=False, load_from_saved=self.__dir_name)
+        self.model = dpp.RegressionModel(debug=False, load_from_saved=self.__dir_name)
 
         # Define model hyperparameters
         self.model.set_batch_size(batch_size)
         self.model.set_number_of_threads(1)
         self.model.set_image_dimensions(self.img_height, self.img_width, 3)
         self.model.set_resize_images(True)
-
-        self.model.set_problem_type('regression')
 
         self.model.set_augmentation_crop(True)
 
@@ -65,7 +63,7 @@ Note that the `__init__()` function builds the full network, exactly the same as
 The important line here is:
 
 ```python
-self.model = dpp.DPPModel(debug=False, load_from_saved=self.__dir_name)
+self.model = dpp.RegressionModel(debug=False, load_from_saved=self.__dir_name)
 ```
 
 The parameter `debug=False` suppresses any console output when we use this class. The parameter `load_from_saved=dir_name` loads all of the parameters from the trained network, so the model is exactly as it was when we finished training.

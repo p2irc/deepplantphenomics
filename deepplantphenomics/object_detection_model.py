@@ -15,7 +15,7 @@ class ObjectDetectionModel(DPPModel):
     _problem_type = definitions.ProblemType.OBJECT_DETECTION
     _loss_fn = 'yolo'
     _supported_loss_fns = ['yolo']
-    _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
+    _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     # State variables specific to object detection for constructing the graph and passing to Tensorboard
     _yolo_loss = None

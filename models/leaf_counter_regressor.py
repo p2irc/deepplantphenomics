@@ -2,9 +2,9 @@
 # Used to train the rosette-leaf-regressor model
 #
 
-import deepplantphenomics as dpp
+from deepplantphenomics.regression_model import RegressionModel
 
-model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=20)
+model = RegressionModel(debug=True, save_checkpoints=False, report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
@@ -15,9 +15,9 @@ model.set_number_of_threads(8)
 model.set_image_dimensions(128, 128, channels)
 model.set_resize_images(True)
 
-model.set_problem_type('regression')
 model.set_num_regression_outputs(1)
-model.set_train_test_split(0.8)
+model.set_test_split(0.2)
+model.set_validation_split(0.0)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('xavier')
 model.set_maximum_training_epochs(500)

@@ -4,7 +4,7 @@
 set_number_of_threads()
 ```
 
-Set number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
+Set the number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
 
@@ -14,7 +14,7 @@ Note that all pre-trained networks operate with only one thread to avoid random 
 set_batch_size()
 ```
 
-Sets the number of examples in each mini-batch. Recall that smaller batches mean more gradient updates per epoch.
+Sets the number of examples in each mini-batch. Defaults to 1. Recall that smaller batches mean more gradient updates per epoch.
 
 ```
 set_maximum_training_epochs()
@@ -26,7 +26,7 @@ Sets the number of epochs to train to before stopping. An epoch is one full cycl
 set_learning_rate()
 ```
 
-Set the initial learning rate. If you're not sure what learning rate is appropriate, err on the side of a smaller learning rate.
+Set the initial learning rate. Defaults to 0.001. If you're not sure what learning rate is appropriate, err on the side of a smaller learning rate.
 
 ```
 set_optimizer()
@@ -50,37 +50,19 @@ Set the coefficient for L2 weight decay (regularization).
 set_weight_initializer()
 ```
 
-Set the weight initialization scheme for convolutional and fully connected layers. Default is `'normal'`, other option is `'xavier'`. Note that you may experience gradient problems with relu activations and xavier initialization.
-
-```
-set_problem_type()
-```
-
-Set the type of problem for the model. Possible problem types include:
-- `classification` (default)
-- `regression`
-- `semantic_segmentation` (pixel-wise regression with a fully convolutional network, useful for segmentation applications; see [semantic segmentation](/Semantic-Segmentation/))
-- `object_detection` (a one-class object detector based on [Yolov2](https://arxiv.org/pdf/1612.08242.pdf))
-
-```
-set_train_test_split()
-```
-
-Set the ratio of training samples to testing samples (assuming no validation samples).
-
-This method has been deprecated. `set_test_split()` and `set_validation_split()` should be used instead.
+Set the weight initialization scheme for convolutional and fully connected layers. Default is `'xavier'`, other option is `'normal'`. Note that you may experience gradient problems with relu activations and xavier initialization.
 
 ```
 set_test_split()
 ```
 
-Set the ratio of the total number of samples to use as a testing set after training.
+Set the ratio of the total number of samples to use as a testing set after training. Defaults to 0.10 (i.e. 10% of the samples).
 
 ```
 set_validation_split()
 ```
 
-Set the ratio of the total number of samples to use as a validation set during training.
+Set the ratio of the total number of samples to use as a validation set during training. Defaults to 0.10 (i.e. 10% of the samples).
 
 ## Input Options
 

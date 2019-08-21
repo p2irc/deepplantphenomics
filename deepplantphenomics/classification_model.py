@@ -13,11 +13,11 @@ class ClassificationModel(DPPModel):
     _problem_type = definitions.ProblemType.CLASSIFICATION
     _loss_fn = 'softmax cross entropy'
     _supported_loss_fns = ['softmax cross entropy']
-    _valid_augmentations = [definitions.AugmentationType.FLIP_HOR,
-                            definitions.AugmentationType.FLIP_VER,
-                            definitions.AugmentationType.CROP,
-                            definitions.AugmentationType.CONTRAST_BRIGHT,
-                            definitions.AugmentationType.ROTATE]
+    _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
+                                definitions.AugmentationType.FLIP_VER,
+                                definitions.AugmentationType.CROP,
+                                definitions.AugmentationType.CONTRAST_BRIGHT,
+                                definitions.AugmentationType.ROTATE]
 
     # State variables specific to classification for constructing the graph and passing to Tensorboard
     __class_predictions = None

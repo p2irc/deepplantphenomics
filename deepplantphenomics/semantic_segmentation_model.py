@@ -11,7 +11,7 @@ class SemanticSegmentationModel(DPPModel):
     _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
     _loss_fn = 'sigmoid cross entropy'
     _supported_loss_fns = ['sigmoid cross entropy']
-    _valid_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
+    _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     # State variables specific to semantic segmentation for constructing the graph and passing to Tensorboard
     _graph_forward_pass = None
