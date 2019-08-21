@@ -1,5 +1,5 @@
 ## Predefined Model Architectures
-[Individual layers](Neural-Network-Layers) can be used to create any custom model. There are some common architectures, however, that don't have to be made from scratch and are predefined.
+[Individual layers](Neural-Network-Layers.md) can be used to create any custom model. There are some common architectures, however, that don't have to be made from scratch and are predefined.
 
 ```python
 model.use_predefined_model(model_name)

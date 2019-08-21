@@ -64,7 +64,7 @@ model.set_augmentation_crop(True)
 
 At test time, the images will be cropped to center in order to maintain the same input size. To illustrate the importance of data augmentation, here are test regression loss results showing the difference adding each augmentation makes:
 
-![augmentation-results](./leaf-counter-augmentation.png)
+![augmentation-results](leaf-counter-augmentation.png)
 
 ## Loading the Data
 

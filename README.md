@@ -47,18 +47,18 @@ Train a simple regression model to rate plants for abiotic stress:
 ```python
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True)
+model = dpp.RegressionModel(debug=True)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3
 
 # Setup and hyperparameters
-model.set_problem_type('regression')
 model.set_batch_size(64)
 model.set_image_dimensions(256, 256, channels)
 model.set_learning_rate(0.0001)
 model.set_maximum_training_epochs(100)
-model.set_train_test_split(0.8)
+model.set_test_split(0.2)
+model.set_validation_split(0.0)
 
 # Load dataset of images and ground-truth labels
 model.load_multiple_labels_from_csv('./data/my_labels.csv')

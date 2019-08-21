@@ -316,6 +316,40 @@ class ClassificationModel(DPPModel):
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
 
+    def load_dataset_from_directory_with_auto_labels(self, dirname):
+        """Loads the png images in the given directory, using subdirectories to separate classes."""
+
+        # Load all file names and labels into arrays
+        subdirs = list(filter(lambda item: os.path.isdir(item) & (item != '.DS_Store'),
+                              [os.path.join(dirname, f) for f in os.listdir(dirname)]))
+
+        num_classes = len(subdirs)
+
+        image_files = []
+        labels = np.array([])
+
+        for sd in subdirs:
+            image_paths = [os.path.join(sd, name) for name in os.listdir(sd) if
+                           os.path.isfile(os.path.join(sd, name)) & name.endswith('.png')]
+            image_files = image_files + image_paths
+
+            # for one-hot labels
+            current_labels = np.zeros((num_classes, len(image_paths)))
+            current_labels[self._total_classes, :] = 1
+            labels = np.hstack([labels, current_labels]) if labels.size else current_labels
+            self._total_classes += 1
+
+        labels = tf.transpose(labels)
+
+        self._total_raw_samples = len(image_files)
+
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+        self._log('Total classes is %d' % self._total_classes)
+        self._log('Parsing dataset...')
+
+        self._raw_image_files = image_files
+        self._raw_labels = labels
+
     def load_ippn_dataset_from_directory(self, dirname, column='strain'):
         """Loads the RGB images and species labels from the International Plant Phenotyping Network dataset."""
 
