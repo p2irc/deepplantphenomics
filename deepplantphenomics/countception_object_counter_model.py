@@ -279,7 +279,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
                 for img in np.array_split(xx, self._batch_size):
-                    total_outputs.append(img)
+                    total_outputs.append(np.squeeze(img))
 
             # delete any outputs which are overruns from the last batch
             if remainder != 0:
@@ -294,7 +294,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
         # Get the predicted count
         patch_size = 32
-        interpreted_outputs = np.sum(xx / (patch_size ** 2.0), axis=[1,2,3])
+        interpreted_outputs = [x / (patch_size ** 2.0) for x in np.sum(xx, axis=(1,2))]
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
