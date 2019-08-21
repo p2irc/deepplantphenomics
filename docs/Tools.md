@@ -2,7 +2,7 @@
 
 ## Vegetation Segmentation Network
 
-The vegetaion segmentation network can perform automatic segmentation of foreground pixels from background pixels. It outputs arrays which can be output to a file using a Python library like [Pillow](https://python-pillow.org/).
+The vegetation segmentation network can perform automatic segmentation of foreground pixels from background pixels. It outputs arrays which can be output to a file using a Python library like [Pillow](https://python-pillow.org/).
 
 ```
 import deepplantphenomics as dpp

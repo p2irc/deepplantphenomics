@@ -1,4 +1,4 @@
-After training a model, if you are happy with the performance, you can deploy it for future use. This tutorial uses the leaf counter as an example. If you are not sure how the leaf counter was trained, please see [Training the Leaf Counter](/Tutorial-Training-The-Leaf-Counter/).
+After training a model, if you are happy with the performance, you can deploy it for future use. This tutorial uses the leaf counter as an example. If you are not sure how the leaf counter was trained, please see [Training the Leaf Counter](Tutorial-Training-The-Leaf-Counter.md).
 
 ## Move the Network State to a Safe Place
 

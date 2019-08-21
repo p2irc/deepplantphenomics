@@ -1,6 +1,6 @@
 Among the kinds of tasks DPP can train models for, it can be used to train a single-class object detector. The object detection in DPP is based on the YOLO object detector ([YOLOv2 specifically](https://arxiv.org/pdf/1612.08242.pdf)). YOLO's methodology splits images into grids and makes multiple bounding box predictions in each grid square alongside a prediction for whether there is an object and what kind of object it is (in multi-class detectors).
 
-The overall structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](/Tutorial-Training-The-Leaf-Counter/) for a detailed description of this). This tutorial largely covers the differences in model setup and data/label loading specific to training YOLO object detectors in DPP.
+The overall structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](Tutorial-Training-The-Leaf-Counter.md) for a detailed description of this). This tutorial largely covers the differences in model setup and data/label loading specific to training YOLO object detectors in DPP.
 
 ## Full Example
 
@@ -13,14 +13,13 @@ Below is a working example of training an object detection model in DPP. This is
 
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, save_checkpoints=False, report_rate=20)
+model = dpp.ObjectDetectionModel(debug=True, save_checkpoints=False, report_rate=20)
 
 # Setup and hyperparameters
 model.set_image_dimensions(448, 448, 3)
 model.set_resize_images(False)
 model.set_patch_size(448, 448)
 
-model.set_problem_type('object_detection')
 # model.set_yolo_parameters() is not called here because we are using all of the default values
 model.set_test_split(0.1)
 model.set_validation_split(0)
@@ -37,7 +36,7 @@ model.begin_training()
 
 ## YOLO v2 Network Layers
 
-Rather than having to create the layers yourself, the YOLO v2 network is available as a predifined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
+Rather than having to create the layers yourself, the YOLO v2 network is available as a predefined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
 
 ```python
 model.use_predefined_model('yolov2')
@@ -49,9 +48,9 @@ When training a YOLO object detector, the settings and hyperparameters will typi
 
 ```python
 # YOLO-specific setup
-model.set_problem_type('object_detection')
 prior_boxes = [[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]]
-model.set_yolo_parameters(grid_size=[7,7], labels=['plant'],
+model.set_yolo_parameters(grid_size=[7,7],
+                          labels=['plant'],
                           anchors=prior_boxes)
 ```
 
@@ -67,21 +66,7 @@ Loaders with automatic conversion to YOLO labels include:
 
 - `load_ippn_tray_dataset_from_directory(dirname)`: Load IPPN tray images and labels and convert labels to YOLO format.
 - `load_pascal_voc_labels_from_directory(dirname)`: Load Pascal VOC labels from a directory of XML files and convert them to YOLO format, then load in images with `load_images_with_id_from_directory(dirname)`.
-- `load_yolo_dataset_from_directory(dirname, label_file, image_dir)` and `load_json_labels_from_file(filename)`: Load labels from a custom JSON format file, then load in images with `load_images_from_list(files)`. The expectecd JSON format for the labels is as follows:
-
-```json
-{
-"<filename>.png": {
-  "width": w,
-  "height": h,
-  "plants": [
-    {"all_points_x": [x1, x2], "all_points_y": [y1, y2]}, 
-    ...
-    ]
-  },
-...
-}
-```
+- `load_yolo_dataset_from_directory(dirname, label_file, image_dir)` and `load_json_labels_from_file(filename)`: Load labels a JSON file, then load in images with `load_images_from_list(files)`. See [the documentation for `load_json_labels_from_file`](Loaders.md) for the expected JSON format.
 
 ## Automatic Patching of Large Images
 
