@@ -367,10 +367,29 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
     def load_dataset_from_pkl_file(self, pkl_file_name):
+        """
+        Loads the dataset(image data and ground truth count map data) from a pickle file into an internal
+        representation.
+        For more information about data format in the pickle file, please refer to the paper
+        https://arxiv.org/abs/1703.08710
+        :param pkl_file_name: the path of the pickle file containing the dataset
+        """
 
-        dataset = pickle.load(open(pkl_file_name, "rb"))
-        dataset_x = np.asarray([d[0] for d in dataset]).astype(np.float32)
-        dataset_y = np.transpose(np.asarray([d[1] for d in dataset]), [0, 2, 3, 1]).astype(np.float32)
+        if not isinstance(pkl_file_name, str):
+            raise TypeError("pkl_file_name must be a str")
+        if not os.path.isfile(pkl_file_name):
+            raise ValueError("'" + pkl_file_name + "' does not exist")
+        if not pkl_file_name.endswith('.pkl'):
+            raise ValueError("'" + pkl_file_name + "' is not a pickle file")
+
+        try:
+            # try to load dataset from the given pickle file
+            dataset = pickle.load(open(pkl_file_name, "rb"))
+            dataset_x = np.asarray([d[0] for d in dataset]).astype(np.float32)
+            dataset_y = np.transpose(np.asarray([d[1] for d in dataset]), [0, 2, 3, 1]).astype(np.float32)
+
+        except Exception:
+            raise TypeError("'" + pkl_file_name + "' does not contain data in required format.")
 
         self._total_raw_samples = len(dataset_x)
 
@@ -381,3 +400,4 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._raw_labels = dataset_y
 
         self._split_labels = False
+
