@@ -435,7 +435,7 @@ class SemanticSegmentationModel(DPPModel):
             raise RuntimeError("An output layer cannot be the first layer added to the model. " +
                                "Add an input layer with DPPModel.add_input_layer() first.")
         if regularization_coefficient is not None:
-            warnings.warn("Object detection doesn't use regularization_coefficient in its output layer")
+            warnings.warn("Semantic segmentation doesn't use regularization_coefficient in its output layer")
         if output_size is not None:
             raise RuntimeError("output_size should be None for semantic segmentation")
 

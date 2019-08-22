@@ -7,6 +7,7 @@ class ProblemType(Enum):
     SEMANTIC_SEGMETNATION = 3
     OBJECT_DETECTION = 4
     OBJECT_COUNTING = 5
+    HEATMAP_COUNTING = 6
 
 
 class AugmentationType(Enum):
