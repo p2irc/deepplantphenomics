@@ -151,3 +151,18 @@ Loads a dataset for object detection with a JSON file of labels and a sub-direct
 ```
 load_yolo_dataset_from_directory(dirname, label_file, image_dir)
 ```
+
+#### Load Dataset Saved in a Pickle File
+
+This loader is only used in the CountCeptionModel for object counting. It loads dataset from a pickle file with the following format:
+
+```
+[(image_data, count_map_data), ...]
+```
+
+For each image, there is a tuple of two matrices. The first matrix contains the image data, and the second matrix contains the count map data.
+For more information about how the count map is generated, please refer to the paper https://arxiv.org/abs/1703.08710.
+
+```
+load_dataset_from_pkl_file(pkl_file_name)
+```
