@@ -30,7 +30,7 @@ class DPPModel(ABC):
     _supported_pooling_types = ['max', 'avg']
     _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
                            'yolo']
-    _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large']
+    _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large', "countception"]
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
@@ -1532,6 +1532,65 @@ class DPPModel(ABC):
                                          stride_length=1, activation_function='lrelu')
 
             self.add_output_layer()
+
+        if model_name == 'countception':
+
+            patch_size = 32
+            self.add_input_layer()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 3, 64],
+                                         stride_length=1,
+                                         activation_function='lrelu',
+                                         padding=patch_size,
+                                         batch_norm=True,
+                                         epsilon=1e-5,
+                                         decay=0.9)
+            self.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 16],
+                                      filter_dimension_2=[3, 3, 0, 16])
+            self.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 16],
+                                      filter_dimension_2=[3, 3, 0, 32])
+            self.add_convolutional_layer(filter_dimension=[14, 14, 0, 16],
+                                         stride_length=1,
+                                         activation_function='lrelu',
+                                         padding=0,
+                                         batch_norm=True,
+                                         epsilon=1e-5,
+                                         decay=0.9)
+            self.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 112],
+                                      filter_dimension_2=[3, 3, 0, 48])
+            self.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 64],
+                                      filter_dimension_2=[3, 3, 0, 32])
+            self.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 40],
+                                      filter_dimension_2=[3, 3, 0, 40])
+            self.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 32],
+                                      filter_dimension_2=[3, 3, 0, 96])
+            self.add_convolutional_layer(filter_dimension=[18, 18, 0, 32],
+                                         stride_length=1,
+                                         activation_function='lrelu',
+                                         padding=0,
+                                         batch_norm=True,
+                                         epsilon=1e-5,
+                                         decay=0.9)
+            self.add_convolutional_layer(filter_dimension=[1, 1, 0, 64],
+                                         stride_length=1,
+                                         activation_function='lrelu',
+                                         padding=0,
+                                         batch_norm=True,
+                                         epsilon=1e-5,
+                                         decay=0.9)
+            self.add_convolutional_layer(filter_dimension=[1, 1, 0, 64],
+                                         stride_length=1,
+                                         activation_function='lrelu',
+                                         padding=0,
+                                         batch_norm=True,
+                                         epsilon=1e-5,
+                                         decay=0.9)
+            self.add_convolutional_layer(filter_dimension=[1, 1, 0, 1],
+                                         stride_length=1,
+                                         activation_function='lrelu',
+                                         padding=0,
+                                         batch_norm=True,
+                                         epsilon=1e-5,
+                                         decay=0.9)
 
     def load_dataset_from_directory_with_csv_labels(self, dirname, labels_file, column_number=False):
         """
