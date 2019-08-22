@@ -1,5 +1,6 @@
-from deepplantphenomics import definitions, SemanticSegmentationModel
+from deepplantphenomics import definitions, loaders, SemanticSegmentationModel
 import numpy as np
+import os
 import warnings
 from tqdm import tqdm
 
@@ -23,8 +24,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
             # Initialize storage for the retrieved test variables
             all_losses = np.empty(shape=1)
-            all_y = np.empty(shape=[self._batch_size, self._image_width, self._image_height])
-            all_predictions = np.empty(shape=[self._batch_size, self._image_width, self._image_height])
+            all_y = np.empty(shape=[self._batch_size, self._image_height, self._image_width])
+            all_predictions = np.empty(shape=[self._batch_size, self._image_height, self._image_width])
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
@@ -120,11 +121,35 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
     def load_heatmap_dataset_from_csv(self, dirname, label_file):
         """
         Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
-        train on and a csv file that maps image names to x and y labels
+        train on and a csv file that maps image names to multiple x and y labels (formatted like x1,y1,x2,y2,...)
         :param dirname: The path to the directory with the image files and label file
         :param label_file: The path to the csv file with heatmap point labels
         """
-        pass
+        labels, ids = loaders.read_csv_multi_labels_and_ids(label_file, 0)
+
+        # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
+        # ground truth heatmap
+        heatmaps = []
+        for coords in labels:
+            if not coords:
+                # There are no objects, so the heatmap is blank
+                heatmaps.append(np.full([self._image_height, self._image_width], 0))
+                continue
+
+            if len(coords) % 2 == 1:
+                # There is an odd number of coordinates, which is problematic
+                raise ValueError("Unpaired coordinate found in points labels from " + label_file)
+
+            points = zip(coords[0::2], coords[1::2])
+            heatmaps.append(self.__points_to_density_map(points))
+
+        image_files = [os.path.join(dirname, filename) for filename in ids]
+        self._total_raw_samples = len(image_files)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+
+        self._raw_image_files = image_files
+        self._raw_labels = labels
+        self._split_labels = False  # Band-aid fix
 
     def __points_to_density_map(self, points):
         """
