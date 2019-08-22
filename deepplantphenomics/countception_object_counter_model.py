@@ -1,6 +1,7 @@
 from . import layers, definitions, deepplantpheno
 import numpy as np
 import tensorflow as tf
+import os
 import datetime
 import time
 import warnings

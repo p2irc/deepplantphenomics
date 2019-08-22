@@ -2,7 +2,7 @@
 # Used to train the count_ception_model
 #
 
-from .. import deepplantphenomics as dpp
+import deepplantphenomics as dpp
 
 model = dpp.CountCeptionModel(debug=True, load_from_saved=False, save_checkpoints=False, report_rate=20)
 
@@ -14,8 +14,8 @@ model.set_batch_size(2)
 model.set_number_of_threads(4)
 model.set_image_dimensions(300, 300, 3)
 
-model.set_test_split(0.2)
-model.set_validation_split(0.1)
+model.set_test_split(0.3)
+model.set_validation_split(0.2)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('xavier')
 model.set_maximum_training_epochs(1000)
