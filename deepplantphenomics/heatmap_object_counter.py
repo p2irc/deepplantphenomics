@@ -1,4 +1,7 @@
 from deepplantphenomics import definitions, SemanticSegmentationModel
+import numpy as np
+import warnings
+from tqdm import tqdm
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
@@ -8,31 +11,98 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
-    def _assemble_graph(self):
-        # TODO
-        # Might be the same as for semantic segmentation
-        pass
-
     def compute_full_test_accuracy(self):
-        # TODO
-        pass
+        self._log('Computing total test accuracy/regression loss...')
+
+        with self._graph.as_default():
+            num_batches = int(np.ceil(self._total_testing_samples / self._batch_size))
+
+            if num_batches == 0:
+                warnings.warn('Less than a batch of testing data')
+                exit()
+
+            # Initialize storage for the retrieved test variables
+            all_losses = np.empty(shape=1)
+            all_y = np.empty(shape=[self._batch_size, self._image_width, self._image_height])
+            all_predictions = np.empty(shape=[self._batch_size, self._image_width, self._image_height])
+
+            # Main test loop
+            for _ in tqdm(range(num_batches)):
+                r_losses, r_y, r_predictions = self._session.run([self._graph_ops['test_losses'],
+                                                                  self._graph_ops['y_test'],
+                                                                  self._graph_ops['x_test_predicted']])
+                all_losses = np.concatenate((all_losses, r_losses), axis=0)
+                all_y = np.concatenate((all_y, r_y), axis=0)
+                all_predictions = np.concatenate((all_predictions, r_predictions), axis=0)
+
+            all_losses = np.delete(all_losses, 0)
+            all_y = np.delete(all_y, 0, axis=0)
+            all_predictions = np.delete(all_predictions, 0, axis=0)
+
+            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
+            # we want to get rid of)
+            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
+            if extra != self._batch_size:
+                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
+                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
+                all_losses = all_losses[mask_extra, ...]
+                all_y = all_y[mask_extra, ...]
+                all_predictions = all_predictions[mask_extra, ...]
+
+            # For heatmap object counting losses, like with semantic segmentation, we want relative and abs mean, std
+            # of L2 norms, plus a histogram of errors
+            abs_mean = np.mean(np.abs(all_losses))
+            abs_var = np.var(np.abs(all_losses))
+            abs_std = np.sqrt(abs_var)
+
+            mean = np.mean(all_losses)
+            var = np.var(all_losses)
+            mse = np.mean(np.square(all_losses))
+            std = np.sqrt(var)
+            loss_max = np.amax(all_losses)
+            loss_min = np.amin(all_losses)
+
+            hist, _ = np.histogram(all_losses, bins=100)
+
+            self._log('Heatmap Losses:')
+            self._log('Mean loss: {}'.format(mean))
+            self._log('Loss standard deviation: {}'.format(std))
+            self._log('Mean absolute loss: {}'.format(abs_mean))
+            self._log('Absolute loss standard deviation: {}'.format(abs_std))
+            self._log('Min error: {}'.format(loss_min))
+            self._log('Max error: {}'.format(loss_max))
+            self._log('MSE: {}'.format(mse))
+
+            self._log('Histogram of {} losses:'.format(self._loss_fn))
+            self._log(hist)
+
+            # Specifically for heatmap object counting, we also want to determine an accuracy in terms of how the sums
+            # over the predicted and ground truth heatmaps compare to each other
+            heatmap_accuracies = np.array(map(
+                lambda i: self.__heatmap_accuracy(all_predictions[i, ...], all_y[i, ...]),
+                range(all_y.shape[0])))
+            overall_accuracy = np.mean(heatmap_accuracies)
+            self._log('Heatmap Accuracies: {}'.format(heatmap_accuracies))
+            self._log('Heatmap Accuracies: {}'.format(overall_accuracy))
+
+            return overall_accuracy
 
     def __heatmap_accuracy(self, predict_heatmap, label_heatmap):
         """
-        Calculates the accuracy of an image's predicted heatmap compared to the heatmap label
-        :param predict_heatmap: The model's predicted heatmap
-        :param label_heatmap: The image's corresponding label heatmap
+        Calculates the accuracy of an image's predicted heatmap compared to its ground truth based on sums over their
+        pixel values
+        :param predict_heatmap: The model's predicted heatmap as an ndarray
+        :param label_heatmap: The image's corresponding label heatmap as an ndarray
         :return: The accuracy of the heatmap prediction
         """
-        return 0
-
-    def forward_pass_with_file_inputs(self, x):
-        # TODO
-        pass
+        return np.abs(np.sum(predict_heatmap) - np.sum(label_heatmap))
 
     def forward_pass_with_interpreted_outputs(self, x):
-        # TODO
-        pass
+        total_outputs = super().forward_pass_with_file_inputs(x)
+
+        # Interpreted output for heatmap counting is the sum over the heatmap pixel values, which should be the number
+        # of objects
+        return np.array(map(lambda i: np.sum[total_outputs[i,...]], range(total_outputs.shape[0])))
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """
