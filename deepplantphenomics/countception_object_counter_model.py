@@ -122,7 +122,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
             # Either load the network parameters from a checkpoint file or start training
             if self._load_from_saved is not False:
-
+                self._has_trained = True
                 self.load_state()
                 self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
@@ -309,23 +309,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         """
         pass
 
-    def load_state(self):
-        """
-        Load all trainable variables from a checkpoint file specified from the load_from_saved parameter in the
-        class constructor.
-        """
-
-        if self._load_from_saved is not False:
-            self._log('Loading from checkpoint file...')
-
-            with self._graph.as_default():
-                saver = tf.train.Saver(tf.global_variables())
-                saver.restore(self._session, tf.train.latest_checkpoint(self._load_from_saved))
-
-            self._has_trained = True
-        else:
-            warnings.warn('Tried to load state with no file given. Make sure load_from_saved is set in constructor.')
-            exit()
 
     def _parse_dataset(self, train_images, train_labels, train_mf,
                        test_images, test_labels, test_mf,
