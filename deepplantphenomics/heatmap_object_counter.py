@@ -2,7 +2,9 @@ from deepplantphenomics import definitions, loaders, SemanticSegmentationModel
 import numpy as np
 import os
 import warnings
+import numbers
 from tqdm import tqdm
+from scipy.ndimage import gaussian_filter
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
@@ -11,6 +13,25 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+        # This is needed for reading in heatmap labels expressed as object locations, since we want to convert points
+        # to gaussians when reading them in and constructing ground truth heatmaps
+        self._density_sigma = 5
+
+        # This in needed to ensure that dataset parsing in the graph is done correctly whether or not the heatmap labels
+        # come from an external image or are generated
+        self.__label_from_image_file = False
+
+    def set_density_map_sigma(self, sigma):
+        """
+        Sets the standard deviation to use for gaussian points when generating ground truth heatmaps from object
+        locations.
+        :param sigma: The standard deviation to use for gaussians in generated heatmaps
+        """
+        if not isinstance(sigma, numbers.Real):
+            raise TypeError("sigma must be a real number")
+
+        self._density_sigma = sigma
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
@@ -103,7 +124,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         # Interpreted output for heatmap counting is the sum over the heatmap pixel values, which should be the number
         # of objects
-        return np.array(map(lambda i: np.sum[total_outputs[i,...]], range(total_outputs.shape[0])))
+        return np.array(map(lambda i: np.sum[total_outputs[i, ...]], range(total_outputs.shape[0])))
 
     def load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname):
         """
@@ -117,6 +138,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         # want to inherit from SemanticSegmentationModel but get a loader that requires reinterpretation to be useful.
         # The ultimate solution is to refactor loader methods into mixin classes, but that will come later.
         super().load_dataset_from_directory_with_segmentation_masks(dirname, seg_dirname)
+        self.__label_from_image_file = True
 
     def load_heatmap_dataset_from_csv(self, dirname, label_file):
         """
@@ -131,17 +153,16 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         # ground truth heatmap
         heatmaps = []
         for coords in labels:
-            if not coords:
+            if coords:
+                if len(coords) % 2 == 1:
+                    # There is an odd number of coordinates, which is problematic
+                    raise ValueError("Unpaired coordinate found in points labels from " + label_file)
+
+                points = zip(coords[0::2], coords[1::2])
+                heatmaps.append(self.__points_to_density_map(points))
+            else:
                 # There are no objects, so the heatmap is blank
                 heatmaps.append(np.full([self._image_height, self._image_width], 0))
-                continue
-
-            if len(coords) % 2 == 1:
-                # There is an odd number of coordinates, which is problematic
-                raise ValueError("Unpaired coordinate found in points labels from " + label_file)
-
-            points = zip(coords[0::2], coords[1::2])
-            heatmaps.append(self.__points_to_density_map(points))
 
         image_files = [os.path.join(dirname, filename) for filename in ids]
         self._total_raw_samples = len(image_files)
@@ -153,8 +174,26 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
     def __points_to_density_map(self, points):
         """
-        Convert point labels for a heatmap into a grayscale image with gaussians placed at heatmap points
+        Convert point labels for a heatmap into a grayscale image with a gaussian placed at heatmap points
         :param points: A list of (x,y) tuples for object locations in an image
         :return: An ndarray of the heatmap image
         """
-        return []
+        # The simple way to do this is to place single pixel 1's on a blank image at each point and then apply a
+        # gaussian filter to that image. The result is our density map.
+        den_map = np.empty([self._image_height, self._image_width])
+        for p in points:
+            den_map[p[0], p[1]] = 1
+        den_map = gaussian_filter(den_map, self._density_sigma, mode='constant')
+
+        return den_map
+
+    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
+        # This is tricky. If we read in the heatmaps as images, then we want to use the version in
+        # SemanticSegmentationModel, which treats the labels like regular images. If we instead generated the heatmaps
+        # from points in a CSV file, then we want to treat the labels like other labels, which the version in DPPModel
+        # does. super() will let us choose which one by making it look through this or Semantic...Model's MRO.
+        if self.__label_from_image_file:
+            super(SemanticSegmentationModel, self)._parse_apply_preprocessing(
+                test_input_queue, train_input_queue, val_input_queue)
+        else:
+            super()._parse_apply_preprocessing(test_input_queue, train_input_queue, val_input_queue)

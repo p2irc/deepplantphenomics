@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import datetime
 import time
+import os
 import warnings
 from tqdm import tqdm
 import pickle
@@ -264,7 +265,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 remainder = self._batch_size - remainder
 
             images = x
-            self._parse_images(images, image_type='jpg', standadization=False)
+            self._parse_images(images, image_type='jpg', standardization=False)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
@@ -294,7 +295,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
         # Get the predicted count
         patch_size = 32
-        interpreted_outputs = [x / (patch_size ** 2.0) for x in np.sum(xx, axis=(1,2))]
+        interpreted_outputs = [x / (patch_size ** 2.0) for x in np.sum(xx, axis=(1, 2))]
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
@@ -400,4 +401,3 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._raw_labels = dataset_y
 
         self._split_labels = False
-

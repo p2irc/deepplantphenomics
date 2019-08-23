@@ -16,7 +16,6 @@ class RegressionModel(DPPModel):
                                 definitions.AugmentationType.CROP,
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
-    _num_regression_outputs = 1
 
     # State variables specific to regression for constructing the graph and passing to Tensorboard
     _regression_loss = None
@@ -24,6 +23,8 @@ class RegressionModel(DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+        self._num_regression_outputs = 1
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""

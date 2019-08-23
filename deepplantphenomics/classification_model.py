@@ -19,13 +19,13 @@ class ClassificationModel(DPPModel):
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
 
-    # State variables specific to classification for constructing the graph and passing to Tensorboard
-    __class_predictions = None
-    __val_class_predictions = None
-
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+        # State variables specific to classification for constructing the graph and passing to Tensorboard
+        self.__class_predictions = None
+        self.__val_class_predictions = None
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
