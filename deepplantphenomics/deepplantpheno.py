@@ -2012,7 +2012,7 @@ class DPPModel(ABC):
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
 
-    def _parse_images(self, images, image_type='png', standadization=True):
+    def _parse_images(self, images, image_type='png'):
         """Takes some images as input, creates producer of processed images internally to this instance"""
         with self._graph.as_default():
             input_queue = tf.train.string_input_producer(images, shuffle=False)
@@ -2032,9 +2032,9 @@ class DPPModel(ABC):
             if self._crop_or_pad_images is True:  # Pad or crop to deal with images of different sizes
                 input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
                                                                       self._image_width)
-            if standadization:
-                # mean-center all inputs
-                input_images = tf.image.per_image_standardization(input_images)
+
+            # mean-center all inputs
+            input_images = tf.image.per_image_standardization(input_images)
 
             # Manually set the shape of the image tensors so it matches the shape of the images
             input_images.set_shape([self._image_height, self._image_width, self._image_depth])
