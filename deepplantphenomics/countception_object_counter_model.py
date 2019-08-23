@@ -36,88 +36,87 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
     def _assemble_graph(self):
 
-        with self._graph.as_default():
+        self._log('Parsing dataset...')
+        self._graph_parse_data()
 
-            self._log('Parsing dataset...')
-            self._graph_parse_data()
+        self._log('Creating layer parameters...')
+        self._add_layers_to_graph()
 
-            self._log('Creating layer parameters...')
-            self._add_layers_to_graph()
+        self._log('Assembling graph...')
 
-            self._log('Assembling graph...')
+        x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                      batch_size=self._batch_size,
+                                      num_threads=self._num_threads,
+                                      capacity=self._queue_capacity,
+                                      min_after_dequeue=self._batch_size)
 
-            x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                          batch_size=self._batch_size,
-                                          num_threads=self._num_threads,
-                                          capacity=self._queue_capacity,
-                                          min_after_dequeue=self._batch_size)
+        # Reshape input to the expected image dimensions
+        x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            # Reshape input to the expected image dimensions
-            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+        # Run the network operations
+        xx = self.forward_pass(x, deterministic=False)
 
-            # Run the network operations
-            xx = self.forward_pass(x, deterministic=False)
+        # Define regularization cost
+        if self._reg_coeff is not None:
+            l2_cost = tf.squeeze(tf.reduce_sum(
+                [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                 if isinstance(layer, layers.fullyConnectedLayer)]))
+        else:
+            l2_cost = 0.0
 
-            # Define regularization cost
-            if self._reg_coeff is not None:
-                l2_cost = tf.squeeze(tf.reduce_sum(
-                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                     if isinstance(layer, layers.fullyConnectedLayer)]))
-            else:
-                l2_cost = 0.0
+        # Define cost function
+        if self._loss_fn == 'l1':
+            l1_loss = tf.reduce_mean(tf.abs(tf.subtract(xx, y)))
+            gt = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
+            pr = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
+            accuracy = tf.reduce_mean(tf.abs(gt - pr))
+            self._graph_ops['cost'] = tf.squeeze(tf.add(l1_loss, l2_cost))
+            self._graph_ops['accuracy'] = accuracy
 
-            # Define cost function
+        # Set the optimizer and get the gradients from it
+        gradients, variables, global_grad_norm = self._graph_add_optimizer()
+
+        # Calculate validation and test accuracy
+        if self._testing:
+            x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
+                                                               batch_size=self._batch_size,
+                                                               num_threads=self._num_threads,
+                                                               capacity=self._queue_capacity)
+            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+        if self._validation:
+            x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
+                                                             batch_size=self._batch_size,
+                                                             num_threads=self._num_threads,
+                                                             capacity=self._queue_capacity)
+            x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+
+        if self._testing:
+            self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+        if self._validation:
+            self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
+        if self._testing:
             if self._loss_fn == 'l1':
-                l1_loss = tf.reduce_mean(tf.abs(tf.subtract(xx, y)))
-                gt = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
-                pr = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
-                accuracy = tf.reduce_mean(tf.abs(gt - pr))
-                self._graph_ops['cost'] = tf.squeeze(tf.add(l1_loss, l2_cost))
-                self._graph_ops['accuracy'] = accuracy
+                self._graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
+                    self._graph_ops['y_test'], self._graph_ops['x_test_predicted'])))
+                gt_test = tf.reduce_sum(self._graph_ops['y_test'], axis=[1, 2, 3]) / (32 ** 2.0)
+                pr_test = tf.reduce_sum(self._graph_ops['x_test_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
+                self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.abs(gt_test - pr_test))
+        if self._validation:
+            if self._loss_fn == 'l1':
+                self._graph_ops['val_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
+                    self._graph_ops['y_val'], self._graph_ops['x_val_predicted'])))
+                gt_val = tf.reduce_sum(self._graph_ops['y_val'], axis=[1, 2, 3]) / (32 ** 2.0)
+                pr_val = tf.reduce_sum(self._graph_ops['x_val_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
+                self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
 
-            # Set the optimizer and get the gradients from it
-            gradients, variables, global_grad_norm = self._graph_add_optimizer()
-
-            # Calculate validation and test accuracy
-            if self._testing:
-                x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
-                                                                   batch_size=self._batch_size,
-                                                                   num_threads=self._num_threads,
-                                                                   capacity=self._queue_capacity)
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
-                                                                 batch_size=self._batch_size,
-                                                                 num_threads=self._num_threads,
-                                                                 capacity=self._queue_capacity)
-                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
-
-            if self._testing:
-                self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
-            if self._validation:
-                self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
-
-            if self._testing:
-                if self._loss_fn == 'l1':
-                    self._graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
-                        self._graph_ops['y_test'], self._graph_ops['x_test_predicted'])))
-                    gt_test = tf.reduce_sum(self._graph_ops['y_test'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    pr_test = tf.reduce_sum(self._graph_ops['x_test_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.abs(gt_test - pr_test))
-            if self._validation:
-                if self._loss_fn == 'l1':
-                    self._graph_ops['val_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
-                        self._graph_ops['y_val'], self._graph_ops['x_val_predicted'])))
-                    gt_val = tf.reduce_sum(self._graph_ops['y_val'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    pr_val = tf.reduce_sum(self._graph_ops['x_val_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
-
-            # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        # Epoch summaries for Tensorboard
+        self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
 
         with self._graph.as_default():
+
             self._assemble_graph()
             print('assembled the graph')
 
@@ -130,6 +129,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 self.shut_down()
 
             else:
+
                 if self._tb_dir is not None:
                     train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
 
@@ -309,6 +309,24 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         """
         pass
 
+    def load_state(self):
+        """
+        Load all trainable variables from a checkpoint file specified from the load_from_saved parameter in the
+        class constructor.
+        """
+
+        if self._load_from_saved is not False:
+            self._log('Loading from checkpoint file...')
+
+            with self._graph.as_default():
+                saver = tf.train.Saver(tf.global_variables())
+                saver.restore(self._session, tf.train.latest_checkpoint(self._load_from_saved))
+
+            self._has_trained = True
+        else:
+            warnings.warn('Tried to load state with no file given. Make sure load_from_saved is set in constructor.')
+            exit()
+
     def _parse_dataset(self, train_images, train_labels, train_mf,
                        test_images, test_labels, test_mf,
                        val_images, val_labels, val_mf,
@@ -395,7 +413,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._total_raw_samples = len(dataset_x)
 
         self._log('Total raw examples is %d' % self._total_raw_samples)
-        self._log('Parsing dataset...')
+        self._log('Loading dataset...')
 
         self._raw_image_files = dataset_x
         self._raw_labels = dataset_y
