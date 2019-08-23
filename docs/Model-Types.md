@@ -2,13 +2,14 @@
 
 DPP is mainly used through several model objects. These objects contain the methods used to load image & label datasets, control training hyperparameters and data augmentation, build and connect model layers, and train models.
 
-There are 5 `Model` objects is DPP for each problem type that it supports: 
+There are 6 `Model` objects is DPP for each problem type that it supports: 
 
 - `ClassificationModel`, for classifying images into different classes (like objects or biotic stress)
 - `RegressionModel`, for determining parameter values (like leaf counts) from images
 - `SemanticSegmentationModel`, for determining segmentation masks for images
 - `ObjectDetectionModel`, for detecting objects in images using the YOLO model
 - `CountCeptionModel`, for counting objects in images using the Countception model
+- `HeatmapObjectCountingModel`, for counting objects in images by determining heatmaps of their locations. This works similarly to semantic segmentation otherwise.
 
 #### Model Creation
 

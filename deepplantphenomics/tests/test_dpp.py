@@ -46,6 +46,16 @@ def test_set_num_regression_outputs():
         model.set_num_regression_outputs(-1)
 
 
+def test_set_density_map_sigma():
+    model = dpp.HeatmapObjectCountingModel()
+    assert model._density_sigma == 5
+
+    with pytest.raises(TypeError):
+        model.set_density_map_sigma('4')
+    model.set_density_map_sigma(2.0)
+    assert model._density_sigma == 2.0
+
+
 def test_set_maximum_training_epochs(model):
     with pytest.raises(TypeError):
         model.set_maximum_training_epochs(5.0)
@@ -261,7 +271,8 @@ def test_set_patch_size(model):
                           (dpp.RegressionModel(), 'softmax cross entropy', 'l2'),
                           (dpp.SemanticSegmentationModel(), 'l2', 'sigmoid cross entropy'),
                           (dpp.ObjectDetectionModel(), 'l2', 'yolo'),
-                          (dpp.CountCeptionModel(), 'l2', 'l1')])
+                          (dpp.CountCeptionModel(), 'l2', 'l1'),
+                          (dpp.HeatmapObjectCountingModel(), 'l1', 'sigmoid cross entropy')])
 def test_set_loss_function(model, bad_loss, good_loss):
     with pytest.raises(TypeError):
         model.set_loss_function(0)

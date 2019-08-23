@@ -140,7 +140,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         super().load_dataset_from_directory_with_segmentation_masks(dirname, seg_dirname)
         self.__label_from_image_file = True
 
-    def load_heatmap_dataset_from_csv(self, dirname, label_file):
+    def load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file):
         """
         Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
         train on and a csv file that maps image names to multiple x and y labels (formatted like x1,y1,x2,y2,...)

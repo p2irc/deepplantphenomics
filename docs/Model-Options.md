@@ -76,6 +76,7 @@ Sets the loss function to be used by the model during training and testing. The 
 - `SemanticSegmentationModel`: `sigmoid cross entropy` only
 - `ObjectDetectionModel`: `yolo` only
 - `CountCeptionModel`: `l1` only
+- `HeatmapObjectCountingModel`: `sigmoid cross entropy` only
 
 #### Regression Models Only
 
@@ -106,6 +107,14 @@ set_yolo_thresholds(thresh_sig=0.6,
 ```
 
 Sets the Intersection-over-Union (IoU) thresholds internally used by the YOLO model to detect objects and calculate average precision. `thresh_sig` controls the minimum IoU for taking a detection as significant, `thresh_overlap` controls the minimum IoU for overlapping detections (at which point only the more confidant one is taken), and `thresh_correct` controls the minimum IoU for saying a detection is correct during validation and testing.
+
+#### Heatmap Object Counting Models Only
+
+```
+set_density_map_sigma(sigma)
+```
+
+Sets the standard deviation used for gaussians when generating ground truth heatmaps from point locations of objects. See [the heatmap dataset loader](Loaders.md) for more info.
 
 ## Input Options
 
