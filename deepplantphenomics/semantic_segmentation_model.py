@@ -384,23 +384,14 @@ class SemanticSegmentationModel(DPPModel):
         self._raw_labels = seg_files
         self._split_labels = False  # Band-aid fix
 
-    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
-        self._train_images = self._parse_preprocess_images(tf.read_file(train_input_queue[0]),
-                                                           channels=self._image_depth)
-        self._test_images = self._parse_preprocess_images(tf.read_file(test_input_queue[0]),
-                                                          channels=self._image_depth)
-        self._val_images = self._parse_preprocess_images(tf.read_file(val_input_queue[0]),
-                                                         channels=self._image_depth)
-
-        # Apply pre-processing to the image labels (which are images for semantic segmentation), then convert them
+    def _parse_apply_preprocessing(self, input_queue):
+        # Apply pre-processing to the image labels too (which are images for semantic segmentation), then convert them
         # back to binary masks if they were resized
-        self._train_labels = self._parse_preprocess_images(tf.read_file(train_input_queue[1]), channels=1)
-        self._test_labels = self._parse_preprocess_images(tf.read_file(train_input_queue[1]), channels=1)
-        self._val_labels = self._parse_preprocess_images(tf.read_file(train_input_queue[1]), channels=1)
+        images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
+        labels = self._parse_preprocess_images(tf.read_file(input_queue[1]), channels=1)
         if self._resize_images:
-            self._train_labels = tf.reduce_mean(self._train_labels, axis=2)
-            self._test_labels = tf.reduce_mean(self._test_labels, axis=2)
-            self._val_labels = tf.reduce_mean(self._val_labels, axis=2)
+            labels = tf.reduce_mean(self._train_labels, axis=2)
+        return images, labels
 
     def _parse_crop_or_pad(self):
         self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,

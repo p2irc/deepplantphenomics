@@ -1916,7 +1916,11 @@ class DPPModel(ABC):
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
             # Apply pre-processing for training, testing, and validation images and labels
-            self._parse_apply_preprocessing(test_input_queue, train_input_queue, val_input_queue)
+            self._train_images, self._train_labels = self._parse_apply_preprocessing(train_input_queue)
+            if self._testing:
+                self._test_images, self._test_labels = self._parse_apply_preprocessing(test_input_queue)
+            if self._validation:
+                self._val_images, self._val_labels = self._parse_apply_preprocessing(val_input_queue)
 
             # Apply the various augmentations to the images
             if self._augmentation_crop:  # Apply random crops to images
@@ -2023,31 +2027,24 @@ class DPPModel(ABC):
         :param channels: The number of channels in the image. Defaults to 1
         :return: The preprocessed versions of the images
         """
-        images = tf.io.decode_image(images, channels=channels)
+        # decode_png and decode_jpeg apparently both accept JPEG and PNG. We're using one of them because decode_image
+        # also accepts GIF, preventing the return of a static shape and preventing resize_images from running. See this
+        # Github issue for Tensorflow: https://github.com/tensorflow/tensorflow/issues/9356
+        images = tf.io.decode_png(images, channels=channels)
         images = tf.image.convert_image_dtype(images, dtype=tf.float32)
         if self._resize_images:
             images = tf.image.resize_images(images, [self._image_height, self._image_width])
         return images
 
-    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
+    def _parse_apply_preprocessing(self, input_queue):
         """
-        Applies input preprocessing to images and labels from queues
-        :param test_input_queue: An input queue for training images and labels
-        :param train_input_queue: An input queue for testing images and labels
-        :param val_input_queue: An input queue for validation images and labels
+        Applies input preprocessing to images and labels from a queue
+        :param input_queue: The queue to apply preprocessing to
+        :return: The preprocessed images and labels from the queue
         """
-        self._train_images = self._parse_preprocess_images(tf.read_file(train_input_queue[0]),
-                                                           channels=self._image_depth)
-        self._test_images = self._parse_preprocess_images(tf.read_file(test_input_queue[0]),
-                                                          channels=self._image_depth)
-        self._val_images = self._parse_preprocess_images(tf.read_file(val_input_queue[0]),
-                                                         channels=self._image_depth)
-
-        self._train_labels = train_input_queue[1]
-        if self._testing:
-            self._test_labels = test_input_queue[1]
-        if self._validation:
-            self._val_labels = val_input_queue[1]
+        images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
+        labels = input_queue[1]
+        return images, labels
 
     def _parse_crop_augment(self):
         """Applies random cropping augmentation to input images during dataset parsing"""

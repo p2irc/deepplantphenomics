@@ -265,7 +265,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 remainder = self._batch_size - remainder
 
             images = x
-            self._parse_images(images, image_type='jpg', standardization=False)
+            self._parse_images(images, standardization=False)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
