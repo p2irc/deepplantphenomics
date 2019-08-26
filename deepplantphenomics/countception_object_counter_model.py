@@ -7,6 +7,7 @@ import time
 import warnings
 from tqdm import tqdm
 import pickle
+from PIL import Image
 
 
 class CountCeptionModel(deepplantpheno.DPPModel):
@@ -264,13 +265,12 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 num_batches += 1
                 remainder = self._batch_size - remainder
 
-            images = x
-            self._parse_images(images, image_type='jpg', standadization=False)
+            self._parse_images(x)
 
             x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
             x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            if self._load_from_saved:
+            if self._load_from_saved is not False:
                 self.load_state()
             self._initialize_queue_runners()
 
@@ -295,7 +295,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
         # Get the predicted count
         patch_size = 32
-        interpreted_outputs = [x / (patch_size ** 2.0) for x in np.sum(xx, axis=(1,2))]
+        interpreted_outputs = [y / (patch_size ** 2.0) for y in np.sum(xx, axis=(1,2))]
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
@@ -308,6 +308,19 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         use cases such as creating the output layer before loading data.
         """
         pass
+
+
+    def _parse_images(self, images):
+        """
+        Parse and put input images into self._all_images.
+        This is usually called in forward_pass_with_file_inputs(), when trained network is used for prediction.
+        """
+        input_queue = tf.train.slice_input_producer([images], shuffle=False)
+        # '*255' because tf.io.decode_image() returns values between 0 and 1
+        # In the pickle file for training, image data values are between 0 and 255
+        images = tf.io.decode_image(tf.read_file(input_queue[0]), channels=self._image_depth, dtype=tf.float32) * 255
+        images.set_shape([self._image_height, self._image_width, self._image_depth])
+        self._all_images = images
 
 
     def _parse_dataset(self, train_images, train_labels, train_mf,
@@ -368,7 +381,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             if self._validation:
                 self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
-    def load_dataset_from_pkl_file(self, pkl_file_name):
+    def load_countception_dataset_from_pkl_file(self, pkl_file_name):
         """
         Loads the dataset(image data and ground truth count map data) from a pickle file into an internal
         representation.
@@ -402,4 +415,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._raw_labels = dataset_y
 
         self._split_labels = False
+
+
 

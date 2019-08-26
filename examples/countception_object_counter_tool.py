@@ -6,7 +6,10 @@
 import deepplantphenomics as dpp
 import os
 
-dir = '../deepplantphenomics/tests/test_data/test_countception_MBM_images'
+m_path, _ = os.path.split(__file__)
+re_path = '../deepplantphenomics/tests/test_data/test_countception_MBM_images'
+
+dir = os.path.join(m_path, re_path)
 
 images = [os.path.join(dir, name) for name in os.listdir(dir)]
 
