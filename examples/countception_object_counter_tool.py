@@ -3,16 +3,16 @@
 # Loads image files from a folder.
 #
 
-from .. import deepplantphenomics as dpp
+import deepplantphenomics as dpp
 import os
 
-dir = './data/canola_flowers'
+dir = './data/MBM_images'
 
 images = [os.path.join(dir, name) for name in os.listdir(dir)]
 
 print('Performing flower counting...')
 
-y = dpp.tools.count_flowers(images)
+y = dpp.tools.object_count_countception(images)
 
 for k,v in zip(images, y):
     print('%s: %d' % (os.path.basename(k), v))

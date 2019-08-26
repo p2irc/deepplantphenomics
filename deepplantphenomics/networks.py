@@ -1,4 +1,5 @@
 import os
+import tensorflow as tf
 
 
 class boundingBoxRegressor(object):
@@ -179,9 +180,9 @@ class countCeptionCounter(object):
         m_path, _ = os.path.split(__file__)
         checkpoint_path = os.path.join(m_path, 'network_states', self.__dir_name)
 
-        from . import countception_object_counter_model as cc
+        import deepplantphenomics as dpp
 
-        self.model = cc.CountCeptionModel(debug=False, load_from_saved=checkpoint_path)
+        self.model = dpp.CountCeptionModel(debug=True, load_from_saved=checkpoint_path)
 
         # Define model hyperparameters
         self.model.set_loss_function('l1')
@@ -247,6 +248,7 @@ class countCeptionCounter(object):
                                       decay=0.9)
 
     def forward_pass(self, x):
+
         y = self.model.forward_pass_with_interpreted_outputs(x)
         return y
 
