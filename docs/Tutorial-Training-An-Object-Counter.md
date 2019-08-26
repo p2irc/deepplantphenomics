@@ -85,4 +85,6 @@ For the countception network, image and ground truth data is loaded from a pickl
 model.load_dataset_from_pkl_file()
 ```
 
+For more information about how the pickle file is generated, please refer to the paper https://arxiv.org/abs/1703.08710 and the githut repo https://github.com/roggirg/count-ception_mbm.
+
 
