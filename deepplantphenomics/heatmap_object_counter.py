@@ -147,7 +147,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param dirname: The path to the directory with the image files and label file
         :param label_file: The path to the csv file with heatmap point labels
         """
-        labels, ids = loaders.read_csv_multi_labels_and_ids(label_file, 0)
+        filename = os.path.join(dirname, label_file)
+        labels, ids = loaders.read_csv_multi_labels_and_ids(filename, 0)
 
         # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
         # ground truth heatmap
@@ -158,18 +159,21 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                     # There is an odd number of coordinates, which is problematic
                     raise ValueError("Unpaired coordinate found in points labels from " + label_file)
 
+                coords = [int(x) for x in coords]
                 points = zip(coords[0::2], coords[1::2])
                 heatmaps.append(self.__points_to_density_map(points))
             else:
                 # There are no objects, so the heatmap is blank
                 heatmaps.append(np.full([self._image_height, self._image_width], 0))
 
+        heatmaps = np.stack(heatmaps)
+
         image_files = [os.path.join(dirname, filename) for filename in ids]
         self._total_raw_samples = len(image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
         self._raw_image_files = image_files
-        self._raw_labels = labels
+        self._raw_labels = heatmaps
         self._split_labels = False  # Band-aid fix
 
     def __points_to_density_map(self, points):
@@ -180,7 +184,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         """
         # The simple way to do this is to place single pixel 1's on a blank image at each point and then apply a
         # gaussian filter to that image. The result is our density map.
-        den_map = np.empty([self._image_height, self._image_width])
+        den_map = np.zeros([self._image_height, self._image_width], dtype=np.float32)
         for p in points:
             den_map[p[0], p[1]] = 1
         den_map = gaussian_filter(den_map, self._density_sigma, mode='constant')
