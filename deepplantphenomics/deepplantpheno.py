@@ -615,7 +615,7 @@ class DPPModel(ABC):
         """
         pass
 
-    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer):
+    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         """
         Calculates and reports mid-training losses and other statistics, both through the console and through writing
         Tensorboard log files
@@ -626,7 +626,7 @@ class DPPModel(ABC):
         """
         elapsed = time.time() - start_time
 
-        if self._tb_dir is not None:
+        if train_writer is not None:
             summary = self._session.run(self._graph_ops['merged'])
             train_writer.add_summary(summary, batch_num)
 
@@ -694,7 +694,10 @@ class DPPModel(ABC):
                     self._global_epoch = i
                     self._session.run(self._graph_ops['optimizer'])
                     if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        self._training_batch_results(i, start_time, tqdm_range, train_writer)
+                        if self._tb_dir is not None:
+                            self._training_batch_results(i, start_time, tqdm_range, train_writer)
+                        else:
+                            self._training_batch_results(i, start_time, tqdm_range)
 
                         if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
                             self.save_state(self._save_dir)
