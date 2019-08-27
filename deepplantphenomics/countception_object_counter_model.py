@@ -102,6 +102,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                     self._graph_ops['y_test'], self._graph_ops['x_test_predicted'])))
                 gt_test = tf.reduce_sum(self._graph_ops['y_test'], axis=[1, 2, 3]) / (32 ** 2.0)
                 pr_test = tf.reduce_sum(self._graph_ops['x_test_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
+                self._graph_ops['gt_test'] = gt_test
+                self._graph_ops['pr_test'] = pr_test
                 self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.abs(gt_test - pr_test))
         if self._validation:
             if self._loss_fn == 'l1':
@@ -239,7 +241,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
-                batch_loss, batch_abs_diff = self._session.run(
+                batch_loss, batch_abs_diff, batch_gt, batch_pr = self._session.run(
                     [self._graph_ops['test_losses'], self._graph_ops['test_accuracy']])
                 loss_sum = loss_sum + batch_loss
                 abs_diff_sum = abs_diff_sum + batch_abs_diff

@@ -18,10 +18,10 @@ model.set_test_split(0.3)
 model.set_validation_split(0.2)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('xavier')
-model.set_maximum_training_epochs(1000)
+model.set_maximum_training_epochs(10)
 
 # Load images and ground truth from a pickle file
-model.load_countception_dataset_from_pkl_file('MBM_dataset.pkl')
+model.load_countception_dataset_from_pkl_file('MBM-dataset.pkl')
 
 # Define a model architecture
 model.add_input_layer()
