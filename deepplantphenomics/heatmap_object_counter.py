@@ -45,8 +45,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
             # Initialize storage for the retrieved test variables
             all_losses = np.empty(shape=1)
-            all_y = np.empty(shape=[self._batch_size, self._image_height, self._image_width])
-            all_predictions = np.empty(shape=[self._batch_size, self._image_height, self._image_width])
+            all_y = np.empty(shape=[1, self._image_height, self._image_width, 1])
+            all_predictions = np.empty(shape=[1, self._image_height, self._image_width, 1])
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
@@ -100,24 +100,26 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
             # Specifically for heatmap object counting, we also want to determine an accuracy in terms of how the sums
             # over the predicted and ground truth heatmaps compare to each other
-            heatmap_accuracies = np.array(map(
-                lambda i: self.__heatmap_accuracy(all_predictions[i, ...], all_y[i, ...]),
-                range(all_y.shape[0])))
-            overall_accuracy = np.mean(heatmap_accuracies)
-            self._log('Heatmap Accuracies: {}'.format(heatmap_accuracies))
-            self._log('Heatmap Accuracies: {}'.format(overall_accuracy))
+            heatmap_differences = [self.__heatmap_difference(all_predictions[i, ...], all_y[i, ...])
+                                   for i in range(all_y.shape[0])]
+            heatmap_differences = np.array(heatmap_differences)
+            overall_difference = np.mean(heatmap_differences)
+            self._log('Heatmap Differences: {}'.format(heatmap_differences))
+            self._log('Mean Heatmap Difference: {}'.format(overall_difference))
 
-            return overall_accuracy
+            return overall_difference
 
-    def __heatmap_accuracy(self, predict_heatmap, label_heatmap):
+    def __heatmap_difference(self, predict_heatmap, label_heatmap):
         """
-        Calculates the accuracy of an image's predicted heatmap compared to its ground truth based on sums over their
-        pixel values
+        Calculates the difference in an image's predicted heatmap compared to its ground truth based on sums over their
+        pixel values (i.e. their object count)
         :param predict_heatmap: The model's predicted heatmap as an ndarray
         :param label_heatmap: The image's corresponding label heatmap as an ndarray
         :return: The accuracy of the heatmap prediction
         """
-        return np.abs(np.sum(predict_heatmap) - np.sum(label_heatmap))
+        predicted_count = np.sum(predict_heatmap)
+        label_count = np.sum(label_heatmap)
+        return np.abs(predicted_count - label_count)
 
     def forward_pass_with_interpreted_outputs(self, x):
         total_outputs = super().forward_pass_with_file_inputs(x)
@@ -168,7 +170,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         heatmaps = np.stack(heatmaps)
 
-        image_files = [os.path.join(dirname, filename) for filename in ids]
+        image_files = [os.path.join(dirname, filename) for filename in os.listdir(dirname)
+                       if os.path.isfile(os.path.join(dirname, filename)) & filename.endswith('.png')]
         self._total_raw_samples = len(image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
