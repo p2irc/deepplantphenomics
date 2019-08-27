@@ -251,8 +251,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                     pr = batch_pr[idx]
                     abs_diff = abs(pr-gt)
                     rel_diff = abs_diff / gt
-                    print("idx={}, real_count={}, prediction={}, abs_diff={}, relative_diff={}"
-                          .format(idx, gt, pr, abs_diff, rel_diff))
+                    self._log("idx={}, real_count={}, prediction={:.3f}, abs_diff={:.3f}, relative_diff={:.3f}"
+                              .format(idx, gt, pr, abs_diff, rel_diff))
 
             # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix (not
             # implemented)

@@ -247,6 +247,8 @@ class countCeptionCounter(object):
                                       epsilon=1e-5,
                                       decay=0.9)
 
+        # self.model.use_predefined_model("countception")
+
     def forward_pass(self, x):
 
         y = self.model.forward_pass_with_interpreted_outputs(x)
