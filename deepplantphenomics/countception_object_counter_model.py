@@ -242,9 +242,17 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             # Main test loop
             for _ in tqdm(range(num_batches)):
                 batch_loss, batch_abs_diff, batch_gt, batch_pr = self._session.run(
-                    [self._graph_ops['test_losses'], self._graph_ops['test_accuracy']])
+                    [self._graph_ops['test_losses'], self._graph_ops['test_accuracy'],
+                     self._graph_ops['gt_test'], self._graph_ops['pr_test']])
                 loss_sum = loss_sum + batch_loss
                 abs_diff_sum = abs_diff_sum + batch_abs_diff
+
+                for idx, gt in enumerate(batch_gt):
+                    pr = batch_pr[idx]
+                    abs_diff = abs(pr-gt)
+                    rel_diff = abs_diff / gt
+                    print("idx={}, real_count={}, prediction={}, abs_diff={}, relative_diff={}"
+                          .format(idx, gt, pr, abs_diff, rel_diff))
 
             # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix (not
             # implemented)
