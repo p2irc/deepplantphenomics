@@ -27,15 +27,13 @@ class SemanticSegmentationModel(DPPModel):
         # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
         # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
         train_images_summary = self._get_weights_as_image(
-            tf.transpose(tf.expand_dims(self._graph_forward_pass, -1), (1, 2, 3, 0)),
-            self._layers[-1].output_size)
+            tf.transpose(self._graph_forward_pass, (1, 2, 3, 0)), self._layers[-1].output_size)
         tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
                               collections=['custom_summaries'])
             val_images_summary = self._get_weights_as_image(
-                tf.transpose(tf.expand_dims(self._graph_ops['x_val_predicted'], -1), (1, 2, 3, 0)),
-                self._layers[-1].output_size)
+                tf.transpose(self._graph_ops['x_val_predicted'], (1, 2, 3, 0)), self._layers[-1].output_size)
             tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
     def _assemble_graph(self):

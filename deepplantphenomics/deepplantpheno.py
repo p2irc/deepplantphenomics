@@ -817,7 +817,6 @@ class DPPModel(ABC):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
         with self._graph.as_default():
             pad = 1
-            grid_x = 4
 
             # pad x and y
             x1 = tf.pad(kernel, tf.constant([[pad, 0], [pad, 0], [0, 0], [0, 0]]))
@@ -830,18 +829,23 @@ class DPPModel(ABC):
             # convolution grid for each layer, not each batch.
             if size is not None:
                 # this is when visualizing the actual images
-                grid_y = int(np.ceil(self._batch_size / 4))
+                grid_y_prelim = int(np.ceil(self._batch_size))
                 # x and y dimensions, w.r.t. padding
                 y = size[1] + pad
                 x = size[2] + pad
                 num_channels = size[-1]
             else:
                 # this is when visualizing the weights
-                grid_y = (kernel.get_shape().as_list()[-1] / 4)
+                grid_y_prelim = (kernel.get_shape().as_list()[-1])
                 # x and y dimensions, w.r.t. padding
                 y = kernel.get_shape()[0] + pad
                 x = kernel.get_shape()[1] + pad
                 num_channels = kernel.get_shape().as_list()[2]
+
+            # we then want to set grid_x somewhat dynamically based on grid_y, making it the largest possible out of
+            # 4, 2, or 1
+            grid_x = 4 if grid_y_prelim % 4 == 0 else (2 if grid_y_prelim % 2 == 0 else 1)
+            grid_y = grid_y_prelim // grid_x
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
