@@ -22,8 +22,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to classification problems
         tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
@@ -33,6 +32,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                               collections=['custom_summaries'])
             tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
                               collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
 

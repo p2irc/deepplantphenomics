@@ -21,7 +21,7 @@ class SemanticSegmentationModel(DPPModel):
         self._graph_forward_pass = None
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to semantic segmentation
         # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
@@ -35,6 +35,8 @@ class SemanticSegmentationModel(DPPModel):
             val_images_summary = self._get_weights_as_image(
                 tf.transpose(self._graph_ops['x_val_predicted'], (1, 2, 3, 0)), self._layers[-1].output_size)
             tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
         with self._graph.as_default():

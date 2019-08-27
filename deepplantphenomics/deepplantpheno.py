@@ -558,10 +558,10 @@ class DPPModel(ABC):
 
         return gradients, variables, global_grad_norm
 
-    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+    def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
-        Adds graph components related to outputting losses and other summary variables to Tensorboard. This covers
-        common outputs across every problem type.
+        Adds graph components common to every problem type related to outputting losses and other summary variables to
+        Tensorboard.
         :param l2_cost: ...
         :param gradients: ...
         :param global_grad_norm: ...
@@ -601,6 +601,14 @@ class DPPModel(ABC):
 
             tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
 
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        """
+        Adds graph components related to outputting losses and other summary variables to Tensorboard.
+        :param l2_cost: ...
+        :param gradients: ...
+        :param global_grad_norm: ...
+        """
+        self._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
         self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     @abstractmethod

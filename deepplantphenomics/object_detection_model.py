@@ -210,13 +210,15 @@ class ObjectDetectionModel(DPPModel):
         return total_loss
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to object detection
         tf.summary.scalar('train/yolo_loss', self._yolo_loss, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
                               collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
         with self._graph.as_default():

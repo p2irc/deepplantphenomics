@@ -28,7 +28,7 @@ class ClassificationModel(DPPModel):
         self.__val_class_predictions = None
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to classification problems
         tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
@@ -38,6 +38,8 @@ class ClassificationModel(DPPModel):
                               collections=['custom_summaries'])
             tf.summary.histogram('validation/class_predictions', self.__val_class_predictions,
                                  collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
         with self._graph.as_default():
