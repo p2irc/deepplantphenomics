@@ -409,3 +409,13 @@ class SemanticSegmentationModel(DPPModel):
                                                                       self._image_width)
             self._val_labels = tf.image.resize_image_with_crop_or_pad(self._val_labels, self._image_height,
                                                                       self._image_width)
+
+    def _parse_force_set_shape(self):
+        self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
+        self._train_labels.set_shape([self._image_height, self._image_width, 1])
+        if self._testing:
+            self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
+            self._test_labels.set_shape([self._image_height, self._image_width, 1])
+        if self._validation:
+            self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+            self._val_labels.set_shape([self._image_height, self._image_width, 1])

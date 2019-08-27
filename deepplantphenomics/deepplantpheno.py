@@ -1964,11 +1964,8 @@ class DPPModel(ABC):
                 self._val_images = tf.image.per_image_standardization(self._val_images)
 
             # Manually set the shape of the image tensors so it matches the shape of the images
-            self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            if self._testing:
-                self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+            self._parse_force_set_shape()
+
 
     def _parse_images(self, images, standardization=True):
         """Takes some images as input, creates producer of processed images internally to this instance"""
@@ -2095,6 +2092,15 @@ class DPPModel(ABC):
             self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
             self._train_images = tf.image.resize_images(self._train_images,
                                                         [self._image_height, self._image_width])
+
+    def _parse_force_set_shape(self):
+        """Force sets the shapes of the image Tensors, since we know what their sizes should be but Tensorflow can't
+        properly infer them (unless image resizing is turned on)"""
+        self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
+        if self._testing:
+            self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
+        if self._validation:
+            self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
     def _smallest_crop_fraction(self):
         """

@@ -170,8 +170,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         heatmaps = np.stack(heatmaps)
 
-        image_files = [os.path.join(dirname, filename) for filename in os.listdir(dirname)
-                       if os.path.isfile(os.path.join(dirname, filename)) & filename.endswith('.png')]
+        image_files = sorted([os.path.join(dirname, filename) for filename in os.listdir(dirname)
+                              if os.path.isfile(os.path.join(dirname, filename)) & filename.endswith('.png')])
         self._total_raw_samples = len(image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
@@ -204,3 +204,11 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             return super(SemanticSegmentationModel, self)._parse_apply_preprocessing(input_queue)
         else:
             return super()._parse_apply_preprocessing(input_queue)
+
+    def _parse_force_set_shape(self):
+        # See _parse_apply_preprocessing for an explanation of whats going on here
+        if not self.__label_from_image_file:
+            # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
+            return super(SemanticSegmentationModel, self)._parse_force_set_shape()
+        else:
+            return super()._parse_force_set_shape()
