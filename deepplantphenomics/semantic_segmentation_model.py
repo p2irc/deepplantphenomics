@@ -166,7 +166,8 @@ class SemanticSegmentationModel(DPPModel):
                 self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
 
             # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
@@ -390,7 +391,7 @@ class SemanticSegmentationModel(DPPModel):
         images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
         labels = self._parse_preprocess_images(tf.read_file(input_queue[1]), channels=1)
         if self._resize_images:
-            labels = tf.reduce_mean(self._train_labels, axis=2)
+            labels = tf.reduce_mean(labels, axis=2)
         return images, labels
 
     def _parse_crop_or_pad(self):

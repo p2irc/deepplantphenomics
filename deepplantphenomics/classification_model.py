@@ -163,9 +163,10 @@ class ClassificationModel(DPPModel):
                 self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
 
             # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
-    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer):
+    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time
 
         if self._tb_dir is not None:

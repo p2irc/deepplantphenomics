@@ -357,7 +357,8 @@ class ObjectDetectionModel(DPPModel):
                                                                              self._graph_ops['x_val_predicted'])
 
             # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

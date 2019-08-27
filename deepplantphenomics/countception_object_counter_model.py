@@ -113,7 +113,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                     self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
 
             # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
 

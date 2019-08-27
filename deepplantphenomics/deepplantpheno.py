@@ -566,43 +566,42 @@ class DPPModel(ABC):
         :param gradients: ...
         :param global_grad_norm: ...
         """
-        if self._tb_dir is not None:
-            self._log('Creating Tensorboard summaries...')
+        self._log('Creating Tensorboard summaries...')
 
-            # Summaries for any problem type
-            tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-            tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-            tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-            filter_summary = self._get_weights_as_image(self._first_layer().weights)
-            tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+        # Summaries for any problem type
+        tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+        tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+        tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+        filter_summary = self._get_weights_as_image(self._first_layer().weights)
+        tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
 
-            # Summaries for each layer
-            for layer in self._layers:
-                if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                    tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                    tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+        # Summaries for each layer
+        for layer in self._layers:
+            if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
 
-                    # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                    # and it was found that if you commented the below line then the code wouldn't hang. Never
-                    # fully understood why, as it only happened if you tried running with train/test and no
-                    # validation. But after adding more features and just randomly trying to uncomment the below
-                    # line to see if it would work, it appears to now be working, but still don't know why...
-                    tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                         collections=['custom_summaries'])
+                # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                # and it was found that if you commented the below line then the code wouldn't hang. Never
+                # fully understood why, as it only happened if you tried running with train/test and no
+                # validation. But after adding more features and just randomly trying to uncomment the below
+                # line to see if it would work, it appears to now be working, but still don't know why...
+                tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                     collections=['custom_summaries'])
 
-            # Summaries for gradients
-            # We use variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-            # the name and tensorboard does not like this so we remove it with the [:-2]
-            # We also currently seem to get None's for gradients when performing a hyper-parameter search
-            # and as such it is simply left out for hyper-param searches, needs to be fixed
-            if not self._hyper_param_search:
-                for index, grad in enumerate(gradients):
-                    tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                         collections=['custom_summaries'])
+        # Summaries for gradients
+        # We use variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+        # the name and tensorboard does not like this so we remove it with the [:-2]
+        # We also currently seem to get None's for gradients when performing a hyper-parameter search
+        # and as such it is simply left out for hyper-param searches, needs to be fixed
+        if not self._hyper_param_search:
+            for index, grad in enumerate(gradients):
+                tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                     collections=['custom_summaries'])
 
-                tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+            tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
 
-            self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     @abstractmethod
     def _assemble_graph(self):
