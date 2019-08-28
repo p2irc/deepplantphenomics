@@ -39,7 +39,7 @@ class tools(object):
 
         return predictions
 
-    def object_count_countception(x, batch_size=8, image_height=300, image_width=300, image_depth=3):
+    def object_count_countception(x, batch_size=1, image_height=300, image_width=300, image_depth=3):
 
         net = networks.countCeptionCounter(
             batch_size=batch_size, image_height=image_height, image_width=image_width, image_depth=image_depth)

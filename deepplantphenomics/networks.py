@@ -174,7 +174,7 @@ class countCeptionCounter(object):
 
     __dir_name = 'countception-counter'
 
-    def __init__(self, batch_size=2, image_height=300, image_width=300, image_depth=3):
+    def __init__(self, batch_size=1, image_height=300, image_width=300, image_depth=3):
         """A network which counts flowers in plant images"""
 
         m_path, _ = os.path.split(__file__)

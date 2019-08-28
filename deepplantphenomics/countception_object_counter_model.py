@@ -266,36 +266,33 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
         with self._graph.as_default():
 
-            total_outputs = []
-
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
-
-            if remainder != 0:
-                num_batches += 1
-                remainder = self._batch_size - remainder
-
             self._parse_images(x)
 
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            dataset_batch = tf.data.Dataset.from_tensor_slices(self._all_images) \
+                .batch(self._batch_size, drop_remainder=True) \
+                .prefetch(self._batch_size * 2)
+
+            iterator = dataset_batch.make_one_shot_iterator()
+            image_data = iterator.get_next()
 
             if self._load_from_saved is not False:
                 self.load_state()
+
+            # queue is not used, but this is still called to keep compatible with the shut_down() function
             self._initialize_queue_runners()
 
             # Run model on them
-            x_pred = self.forward_pass(x_test, deterministic=True)
+            x_pred = self.forward_pass(image_data, deterministic=True)
 
-            for i in range(int(num_batches)):
-                xx = self._session.run(x_pred)
-                for img in np.array_split(xx, self._batch_size):
-                    total_outputs.append(np.squeeze(img))
+            total_outputs = []
+            try:
+                while True:
+                    x_pred_value = self._session.run(x_pred)
+                    for pr in x_pred_value:
+                        total_outputs.append(np.squeeze(pr))
 
-            # delete any outputs which are overruns from the last batch
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
+            except tf.errors.OutOfRangeError:
+                pass
 
         return total_outputs
 
@@ -325,13 +322,13 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         Parse and put input images into self._all_images.
         This is usually called in forward_pass_with_file_inputs(), when trained network is used for prediction.
         """
-        input_queue = tf.train.slice_input_producer([images], shuffle=False)
-        # '*255' because tf.io.decode_image() returns values between 0 and 1
-        # In the pickle file for training, image data values are between 0 and 255
-        images = tf.io.decode_image(tf.read_file(input_queue[0]), channels=self._image_depth, dtype=tf.float32) * 255
-        images.set_shape([self._image_height, self._image_width, self._image_depth])
-        self._all_images = images
+        image_data_list = []
+        for img in images:
+            image_data_raw = np.array(Image.open(img).getdata())
+            image_data = image_data_raw.reshape((self._image_height, self._image_width, self._image_depth))
+            image_data_list.append(image_data)
 
+        self._all_images = np.asarray(image_data_list).astype(np.float32)
 
     def _parse_dataset(self, train_images, train_labels, train_mf,
                        test_images, test_labels, test_mf,
