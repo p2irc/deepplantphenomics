@@ -1,9 +1,9 @@
 from . import layers, definitions, deepplantpheno
 import numpy as np
 import tensorflow as tf
-import os
 import datetime
 import time
+import os
 import warnings
 from tqdm import tqdm
 import pickle
@@ -23,8 +23,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to classification problems
         tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
@@ -34,6 +33,8 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                               collections=['custom_summaries'])
             tf.summary.scalar('validation/accuracy', self._graph_ops['val_accuracy'],
                               collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
 
@@ -113,8 +114,9 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 pr_val = tf.reduce_sum(self._graph_ops['x_val_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
                 self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
 
-        # Epoch summaries for Tensorboard
-        self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            # Epoch summaries for Tensorboard
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def begin_training(self, return_test_loss=False):
 
@@ -302,7 +304,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
         # Get the predicted count
         patch_size = 32
-        interpreted_outputs = [y / (patch_size ** 2.0) for y in np.sum(xx, axis=(1,2))]
+        interpreted_outputs = [y / (patch_size ** 2.0) for y in np.sum(xx, axis=(1, 2))]
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
@@ -422,6 +424,3 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._raw_labels = dataset_y
 
         self._split_labels = False
-
-
-

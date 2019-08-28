@@ -2,9 +2,9 @@
 # Used to train the rosette-leaf-regressor model
 #
 
-from deepplantphenomics.regression_model import RegressionModel
+import deepplantphenomics as dpp
 
-model = RegressionModel(debug=True, save_checkpoints=False, report_rate=20)
+model = dpp.RegressionModel(debug=True, save_checkpoints=False, report_rate=20)
 
 # 3 channels for colour, 1 channel for greyscale
 channels = 3

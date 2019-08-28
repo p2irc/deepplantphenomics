@@ -17,24 +17,24 @@ class ObjectDetectionModel(DPPModel):
     _supported_loss_fns = ['yolo']
     _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
-    # State variables specific to object detection for constructing the graph and passing to Tensorboard
-    _yolo_loss = None
-
-    # Yolo-specific parameters, non-default values defined by set_yolo_parameters
-    _grid_w = 7
-    _grid_h = 7
-    _LABELS = ['plant']
-    _NUM_CLASSES = 1
-    _RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
-    _ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
-    _NUM_BOXES = 5
-    _THRESH_SIG = 0.6
-    _THRESH_OVERLAP = 0.3
-    _THRESH_CORRECT = 0.5
-
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+        # State variables specific to object detection for constructing the graph and passing to Tensorboard
+        self._yolo_loss = None
+
+        # Yolo-specific parameters, non-default values defined by set_yolo_parameters
+        self._grid_w = 7
+        self._grid_h = 7
+        self._LABELS = ['plant']
+        self._NUM_CLASSES = 1
+        self._RAW_ANCHORS = [(159, 157), (103, 133), (91, 89), (64, 65), (142, 101)]
+        self._ANCHORS = None  # Scaled version, but grid and image sizes are needed so default is deferred
+        self._NUM_BOXES = 5
+        self._THRESH_SIG = 0.6
+        self._THRESH_OVERLAP = 0.3
+        self._THRESH_CORRECT = 0.5
 
     def set_image_dimensions(self, image_height, image_width, image_depth):
         super().set_image_dimensions(image_height, image_width, image_depth)
@@ -210,13 +210,15 @@ class ObjectDetectionModel(DPPModel):
         return total_loss
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to object detection
         tf.summary.scalar('train/yolo_loss', self._yolo_loss, collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
                               collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
         with self._graph.as_default():
@@ -357,7 +359,8 @@ class ObjectDetectionModel(DPPModel):
                                                                              self._graph_ops['x_val_predicted'])
 
             # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
@@ -585,7 +588,7 @@ class ObjectDetectionModel(DPPModel):
 
         # If there are no valid predictions at all, the mAP is 0
         if not detections:
-            return 0
+            return np.float32(0)  # We need to play nice with compute_full_test_accuracy()'s return
 
         # With multiple classes, we would also have class tags in the detection tuples so the below code could generate
         # and iterate over class-separated detection lists, giving multiple AP values and one true mean AP. We aren't

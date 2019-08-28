@@ -16,7 +16,6 @@ class RegressionModel(DPPModel):
                                 definitions.AugmentationType.CROP,
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
-    _num_regression_outputs = 1
 
     # State variables specific to regression for constructing the graph and passing to Tensorboard
     _regression_loss = None
@@ -24,6 +23,8 @@ class RegressionModel(DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+        self._num_regression_outputs = 1
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
@@ -35,7 +36,7 @@ class RegressionModel(DPPModel):
         self._num_regression_outputs = num
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
-        super()._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+        super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to regression problems
         if self._num_regression_outputs == 1:
@@ -45,6 +46,8 @@ class RegressionModel(DPPModel):
                                   collections=['custom_summaries'])
                 tf.summary.histogram('validation/batch_losses', self._graph_ops['val_losses'],
                                      collections=['custom_summaries'])
+
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
         with self._graph.as_default():
@@ -187,7 +190,8 @@ class RegressionModel(DPPModel):
                 self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
 
             # Epoch summaries for Tensorboard
-            self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+            if self._tb_dir is not None:
+                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

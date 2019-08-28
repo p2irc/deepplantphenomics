@@ -558,51 +558,58 @@ class DPPModel(ABC):
 
         return gradients, variables, global_grad_norm
 
-    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+    def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
-        Adds graph components related to outputting losses and other summary variables to Tensorboard. This covers
-        common outputs across every problem type.
+        Adds graph components common to every problem type related to outputting losses and other summary variables to
+        Tensorboard.
         :param l2_cost: ...
         :param gradients: ...
         :param global_grad_norm: ...
         """
-        if self._tb_dir is not None:
-            self._log('Creating Tensorboard summaries...')
+        self._log('Creating Tensorboard summaries...')
 
-            # Summaries for any problem type
-            tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
-            tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
-            tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
-            filter_summary = self._get_weights_as_image(self._first_layer().weights)
-            tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
+        # Summaries for any problem type
+        tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
+        tf.summary.scalar('train/learning_rate', self._learning_rate, collections=['custom_summaries'])
+        tf.summary.scalar('train/l2_loss', l2_cost, collections=['custom_summaries'])
+        filter_summary = self._get_weights_as_image(self._first_layer().weights)
+        tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
 
-            # Summaries for each layer
-            for layer in self._layers:
-                if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                    tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                    tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+        # Summaries for each layer
+        for layer in self._layers:
+            if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
+                tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
+                tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
 
-                    # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                    # and it was found that if you commented the below line then the code wouldn't hang. Never
-                    # fully understood why, as it only happened if you tried running with train/test and no
-                    # validation. But after adding more features and just randomly trying to uncomment the below
-                    # line to see if it would work, it appears to now be working, but still don't know why...
-                    tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                         collections=['custom_summaries'])
+                # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+                # and it was found that if you commented the below line then the code wouldn't hang. Never
+                # fully understood why, as it only happened if you tried running with train/test and no
+                # validation. But after adding more features and just randomly trying to uncomment the below
+                # line to see if it would work, it appears to now be working, but still don't know why...
+                tf.summary.histogram('activations/' + layer.name, layer.activations,
+                                     collections=['custom_summaries'])
 
-            # Summaries for gradients
-            # We use variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
-            # the name and tensorboard does not like this so we remove it with the [:-2]
-            # We also currently seem to get None's for gradients when performing a hyper-parameter search
-            # and as such it is simply left out for hyper-param searches, needs to be fixed
-            if not self._hyper_param_search:
-                for index, grad in enumerate(gradients):
-                    tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
-                                         collections=['custom_summaries'])
+        # Summaries for gradients
+        # We use variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
+        # the name and tensorboard does not like this so we remove it with the [:-2]
+        # We also currently seem to get None's for gradients when performing a hyper-parameter search
+        # and as such it is simply left out for hyper-param searches, needs to be fixed
+        if not self._hyper_param_search:
+            for index, grad in enumerate(gradients):
+                tf.summary.histogram("gradients/" + variables[index].name[:-2], gradients[index],
+                                     collections=['custom_summaries'])
 
-                tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
+            tf.summary.histogram("gradient_global_norm/", global_grad_norm, collections=['custom_summaries'])
 
-            self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
+    def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
+        """
+        Adds graph components related to outputting losses and other summary variables to Tensorboard.
+        :param l2_cost: ...
+        :param gradients: ...
+        :param global_grad_norm: ...
+        """
+        self._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
+        self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     @abstractmethod
     def _assemble_graph(self):
@@ -615,7 +622,7 @@ class DPPModel(ABC):
         """
         pass
 
-    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer):
+    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         """
         Calculates and reports mid-training losses and other statistics, both through the console and through writing
         Tensorboard log files
@@ -626,7 +633,7 @@ class DPPModel(ABC):
         """
         elapsed = time.time() - start_time
 
-        if self._tb_dir is not None:
+        if train_writer is not None:
             summary = self._session.run(self._graph_ops['merged'])
             train_writer.add_summary(summary, batch_num)
 
@@ -694,7 +701,10 @@ class DPPModel(ABC):
                     self._global_epoch = i
                     self._session.run(self._graph_ops['optimizer'])
                     if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        self._training_batch_results(i, start_time, tqdm_range, train_writer)
+                        if self._tb_dir is not None:
+                            self._training_batch_results(i, start_time, tqdm_range, train_writer)
+                        else:
+                            self._training_batch_results(i, start_time, tqdm_range)
 
                         if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
                             self.save_state(self._save_dir)
@@ -815,7 +825,6 @@ class DPPModel(ABC):
         """Filter visualization, adapted with permission from https://gist.github.com/kukuruza/03731dc494603ceab0c5"""
         with self._graph.as_default():
             pad = 1
-            grid_x = 4
 
             # pad x and y
             x1 = tf.pad(kernel, tf.constant([[pad, 0], [pad, 0], [0, 0], [0, 0]]))
@@ -828,18 +837,23 @@ class DPPModel(ABC):
             # convolution grid for each layer, not each batch.
             if size is not None:
                 # this is when visualizing the actual images
-                grid_y = int(np.ceil(self._batch_size / 4))
+                grid_y_prelim = int(np.ceil(self._batch_size))
                 # x and y dimensions, w.r.t. padding
                 y = size[1] + pad
                 x = size[2] + pad
                 num_channels = size[-1]
             else:
                 # this is when visualizing the weights
-                grid_y = (kernel.get_shape().as_list()[-1] / 4)
+                grid_y_prelim = (kernel.get_shape().as_list()[-1])
                 # x and y dimensions, w.r.t. padding
                 y = kernel.get_shape()[0] + pad
                 x = kernel.get_shape()[1] + pad
                 num_channels = kernel.get_shape().as_list()[2]
+
+            # we then want to set grid_x somewhat dynamically based on grid_y, making it the largest possible out of
+            # 4, 2, or 1
+            grid_x = 4 if grid_y_prelim % 4 == 0 else (2 if grid_y_prelim % 2 == 0 else 1)
+            grid_y = grid_y_prelim // grid_x
 
             # pack into image with proper dimensions for tf.image_summary
             x2 = tf.transpose(x1, (3, 0, 1, 2))
@@ -1975,7 +1989,11 @@ class DPPModel(ABC):
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
             # Apply pre-processing for training, testing, and validation images and labels
-            self._parse_apply_preprocessing(test_input_queue, train_input_queue, val_input_queue)
+            self._train_images, self._train_labels = self._parse_apply_preprocessing(train_input_queue)
+            if self._testing:
+                self._test_images, self._test_labels = self._parse_apply_preprocessing(test_input_queue)
+            if self._validation:
+                self._val_images, self._val_labels = self._parse_apply_preprocessing(val_input_queue)
 
             # Apply the various augmentations to the images
             if self._augmentation_crop:  # Apply random crops to images
@@ -2005,11 +2023,7 @@ class DPPModel(ABC):
                 self._val_images = tf.image.per_image_standardization(self._val_images)
 
             # Manually set the shape of the image tensors so it matches the shape of the images
-            self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            if self._testing:
-                self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+            self._parse_force_set_shape()
 
 
     def _parse_images(self, images, image_type='png'):
@@ -2083,31 +2097,24 @@ class DPPModel(ABC):
         :param channels: The number of channels in the image. Defaults to 1
         :return: The preprocessed versions of the images
         """
-        images = tf.io.decode_image(images, channels=channels)
+        # decode_png and decode_jpeg apparently both accept JPEG and PNG. We're using one of them because decode_image
+        # also accepts GIF, preventing the return of a static shape and preventing resize_images from running. See this
+        # Github issue for Tensorflow: https://github.com/tensorflow/tensorflow/issues/9356
+        images = tf.io.decode_png(images, channels=channels)
         images = tf.image.convert_image_dtype(images, dtype=tf.float32)
         if self._resize_images:
             images = tf.image.resize_images(images, [self._image_height, self._image_width])
         return images
 
-    def _parse_apply_preprocessing(self, test_input_queue, train_input_queue, val_input_queue):
+    def _parse_apply_preprocessing(self, input_queue):
         """
-        Applies input preprocessing to images and labels from queues
-        :param test_input_queue: An input queue for training images and labels
-        :param train_input_queue: An input queue for testing images and labels
-        :param val_input_queue: An input queue for validation images and labels
+        Applies input preprocessing to images and labels from a queue
+        :param input_queue: The queue to apply preprocessing to
+        :return: The preprocessed images and labels from the queue
         """
-        self._train_images = self._parse_preprocess_images(tf.read_file(train_input_queue[0]),
-                                                           channels=self._image_depth)
-        self._test_images = self._parse_preprocess_images(tf.read_file(test_input_queue[0]),
-                                                          channels=self._image_depth)
-        self._val_images = self._parse_preprocess_images(tf.read_file(val_input_queue[0]),
-                                                         channels=self._image_depth)
-
-        self._train_labels = train_input_queue[1]
-        if self._testing:
-            self._test_labels = test_input_queue[1]
-        if self._validation:
-            self._val_labels = val_input_queue[1]
+        images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
+        labels = input_queue[1]
+        return images, labels
 
     def _parse_crop_augment(self):
         """Applies random cropping augmentation to input images during dataset parsing"""
@@ -2144,6 +2151,15 @@ class DPPModel(ABC):
             self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
             self._train_images = tf.image.resize_images(self._train_images,
                                                         [self._image_height, self._image_width])
+
+    def _parse_force_set_shape(self):
+        """Force sets the shapes of the image Tensors, since we know what their sizes should be but Tensorflow can't
+        properly infer them (unless image resizing is turned on)"""
+        self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
+        if self._testing:
+            self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
+        if self._validation:
+            self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
 
     def _smallest_crop_fraction(self):
         """

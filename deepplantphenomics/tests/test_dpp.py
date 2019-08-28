@@ -46,6 +46,16 @@ def test_set_num_regression_outputs():
         model.set_num_regression_outputs(-1)
 
 
+def test_set_density_map_sigma():
+    model = dpp.HeatmapObjectCountingModel()
+    assert model._density_sigma == 5
+
+    with pytest.raises(TypeError):
+        model.set_density_map_sigma('4')
+    model.set_density_map_sigma(2.0)
+    assert model._density_sigma == 2.0
+
+
 def test_set_maximum_training_epochs(model):
     with pytest.raises(TypeError):
         model.set_maximum_training_epochs(5.0)
@@ -261,7 +271,8 @@ def test_set_patch_size(model):
                           (dpp.RegressionModel(), 'softmax cross entropy', 'l2'),
                           (dpp.SemanticSegmentationModel(), 'l2', 'sigmoid cross entropy'),
                           (dpp.ObjectDetectionModel(), 'l2', 'yolo'),
-                          (dpp.CountCeptionModel(), 'l2', 'l1')])
+                          (dpp.CountCeptionModel(), 'l2', 'l1'),
+                          (dpp.HeatmapObjectCountingModel(), 'l1', 'sigmoid cross entropy')])
 def test_set_loss_function(model, bad_loss, good_loss):
     with pytest.raises(TypeError):
         model.set_loss_function(0)
@@ -418,6 +429,8 @@ def test_add_fully_connected_layer(model):
 def test_add_output_layer():
     model1 = dpp.ClassificationModel()
     model2 = dpp.SemanticSegmentationModel()
+    model1.set_image_dimensions(5,5,3)
+    model2.set_image_dimensions(5,5,3)
 
     with pytest.raises(RuntimeError):
         model1.add_output_layer(2.5, 3)
@@ -432,11 +445,11 @@ def test_add_output_layer():
     with pytest.raises(ValueError):
         model1.add_output_layer(2.0, -4)
     with pytest.raises(RuntimeError):
-        model2.add_output_layer(2.0, 3)  # Semantic segmentation needed for following runtime error to occur
+        model2.add_output_layer(2.0, 3)  # Semantic segmentation needed for this runtime error to occur
 
     model1.add_output_layer(2.5, 3)
     assert isinstance(model1._last_layer(), dpp.layers.fullyConnectedLayer)
-    model2.add_output_layer(2.0)
+    model2.add_output_layer()
     assert isinstance(model2._last_layer(), dpp.layers.convLayer)
 
 
