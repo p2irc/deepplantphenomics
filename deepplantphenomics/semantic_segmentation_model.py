@@ -391,7 +391,7 @@ class SemanticSegmentationModel(DPPModel):
         images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
         labels = self._parse_preprocess_images(tf.read_file(input_queue[1]), channels=1)
         if self._resize_images:
-            labels = tf.reduce_mean(labels, axis=2)
+            labels = tf.reduce_mean(labels, axis=2, keepdims=True)
         return images, labels
 
     def _parse_crop_or_pad(self):

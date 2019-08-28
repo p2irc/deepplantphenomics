@@ -1966,7 +1966,6 @@ class DPPModel(ABC):
             # Manually set the shape of the image tensors so it matches the shape of the images
             self._parse_force_set_shape()
 
-
     def _parse_images(self, images, standardization=True):
         """Takes some images as input, creates producer of processed images internally to this instance"""
         with self._graph.as_default():
