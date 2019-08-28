@@ -429,6 +429,8 @@ def test_add_fully_connected_layer(model):
 def test_add_output_layer():
     model1 = dpp.ClassificationModel()
     model2 = dpp.SemanticSegmentationModel()
+    model1.set_image_dimensions(5,5,3)
+    model2.set_image_dimensions(5,5,3)
 
     with pytest.raises(RuntimeError):
         model1.add_output_layer(2.5, 3)
@@ -443,11 +445,11 @@ def test_add_output_layer():
     with pytest.raises(ValueError):
         model1.add_output_layer(2.0, -4)
     with pytest.raises(RuntimeError):
-        model2.add_output_layer(2.0, 3)  # Semantic segmentation needed for following runtime error to occur
+        model2.add_output_layer(2.0, 3)  # Semantic segmentation needed for this runtime error to occur
 
     model1.add_output_layer(2.5, 3)
     assert isinstance(model1._last_layer(), dpp.layers.fullyConnectedLayer)
-    model2.add_output_layer(2.0)
+    model2.add_output_layer()
     assert isinstance(model2._last_layer(), dpp.layers.convLayer)
 
 
