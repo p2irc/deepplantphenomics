@@ -14,6 +14,8 @@ setup(
         'tensorflow',
         'numpy',
         'tqdm',
-        'opencv-python'
+        'opencv-python',
+        'scipy',
+        'pillow'
     ]
 )
