@@ -588,7 +588,7 @@ class ObjectDetectionModel(DPPModel):
 
         # If there are no valid predictions at all, the mAP is 0
         if not detections:
-            return 0
+            return np.float32(0)  # We need to play nice with compute_full_test_accuracy()'s return
 
         # With multiple classes, we would also have class tags in the detection tuples so the below code could generate
         # and iterate over class-separated detection lists, giving multiple AP values and one true mean AP. We aren't
