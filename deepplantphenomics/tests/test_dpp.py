@@ -350,6 +350,20 @@ def test_add_convolutional_layer(model):
     assert isinstance(model._last_layer(), dpp.layers.convLayer)
 
 
+def test_add_paral_conv_block(model):
+    with pytest.raises(RuntimeError):
+        model.add_paral_conv_block([1, 1, 1, 1], [1, 1, 1, 1])
+    model.add_input_layer()
+    with pytest.raises(TypeError):
+        model.add_paral_conv_block([1, 1, 1, 1], [1, 2.0, 1, 1])
+    with pytest.raises(TypeError):
+        model.add_paral_conv_block([1, 1, 1, 1], [1, 1, 1])
+    with pytest.raises(TypeError):
+        model.add_paral_conv_block([1, 1, 1, 1], 1)
+    model.add_paral_conv_block([1, 1, 1, 1], [1, 1, 1, 1])
+    assert isinstance(model._last_layer(), dpp.layers.paralConvBlock)
+
+
 def test_add_pooling_layer(model):
     with pytest.raises(RuntimeError):
         model.add_pooling_layer(1, 1, 'avg')
@@ -429,6 +443,7 @@ def test_add_fully_connected_layer(model):
 def test_add_output_layer():
     model1 = dpp.ClassificationModel()
     model2 = dpp.SemanticSegmentationModel()
+    model3 = dpp.CountCeptionModel()
     model1.set_image_dimensions(5,5,3)
     model2.set_image_dimensions(5,5,3)
 
@@ -436,6 +451,7 @@ def test_add_output_layer():
         model1.add_output_layer(2.5, 3)
     model1.add_input_layer()
     model2.add_input_layer()
+    model3.add_input_layer()
     with pytest.raises(TypeError):
         model1.add_output_layer("2")
     with pytest.raises(ValueError):
@@ -451,6 +467,8 @@ def test_add_output_layer():
     assert isinstance(model1._last_layer(), dpp.layers.fullyConnectedLayer)
     model2.add_output_layer()
     assert isinstance(model2._last_layer(), dpp.layers.convLayer)
+    model3.add_output_layer()
+    assert isinstance(model3._last_layer(), dpp.layers.inputLayer)
 
 
 # having issue with not being able to create a new model, they all seem to inherit the fixture model

@@ -1275,8 +1275,8 @@ class DPPModel(ABC):
         """
         Add a layer(block) consisting of two parallel convolutional layers to the network
 
-        :param filter_dimension_1: filter dimenstion for the first convolutional layer.
-        :param filter_dimension_2: filter dimenstion for the second convolutional layer.
+        :param filter_dimension_1: filter dimension for the first convolutional layer.
+        :param filter_dimension_2: filter dimension for the second convolutional layer.
         """
         if len(self._layers) < 1:
             raise RuntimeError("An output layer cannot be the first layer added to the model. " +
