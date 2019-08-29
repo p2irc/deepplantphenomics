@@ -318,7 +318,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         """
         pass
 
-
     def _parse_images(self, images):
         """
         Parse and put input images into self._all_images.

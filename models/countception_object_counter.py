@@ -24,62 +24,6 @@ model.set_maximum_training_epochs(10)
 model.load_countception_dataset_from_pkl_file('MBM-dataset.pkl')
 
 # Define a model architecture
-# model.add_input_layer()
-# model.add_convolutional_layer(filter_dimension=[3, 3, 3, 64],
-#                               stride_length=1,
-#                               activation_function='lrelu',
-#                               padding=patch_size,
-#                               batch_norm=True,
-#                               epsilon=1e-5,
-#                               decay=0.9)
-# model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 16],
-#                            filter_dimension_2=[3, 3, 0, 16])
-# model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 16],
-#                            filter_dimension_2=[3, 3, 0, 32])
-# model.add_convolutional_layer(filter_dimension=[14, 14, 0, 16],
-#                               stride_length=1,
-#                               activation_function='lrelu',
-#                               padding=0,
-#                               batch_norm=True,
-#                               epsilon=1e-5,
-#                               decay=0.9)
-# model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 112],
-#                            filter_dimension_2=[3, 3, 0, 48])
-# model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 64],
-#                            filter_dimension_2=[3, 3, 0, 32])
-# model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 40],
-#                            filter_dimension_2=[3, 3, 0, 40])
-# model.add_paral_conv_block(filter_dimension_1=[1, 1, 0, 32],
-#                            filter_dimension_2=[3, 3, 0, 96])
-# model.add_convolutional_layer(filter_dimension=[18, 18, 0, 32],
-#                               stride_length=1,
-#                               activation_function='lrelu',
-#                               padding=0,
-#                               batch_norm=True,
-#                               epsilon=1e-5,
-#                               decay=0.9)
-# model.add_convolutional_layer(filter_dimension=[1, 1, 0, 64],
-#                               stride_length=1,
-#                               activation_function='lrelu',
-#                               padding=0,
-#                               batch_norm=True,
-#                               epsilon=1e-5,
-#                               decay=0.9)
-# model.add_convolutional_layer(filter_dimension=[1, 1, 0, 64],
-#                               stride_length=1,
-#                               activation_function='lrelu',
-#                               padding=0,
-#                               batch_norm=True,
-#                               epsilon=1e-5,
-#                               decay=0.9)
-# model.add_convolutional_layer(filter_dimension=[1, 1, 0, 1],
-#                               stride_length=1,
-#                               activation_function='lrelu',
-#                               padding=0,
-#                               batch_norm=True,
-#                               epsilon=1e-5,
-#                               decay=0.9)
-
 model.use_predefined_model("countception")
 
 # Begin training the regression model

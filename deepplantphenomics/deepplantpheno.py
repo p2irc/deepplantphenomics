@@ -575,19 +575,26 @@ class DPPModel(ABC):
         filter_summary = self._get_weights_as_image(self._first_layer().weights)
         tf.summary.image('filters/first', filter_summary, collections=['custom_summaries'])
 
-        # Summaries for each layer
-        for layer in self._layers:
-            if hasattr(layer, 'name') and not isinstance(layer, layers.batchNormLayer):
-                tf.summary.histogram('weights/' + layer.name, layer.weights, collections=['custom_summaries'])
-                tf.summary.histogram('biases/' + layer.name, layer.biases, collections=['custom_summaries'])
+        def _add_layer_histograms(net_layer):
+            tf.summary.histogram('weights/' + net_layer.name, net_layer.weights, collections=['custom_summaries'])
+            tf.summary.histogram('biases/' + net_layer.name, net_layer.biases, collections=['custom_summaries'])
 
-                # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
-                # and it was found that if you commented the below line then the code wouldn't hang. Never
-                # fully understood why, as it only happened if you tried running with train/test and no
-                # validation. But after adding more features and just randomly trying to uncomment the below
-                # line to see if it would work, it appears to now be working, but still don't know why...
-                tf.summary.histogram('activations/' + layer.name, layer.activations,
-                                     collections=['custom_summaries'])
+            # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
+            # and it was found that if you commented the below line then the code wouldn't hang. Never
+            # fully understood why, as it only happened if you tried running with train/test and no
+            # validation. But after adding more features and just randomly trying to uncomment the below
+            # line to see if it would work, it appears to now be working, but still don't know why...
+            tf.summary.histogram('activations/' + net_layer.name, net_layer.activations,
+                                 collections=['custom_summaries'])
+
+        # Summaries for each net_layer
+        for layer in self._layers:
+            if hasattr(layer, 'name'):
+                if isinstance(layer, layers.paralConvBlock):
+                    _add_layer_histograms(layer.conv1)
+                    _add_layer_histograms(layer.conv2)
+                elif not isinstance(layer, layers.batchNormLayer):
+                    _add_layer_histograms(layer)
 
         # Summaries for gradients
         # We use variables[index].name[:-2] because variables[index].name will have a ':0' at the end of
@@ -2025,8 +2032,7 @@ class DPPModel(ABC):
             # Manually set the shape of the image tensors so it matches the shape of the images
             self._parse_force_set_shape()
 
-
-    def _parse_images(self, images, image_type='png'):
+    def _parse_images(self, images):
         """Takes some images as input, creates producer of processed images internally to this instance"""
         with self._graph.as_default():
             input_queue = tf.train.string_input_producer(images, shuffle=False)
