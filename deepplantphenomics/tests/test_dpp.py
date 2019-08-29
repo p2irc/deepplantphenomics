@@ -461,11 +461,12 @@ def test_add_output_layer():
     with pytest.raises(ValueError):
         model1.add_output_layer(2.0, -4)
     with pytest.raises(RuntimeError):
-        model2.add_output_layer(2.0, 3)  # Semantic segmentation needed for this runtime error to occur
+        model2.add_output_layer(output_size=3)  # Semantic segmentation needed for this runtime error to occur
 
     model1.add_output_layer(2.5, 3)
     assert isinstance(model1._last_layer(), dpp.layers.fullyConnectedLayer)
-    model2.add_output_layer()
+    with pytest.warns(Warning):
+        model2.add_output_layer(regularization_coefficient=2.0)
     assert isinstance(model2._last_layer(), dpp.layers.convLayer)
     model3.add_output_layer()
     assert isinstance(model3._last_layer(), dpp.layers.inputLayer)
