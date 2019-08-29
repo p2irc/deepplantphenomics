@@ -1,5 +1,5 @@
 #
-# Used to train the count_ception_model
+# Used to train the Count-ception model
 #
 
 import deepplantphenomics as dpp
