@@ -11,7 +11,6 @@ from PIL import Image
 
 
 class CountCeptionModel(deepplantpheno.DPPModel):
-
     _problem_type = definitions.ProblemType.OBJECT_COUNTING
     _loss_fn = 'l1'
     _supported_loss_fns = ['l1']
@@ -19,14 +18,12 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
-
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
 
         # Summaries specific to classification problems
-        tf.summary.scalar('train/loss', self._graph_ops['cost'], collections=['custom_summaries'])
         tf.summary.scalar('train/accuracy', self._graph_ops['accuracy'], collections=['custom_summaries'])
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_losses'],
@@ -37,7 +34,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
-
         self._log('Parsing dataset...')
         self._graph_parse_data()
 
@@ -118,114 +114,44 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
-    def begin_training(self, return_test_loss=False):
+    def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
+        elapsed = time.time() - start_time
 
-        with self._graph.as_default():
+        if train_writer is not None:
+            summary = self._session.run(self._graph_ops['merged'])
+            train_writer.add_summary(summary, batch_num)
 
-            self._assemble_graph()
-            print('assembled the graph')
+        if self._validation:
+            loss, epoch_accuracy, epoch_val_accuracy = self._session.run([self._graph_ops['cost'],
+                                                                          self._graph_ops['accuracy'],
+                                                                          self._graph_ops['val_accuracy']])
+            samples_per_sec = self._batch_size / elapsed
 
-            # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
-                self._has_trained = True
-                self.load_state()
-                self._initialize_queue_runners()
-                self.compute_full_test_accuracy()
-                self.shut_down()
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, Validation Accuracy: {:.4f}, samples/sec: {:.2f}"
+            tqdm_range.set_description(
+                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                batch_num,
+                                batch_num / (self._total_training_samples / self._batch_size),
+                                loss,
+                                epoch_accuracy,
+                                epoch_val_accuracy,
+                                samples_per_sec))
 
-            else:
+        else:
+            loss, epoch_accuracy = self._session.run([self._graph_ops['cost'],
+                                                      self._graph_ops['accuracy']])
+            samples_per_sec = self._batch_size / elapsed
 
-                if self._tb_dir is not None:
-                    train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
-
-                self._log('Initializing parameters...')
-                self._session.run(tf.global_variables_initializer())
-
-                self._initialize_queue_runners()
-
-                self._log('Beginning training...')
-
-                self._set_learning_rate()
-
-                # Needed for batch norm
-                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
-
-                # for i in range(self._maximum_training_batches):
-                tqdm_range = tqdm(range(self._maximum_training_batches))
-                for i in tqdm_range:
-                    start_time = time.time()
-
-                    self._global_epoch = i
-                    self._session.run(self._graph_ops['optimizer'])
-                    if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
-                        elapsed = time.time() - start_time
-
-                        if self._tb_dir is not None:
-                            summary = self._session.run(self._graph_ops['merged'])
-                            train_writer.add_summary(summary, i)
-                        if self._validation:
-                            loss, epoch_accuracy, epoch_val_accuracy = self._session.run(
-                                [self._graph_ops['cost'],
-                                 self._graph_ops['accuracy'],
-                                 self._graph_ops['val_accuracy']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
-                                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                epoch_accuracy,
-                                                samples_per_sec))
-                            self._log('Batch {}, train_loss {:.3f}, train_accu {:.3f}, val_accu {:.3f}'
-                                      .format(i, loss, epoch_accuracy, epoch_val_accuracy))
-
-                        else:
-                            loss, epoch_accuracy = self._session.run(
-                                [self._graph_ops['cost'],
-                                 self._graph_ops['accuracy']])
-
-                            samples_per_sec = self._batch_size / elapsed
-
-                            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
-                                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
-                            tqdm_range.set_description(
-                                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                                i,
-                                                i / (self._total_training_samples / self._batch_size),
-                                                loss,
-                                                epoch_accuracy,
-                                                samples_per_sec))
-                            self._log('Batch {}, train_loss {:.3f}, train_accu {:.3f}'.format(i, loss, epoch_accuracy))
-
-                        if self._save_checkpoints and self._global_epoch % (self._report_rate * 100) == 0:
-                            self.save_state(self._save_dir)
-                    else:
-                        loss = self._session.run([self._graph_ops['cost']])
-
-                    if loss == 0.0:
-                        self._log('Stopping due to zero loss')
-                        break
-
-                    if i == self._maximum_training_batches - 1:
-                        self._log('Stopping due to maximum epochs')
-
-                self.save_state(self._save_dir)
-
-                final_test_loss = None
-                if self._testing:
-                    final_test_loss = self.compute_full_test_accuracy()
-
-                self.shut_down()
-
-                if return_test_loss:
-                    return final_test_loss
-                else:
-                    return
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
+            tqdm_range.set_description(
+                desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                batch_num,
+                                batch_num / (self._total_training_samples / self._batch_size),
+                                loss,
+                                epoch_accuracy,
+                                samples_per_sec))
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy...')
@@ -237,7 +163,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            # Initialize storage for the retreived test variables
+            # Initialize storage for the retrieved test variables
             loss_sum = 0.0
             abs_diff_sum = 0.0
 
@@ -249,23 +175,22 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 loss_sum = loss_sum + batch_loss
                 abs_diff_sum = abs_diff_sum + batch_abs_diff
 
+                # Print prediction results for each image as we go
                 for idx, gt in enumerate(batch_gt):
                     pr = batch_pr[idx]
-                    abs_diff = abs(pr-gt)
+                    abs_diff = abs(pr - gt)
                     rel_diff = abs_diff / gt
                     self._log("idx={}, real_count={}, prediction={:.3f}, abs_diff={:.3f}, relative_diff={:.3f}"
                               .format(idx, gt, pr, abs_diff, rel_diff))
 
-            # For classification problems (assumed to be multi-class), we want accuracy and confusion matrix (not
-            # implemented)
+            # For counting problems with countception, we want the averaged loss and difference across the images
             loss_mean = (loss_sum / num_batches)
             abs_diff_mean = (abs_diff_sum / num_batches)
             self._log('Average test loss: {:.3f}'.format(loss_mean))
             self._log('Average test absolute difference: {:.3f}'.format(abs_diff_mean))
-            return 1.0-loss_mean.astype(np.float32), abs_diff_mean
+            return 1.0 - loss_mean.astype(np.float32), abs_diff_mean
 
     def forward_pass_with_file_inputs(self, x):
-
         with self._graph.as_default():
 
             self._parse_images(x)
@@ -299,7 +224,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-
         xx = self.forward_pass_with_file_inputs(x)
 
         # Get the predicted count
@@ -308,20 +232,13 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
-        """
-        Add an output layer to the network (no need to do this in the count ception model)
-
-        :param regularization_coefficient: optionally, an L2 decay coefficient for this layer (overrides the coefficient
-         set by set_regularization_coefficient)
-        :param output_size: optionally, override the output size of this layer. Typically not needed, but required for
-        use cases such as creating the output layer before loading data.
-        """
+        # There is no need to do this in the countception model
         pass
 
     def _parse_images(self, images):
         """
         Parse and put input images into self._all_images.
-        This is usually called in forward_pass_with_file_inputs(), when trained network is used for prediction.
+        This is usually called in forward_pass_with_file_inputs(), when a pre-trained network is used for prediction.
         """
         image_data_list = []
         for img in images:
@@ -333,12 +250,12 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
     def _parse_dataset(self, train_images, train_labels, train_mf,
                        test_images, test_labels, test_mf,
-                       val_images, val_labels, val_mf,
-                       image_type='png'):
-        """Takes training and testing images and labels, creates input queues internally to this instance"""
+                       val_images, val_labels, val_mf):
+        # Countception uses arrays from pickle files for its image and label inputs, so enough differences exist to
+        # override this whole function
         with self._graph.as_default():
-
-            # Get the number of samples the normal way
+            # Get the number of samples the normal way right off the bat, since other methods of getting the counts
+            # depend on Tensors
             self._total_training_samples = int(self._total_raw_samples)
             if self._testing:
                 self._total_testing_samples = int(self._total_raw_samples * self._test_split)
@@ -369,25 +286,24 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             if self._validation:
                 val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
 
-            self._train_labels = train_input_queue[1]
-            if self._testing:
-                self._test_labels = test_input_queue[1]
-            if self._validation:
-                self._val_labels = val_input_queue[1]
-
-            # Apply pre-processing for training and testing images
+            # Apply pre-processing for training and testing images. Images need just a dtype conversion and labels need
+            # nothing whatsoever
             self._train_images = tf.image.convert_image_dtype(train_input_queue[0], dtype=tf.float32)
             if self._testing:
                 self._test_images = tf.image.convert_image_dtype(test_input_queue[0], dtype=tf.float32)
             if self._validation:
                 self._val_images = tf.image.convert_image_dtype(val_input_queue[0], dtype=tf.float32)
 
-            # define the shape of the image tensors so it matches the shape of the images
-            self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
+            self._train_labels = train_input_queue[1]
             if self._testing:
-                self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
+                self._test_labels = test_input_queue[1]
             if self._validation:
-                self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+                self._val_labels = val_input_queue[1]
+
+            # Image standardization doesn't apply, so we skip it
+
+            # Manually set the shape of the image tensors so it matches the shape of the images
+            self._parse_force_set_shape()
 
     def load_countception_dataset_from_pkl_file(self, pkl_file_name):
         """
@@ -397,7 +313,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         https://arxiv.org/abs/1703.08710
         :param pkl_file_name: the path of the pickle file containing the dataset
         """
-
         if not isinstance(pkl_file_name, str):
             raise TypeError("pkl_file_name must be a str")
         if not os.path.isfile(pkl_file_name):
@@ -410,7 +325,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             dataset = pickle.load(open(pkl_file_name, "rb"))
             dataset_x = np.asarray([d[0] for d in dataset]).astype(np.float32)
             dataset_y = np.transpose(np.asarray([d[1] for d in dataset]), [0, 2, 3, 1]).astype(np.float32)
-
         except Exception:
             raise TypeError("'" + pkl_file_name + "' does not contain data in required format.")
 

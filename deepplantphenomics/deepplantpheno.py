@@ -681,6 +681,7 @@ class DPPModel(ABC):
 
             # Either load the network parameters from a checkpoint file or start training
             if self._load_from_saved is not False:
+                self._has_trained = True
                 self.load_state()
                 self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
@@ -690,8 +691,7 @@ class DPPModel(ABC):
                     train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
 
                 self._log('Initializing parameters...')
-                init_op = tf.global_variables_initializer()
-                self._session.run(init_op)
+                self._session.run(tf.global_variables_initializer())
                 self._initialize_queue_runners()
 
                 self._log('Beginning training...')
@@ -1013,6 +1013,12 @@ class DPPModel(ABC):
         :param filter_dimension: array of dimensions in the format [x_size, y_size, depth, num_filters]
         :param stride_length: convolution stride length
         :param activation_function: the activation function to apply to the activation map
+        :param padding: An optional amount of padding for the layer to add to the edges of inputs before convolving
+        them. Defaults to using enough padding to keep the image size unchanged after convolution.
+        :param batch_norm: A flag for including a batch norm layer immediately after the convolution layer but before
+        the activation layer. Defaults to False (i.e. no intermediate batch norm layer)
+        :param epsilon: The epsilon value to use for an intermediate batch norm layer
+        :param decay: The decay value to use for an intermediate batch norm layer
         """
         if len(self._layers) < 1:
             raise RuntimeError("A convolutional layer cannot be the first layer added to the model. " +
@@ -1555,7 +1561,6 @@ class DPPModel(ABC):
             self.add_output_layer()
 
         if model_name == 'countception':
-
             patch_size = 32
             self.add_input_layer()
             self.add_convolutional_layer(filter_dimension=[3, 3, 3, 64],

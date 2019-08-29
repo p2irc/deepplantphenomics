@@ -51,7 +51,6 @@ class convLayer(object):
             self.batch_norm_layer.add_to_graph()
 
     def forward_pass(self, x, deterministic=False):
-
         activations = tf.nn.conv2d(x, self.weights,
                                    strides=[1, self.__stride_length, self.__stride_length, 1],
                                    padding=self.padding)

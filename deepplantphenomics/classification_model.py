@@ -171,7 +171,7 @@ class ClassificationModel(DPPModel):
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time
 
-        if self._tb_dir is not None:
+        if train_writer is not None:
             summary = self._session.run(self._graph_ops['merged'])
             train_writer.add_summary(summary, batch_num)
 
@@ -181,8 +181,8 @@ class ClassificationModel(DPPModel):
                                                                           self._graph_ops['val_accuracy']])
             samples_per_sec = self._batch_size / elapsed
 
-            desc_str = "{}: Results for batch {} (epoch {:.1f}) - " + \
-                       "Loss: {:.5f}, Training Accuracy: {:.4f}, Validation Accuracy: {:.4f}, samples/sec: {:.2f}"
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, Validation Accuracy: {:.4f}, samples/sec: {:.2f}"
             tqdm_range.set_description(
                 desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
                                 batch_num,
@@ -193,13 +193,12 @@ class ClassificationModel(DPPModel):
                                 samples_per_sec))
 
         else:
-            loss, epoch_accuracy = self._session.run(
-                [self._graph_ops['cost'],
-                 self._graph_ops['accuracy']])
+            loss, epoch_accuracy = self._session.run([self._graph_ops['cost'],
+                                                      self._graph_ops['accuracy']])
             samples_per_sec = self._batch_size / elapsed
 
-            desc_str = "{}: Results for batch {} (epoch {:.1f}) - " + \
-                       "Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
+            desc_str = "{}: Results for batch {} (epoch {:.1f}) " + \
+                       "- Loss: {:.5f}, Training Accuracy: {:.4f}, samples/sec: {:.2f}"
             tqdm_range.set_description(
                 desc_str.format(datetime.datetime.now().strftime("%I:%M%p"),
                                 batch_num,
