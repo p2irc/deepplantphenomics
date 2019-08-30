@@ -1,14 +1,14 @@
-DPP provides the model for the Count-ception object counter (https://arxiv.org/abs/1703.08710) for tasks like counting dense canola flowers in images. The Count-ception model uses a fully convolutional network with a small receptive field to run over the input image and count the number of objects. A redundant count map is generated and processed to get the total count of objects in the input image.
+DPP provides 2 different models that can be used for object counting. One of those models is the [Countception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers in images.
 
-The overall structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](Tutorial-Training-The-Leaf-Counter.md) for a detailed description of this). This tutorial largely covers the differences in model setup and data/label loading specific to training a Count-ception based model in DPP.
+The structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](Tutorial-Training-The-Leaf-Counter.md) for a detailed description of this). This covers the differences in model setup and data/label loading specific to training a Countception model in DPP.
 
 ## Full Example
 
-Below is a working example of training a Count-ception object counter in DPP. 
+Below is a working example of training a Countception object counter in DPP. 
 
 ```python
 #
-# Demonstrates the process of training a Count-ception object counter in DPP.
+# Demonstrates the process of training a Countception object counter in DPP.
 #
 
 import deepplantphenomics as dpp
@@ -37,7 +37,7 @@ model.begin_training()
 
 ## Count-ception Network Layers
 
-The Count-ception network consists of six convolutional layers and six parallel convolutional blocks. The Count-ception network can be recreated with the following layers:
+The Countception network consists of six convolutional layers and six parallel convolutional blocks. The Count-ception network can be recreated with the following layers:
 
 ```python
 patch_size = 32
@@ -45,7 +45,7 @@ model.add_input_layer()
 model.add_convolutional_layer([3, 3, 3, 64], 1, 'lrelu', patch_size, True, 1e-5, 0.9)
 model.add_paral_conv_block([1, 1, 0, 16], [3, 3, 0, 16])
 model.add_paral_conv_block([1, 1, 0, 16], [3, 3, 0, 32])
-model.add_convolutional_layer([14, 14, 0, 16], 1, 'lrelu', 0, True, 1e-5,0.9)
+model.add_convolutional_layer([14, 14, 0, 16], 1, 'lrelu', 0, True, 1e-5, 0.9)
 model.add_paral_conv_block([1, 1, 0, 112], [3, 3, 0, 48])
 model.add_paral_conv_block([1, 1, 0, 64], [3, 3, 0, 32])
 model.add_paral_conv_block([1, 1, 0, 40], [3, 3, 0, 40])
@@ -53,9 +53,9 @@ model.add_paral_conv_block([1, 1, 0, 32], [3, 3, 0, 96])
 model.add_convolutional_layer([18, 18, 0, 32], 1, 'lrelu', 0, True, 1e-5, 0.9)
 model.add_convolutional_layer([1, 1, 0, 64], 1, 'lrelu', 0, True, 1e-5, 0.9)
 model.add_convolutional_layer([1, 1, 0, 64], 1, 'lrelu', 0, True, 1e-5, 0.9)
-model.add_convolutional_layer([1, 1, 0, 1], 1, 'lrelu', 0, True, 1e-5,0.9)
+model.add_convolutional_layer([1, 1, 0, 1], 1, 'lrelu', 0, True, 1e-5, 0.9)
 ```
-Different from convolutional layers used in other networks, Count-ception follows each convolutional layer by a batch normalization layer. The last three parameters of add_convolutional_layer() method are used for setting up these batch normalization layers.
+Different from convolutional layers used in other networks, Countception follows each convolutional layer by a batch normalization layer. The last three parameters of add_convolutional_layer() method are used for setting up these batch normalization layers.
 
 ```python
 add_convolutional_layer(self, filter_dimension, stride_length, activation_function,
@@ -63,9 +63,9 @@ add_convolutional_layer(self, filter_dimension, stride_length, activation_functi
 ```
 In the current implementation in DPP, a receptive field of 32 is used. For this setting, the first convolutional layer uses a 3x3 filter with `padding=32`, the second convolutional layer uses a 14x14 filter with `padding=0` and the third convolutional layer uses a 18x18 filter with `padding=0`. To use other receptive fields, these parameters should be modified and set properly. Each convolutional layer uses `xavier` weight initialization and the `LeakyReLu` activation function.
 
-## Predefined Count-ception Network
+## Predefined Countception Network
 
-While the network layers were described above, the Count-ception network (with default parameters) is available as a predefined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
+While the network layers were described above, the Countception network (with default parameters) is available as a predefined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
 
 ```python
 model.use_predefined_model('countception')
@@ -73,12 +73,10 @@ model.use_predefined_model('countception')
 
 ## Data/Label Loading
 
-For the Count-ception network, image and ground truth data are loaded from a pickle file using:
+For the Countception network, image and ground truth data are loaded from a pickle file using:
 
 ```python
 model.load_countception_dataset_from_pkl_file()
 ```
 
 For more information about how the pickle file is generated, please refer to the [paper](https://arxiv.org/abs/1703.08710) and the [github repo](https://github.com/roggirg/count-ception_mbm).
-
-

@@ -17,5 +17,9 @@ pages:
         - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
         - Tutorial - Deploying your Trained Model: Tutorial-Deployment.md
         - Tutorial - Training an Object Detector: Tutorial-Training-An-Object-Detector.md
+        - Object Counting:
+          - Object Counting Models: Object-Counting-Models.md
+          - Tutorial - Object Counting with Countception: Tutorial-Object-Counting-with-Countception.md
+          - Tutorial - Object Counting with Heatmaps: Tutorial-Object-Counting-with-Heatmaps.md
 
 theme: readthedocs
