@@ -18,13 +18,11 @@ model = dpp.CountCeptionModel(debug=True, save_checkpoints=False, report_rate=20
 # Setup and hyperparameters
 model.set_loss_function('l1')
 model.set_batch_size(2)
-model.set_number_of_threads(4)
 model.set_image_dimensions(300, 300, 3)
 
 model.set_test_split(0.2)
 model.set_validation_split(0.1)
 model.set_learning_rate(0.0001)
-model.set_weight_initializer('xavier')
 model.set_maximum_training_epochs(1000)
 
 # Load images and ground truth from a pickle file
@@ -81,6 +79,6 @@ For the Count-ception network, image and ground truth data are loaded from a pic
 model.load_countception_dataset_from_pkl_file()
 ```
 
-For more information about how the pickle file is generated, please refer to the paper (https://arxiv.org/abs/1703.08710) and the githut repo (https://github.com/roggirg/count-ception_mbm).
+For more information about how the pickle file is generated, please refer to the [paper](https://arxiv.org/abs/1703.08710) and the [github repo](https://github.com/roggirg/count-ception_mbm).
 
 

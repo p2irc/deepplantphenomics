@@ -17,7 +17,7 @@ print('Performing flower counting...')
 
 y = dpp.tools.object_count_countception(images)
 
-for k,v in zip(images, y):
+for k, v in zip(images, y):
     print('%s: %d' % (os.path.basename(k), v))
 
 print('Done')
