@@ -47,3 +47,19 @@ my_files = ['one.png', 'two.png', 'three.png']
 
 leaf_counts = dpp.tools.predict_rosette_leaf_count(my_files)
 ```
+
+## Canola Flower Counter
+
+The canola flower counter provides an estimate of the number of flowers in an image. It makes use of a pre-trained fully convolutional neural network.
+When this flower counter tool is called, a list of pathnames of flower images are given as an input, and a list of flower counts is outputted.
+
+```
+import deepplantphenomics as dpp
+
+image_files = ['one.png', 'two.png', 'three.png']
+
+y = dpp.tools.count_canola_flowers(image_files)
+
+for k, v in zip(image_files, y):
+    print('%s: %d' % (k, v))
+```
