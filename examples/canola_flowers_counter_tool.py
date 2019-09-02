@@ -15,7 +15,7 @@ images = [os.path.join(dir, name) for name in os.listdir(dir)]
 
 print('Performing flower counting...')
 
-y = dpp.tools.object_count_countception(images)
+y = dpp.tools.count_canola_flowers(images)
 
 for k, v in zip(images, y):
     print('%s: %d' % (os.path.basename(k), v))
