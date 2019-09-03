@@ -172,7 +172,7 @@ class countCeptionCounter(object):
 
     patch_size = 32
 
-    __dir_name = 'countception-counter'
+    __dir_name = 'canola-flowers-counter'
 
     def __init__(self, batch_size=1, image_height=300, image_width=300, image_depth=3):
         """A network which counts flowers in plant images"""
