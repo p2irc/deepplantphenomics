@@ -140,6 +140,7 @@ class DPPModel(ABC):
         self._num_layers_dropout = 0
         self._num_layers_batchnorm = 0
         self._num_blocks_paral_conv = 0
+        self._num_skip_connections = 0
 
         # Network options
         self._batch_size = 1
@@ -936,9 +937,19 @@ class DPPModel(ABC):
         :param moderation_features: ???
         :return: output tensor where the first dimension is batch
         """
+        residual = None
+
         with self._graph.as_default():
             for layer in self._layers:
-                if isinstance(layer, layers.moderationLayer) and moderation_features is not None:
+                if isinstance(layer, layers.skipConnection):
+                    # The first skip only sends its residual value down to later layers. Further skips have to receive
+                    # that, possibly downsample it, and add it to the latest output before setting the next residual.
+                    if residual is None:
+                        residual = x
+                    else:
+                        x = x + layer.forward_pass(residual, False)
+                        residual = x
+                elif isinstance(layer, layers.moderationLayer) and moderation_features is not None:
                     x = layer.forward_pass(x, deterministic, moderation_features)
                 else:
                     x = layer.forward_pass(x, deterministic)
@@ -1313,6 +1324,21 @@ class DPPModel(ABC):
                                                                     block.output_size))
 
         self._layers.append(block)
+
+    def add_skip_connection(self, downsampled=False):
+        """Adds a residual connection between this point and the last residual connection"""
+        if len(self._layers) < 1:
+            raise RuntimeError("A skip connection cannot be the first layer added to the model.")
+
+        self._num_skip_connections += 1
+        layer_name = 'skip%d' % self._num_skip_connections
+        self._log('Adding skip connection...')
+
+        layer = layers.skipConnection(layer_name, self._last_layer_outputs_volume(), downsampled)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
 
     @abstractmethod
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
