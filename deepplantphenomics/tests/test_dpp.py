@@ -364,6 +364,23 @@ def test_add_paral_conv_block(model):
     assert isinstance(model._last_layer(), dpp.layers.paralConvBlock)
 
 
+def test_add_skip_connection(model):
+    model.set_image_dimensions(50, 50, 16)
+    model.set_batch_size(1)
+
+    with pytest.raises(RuntimeError):
+        model.add_skip_connection(downsampled=False)
+    model.add_input_layer()
+
+    model.add_skip_connection(downsampled=False)
+    assert isinstance(model._last_layer(), dpp.layers.skipConnection)
+    assert model._last_layer().output_size == [1, 50, 50, 16]
+
+    model.add_skip_connection(downsampled=True)
+    assert isinstance(model._last_layer(), dpp.layers.skipConnection)
+    assert model._last_layer().output_size == [1, 25, 25, 16]
+
+
 def test_add_pooling_layer(model):
     with pytest.raises(RuntimeError):
         model.add_pooling_layer(1, 1, 'avg')
@@ -444,8 +461,8 @@ def test_add_output_layer():
     model1 = dpp.ClassificationModel()
     model2 = dpp.SemanticSegmentationModel()
     model3 = dpp.CountCeptionModel()
-    model1.set_image_dimensions(5,5,3)
-    model2.set_image_dimensions(5,5,3)
+    model1.set_image_dimensions(5, 5, 3)
+    model2.set_image_dimensions(5, 5, 3)
 
     with pytest.raises(RuntimeError):
         model1.add_output_layer(2.5, 3)
@@ -578,3 +595,24 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
 #     model.add_pooling_layer(kernel_size=3, stride_length=2)
 #     model.add_output_layer()
 #     model.begin_training()
+
+def test_forward_pass_residual():
+    model = dpp.SemanticSegmentationModel()
+    model.set_image_dimensions(50, 50, 1)
+    model.set_batch_size(1)
+
+    # Set up a small deterministic network with residuals
+    model.add_input_layer()
+    model.add_skip_connection(downsampled=False)
+    model.add_skip_connection(downsampled=False)
+
+    # Create an input image and its expected output
+    test_im = np.full([50, 50, 1], 0.5, dtype=np.float32)
+    expected_im = np.full([50, 50, 1], 1.0, dtype=np.float32)
+
+    # Add the layers and get the forward pass
+    model._add_layers_to_graph()
+    out_im = model.forward_pass(test_im)
+
+    assert out_im.size == expected_im.size
+    assert np.all(out_im == expected_im)

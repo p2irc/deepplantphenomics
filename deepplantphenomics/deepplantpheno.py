@@ -1334,7 +1334,7 @@ class DPPModel(ABC):
         layer_name = 'skip%d' % self._num_skip_connections
         self._log('Adding skip connection...')
 
-        layer = layers.skipConnection(layer_name, self._last_layer_outputs_volume(), downsampled)
+        layer = layers.skipConnection(layer_name, self._last_layer().output_size, downsampled)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
 

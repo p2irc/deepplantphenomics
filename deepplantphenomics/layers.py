@@ -383,7 +383,6 @@ class skipConnection(object):
     def __init__(self, name, input_size, downsampled):
         self.name = name
         self.input_size = input_size
-        self.output_size = input_size
 
         if downsampled:
             filters = self.input_size[-1]
@@ -392,11 +391,11 @@ class skipConnection(object):
                                    filter_dimension=[1, 1, filters / 2, filters],
                                    stride_length=2,
                                    activation_function=None,
-                                   initializer='xavier',
-                                   padding=False,
-                                   batch_norm=False)
+                                   initializer='xavier')
+            self.output_size = self.layer.output_size
         else:
             self.layer = None
+            self.output_size = input_size
 
     def add_to_graph(self):
         if self.layer is not None:
