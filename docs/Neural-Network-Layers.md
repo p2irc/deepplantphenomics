@@ -92,6 +92,16 @@ Using batch normalization may be detrimental to some regression problems. You sh
 model.add_batch_norm_layer()
 ```
 
+## Residual/Skip Connection
+
+This layer creates a residual connection that skips over further layers in the network. A residual connection is used to pass values forward in a network and allow the forward and backward propagation of gradients. This typically improves the ability of a network to learn certain features and identity functions.
+
+```
+model.add_skip_connection(downsampled=False)
+```
+
+The `downsampled` flag is used when the passed values from a previous skip connection form a larger volume than the volume it needs to be added to. Toggling it creates a convolutional layer that the passed volume goes through to downsample it by a factor of 2. 
+
 ## Output Layer
 
 The output layer is the final layer in the network.
