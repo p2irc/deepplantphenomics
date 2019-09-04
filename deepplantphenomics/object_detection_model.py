@@ -373,7 +373,7 @@ class ObjectDetectionModel(DPPModel):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            # Initialize storage for the retreived test variables. Object detection needs some special care given to
+            # Initialize storage for the retrieved test variables. Object detection needs some special care given to
             # its variable's shape
             all_y = np.empty(shape=(1,
                                     self._grid_w * self._grid_h,
@@ -427,7 +427,7 @@ class ObjectDetectionModel(DPPModel):
             self._log('Yolo mAP: {}'.format(yolo_map))
             return yolo_map.astype(np.float32)
 
-    def __yolo_coord_convert(self, labels, preds):
+    def __yolo_coord_convert(self, labels=None, preds=None):
         """
         Converts Yolo labeled and predicted bounding boxes from xywh coords to x1y1x2y2 coords. Also accounts for
         required sigmoid and exponential conversions in the predictions (including the confidences)
@@ -455,43 +455,45 @@ class ObjectDetectionModel(DPPModel):
             y2 = y + h/2
             return x1, y1, x2, y2
 
-        # Labels are already sensible numbers, so convert them first
-        lab_coord_idx = np.arange(labels.shape[-1]-4, labels.shape[-1])
-        lab_class, lab_x, lab_y, lab_w, lab_h = np.split(labels, lab_coord_idx, axis=-1)
-        lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(np.squeeze(lab_x),  # Squeezing to aid broadcasting in helper
-                                                      np.squeeze(lab_y),
-                                                      np.squeeze(lab_w),
-                                                      np.squeeze(lab_h))
-        labels = np.concatenate([lab_class,
-                                 lab_x1[:, np.newaxis],  # Dummy dimensions to enable concatenation
-                                 lab_y1[:, np.newaxis],
-                                 lab_x2[:, np.newaxis],
-                                 lab_y2[:, np.newaxis]], axis=-1)
+        if labels is not None:
+            # Labels are already sensible numbers, so convert them first
+            lab_coord_idx = np.arange(labels.shape[-1]-4, labels.shape[-1])
+            lab_class, lab_x, lab_y, lab_w, lab_h = np.split(labels, lab_coord_idx, axis=-1)
+            lab_x1, lab_y1, lab_x2, lab_y2 = xywh_to_xyxy(np.squeeze(lab_x),  # Squeezing to aid broadcasting in helper
+                                                          np.squeeze(lab_y),
+                                                          np.squeeze(lab_w),
+                                                          np.squeeze(lab_h))
+            labels = np.concatenate([lab_class,
+                                     lab_x1[:, np.newaxis],  # Dummy dimensions to enable concatenation
+                                     lab_y1[:, np.newaxis],
+                                     lab_x2[:, np.newaxis],
+                                     lab_y2[:, np.newaxis]], axis=-1)
 
-        # Extract the class predictions and reorganize the predicted boxes
-        class_preds = preds[..., self._NUM_BOXES * 5:]
-        preds = np.reshape(preds[..., 0:self._NUM_BOXES * 5], preds.shape[:-1] + (self._NUM_BOXES, 5))
+        if preds is not None:
+            # Extract the class predictions and reorganize the predicted boxes
+            class_preds = preds[..., self._NUM_BOXES * 5:]
+            preds = np.reshape(preds[..., 0:self._NUM_BOXES * 5], preds.shape[:-1] + (self._NUM_BOXES, 5))
 
-        # Predictions are not, so apply sigmoids and exponentials first and then convert them
-        anchors = np.array(self._ANCHORS)
-        pred_x = expit(preds[..., 0])
-        pred_y = expit(preds[..., 1])
-        pred_w = np.exp(preds[..., 2]) * anchors[:, 0]
-        pred_h = np.exp(preds[..., 3]) * anchors[:, 1]
-        pred_conf = expit(preds[..., 4])
-        pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x.T,  # Transposes to aid broadcasting in helper
-                                                          pred_y.T,
-                                                          pred_w.T,
-                                                          pred_h.T)
-        preds[..., :] = np.stack([pred_x1.T,  # Transposes to restore original shape
-                                  pred_y1.T,
-                                  pred_x2.T,
-                                  pred_y2.T,
-                                  pred_conf], axis=-1)
+            # Predictions are not sensible numbers, so apply sigmoids and exponentials first and then convert them
+            anchors = np.array(self._ANCHORS)
+            pred_x = expit(preds[..., 0])
+            pred_y = expit(preds[..., 1])
+            pred_w = np.exp(preds[..., 2]) * anchors[:, 0]
+            pred_h = np.exp(preds[..., 3]) * anchors[:, 1]
+            pred_conf = expit(preds[..., 4])
+            pred_x1, pred_y1, pred_x2, pred_y2 = xywh_to_xyxy(pred_x.T,  # Transposes to aid broadcasting in helper
+                                                              pred_y.T,
+                                                              pred_w.T,
+                                                              pred_h.T)
+            preds[..., :] = np.stack([pred_x1.T,  # Transposes to restore original shape
+                                      pred_y1.T,
+                                      pred_x2.T,
+                                      pred_y2.T,
+                                      pred_conf], axis=-1)
 
-        # Reattach the class predictions
-        preds = np.reshape(preds, preds.shape[:-2] + (self._NUM_BOXES * 5,))
-        preds = np.concatenate([preds, class_preds], axis=-1)
+            # Reattach the class predictions
+            preds = np.reshape(preds, preds.shape[:-2] + (self._NUM_BOXES * 5,))
+            preds = np.concatenate([preds, class_preds], axis=-1)
 
         return labels, preds
 
@@ -616,23 +618,21 @@ class ObjectDetectionModel(DPPModel):
             if self._with_patching:
                 # we want the largest multiple of patch height/width that is smaller than the original
                 # image height/width, for the final image dimensions
-                patch_height = self._patch_height
-                patch_width = self._patch_width
-                final_height = (self._image_height // patch_height) * patch_height
-                final_width = (self._image_width // patch_width) * patch_width
-                num_patches_vert = self._image_height // patch_height
-                num_patches_horiz = self._image_width // patch_width
-                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
+                num_patches_vert = self._image_height // self._patch_height
+                num_patches_horiz = self._image_width // self._patch_width
+                final_height = num_patches_vert * self._patch_height
+                final_width = num_patches_horiz * self._patch_width
+
+                # find image differences to determine re-centering crop coords, we divide by 2 so that the leftover
                 # is equal on all sides of image
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2
                 # pre-allocate output dimensions
-                total_outputs = np.empty([1,
-                                          num_patches_horiz * num_patches_vert,
-                                          self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
+                total_outputs = np.empty([1, num_patches_horiz * num_patches_vert,
+                                          self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES])
             else:
                 total_outputs = np.empty(
-                    [1, self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
+                    [1, self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES])
 
             num_batches = len(x) // self._batch_size
             remainder = len(x) % self._batch_size
@@ -650,11 +650,11 @@ class ObjectDetectionModel(DPPModel):
             if self._with_patching:
                 x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
                 # Split the images up into the multiple slices of size patch_height x patch_width
-                ksizes = [1, patch_height, patch_width, 1]
-                strides = [1, patch_height, patch_width, 1]
+                ksizes = [1, self._patch_height, self._patch_width, 1]
+                strides = [1, self._patch_height, self._patch_width, 1]
                 rates = [1, 1, 1, 1]
                 x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
+                x_test = tf.reshape(x_test, shape=[-1, self._patch_height, self._patch_width, self._image_depth])
 
             if self._load_from_saved:
                 self.load_state()
@@ -663,22 +663,20 @@ class ObjectDetectionModel(DPPModel):
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             if self._with_patching:
-                for i in range(int(num_batches)):
-                    xx = self._session.run(x_pred)
-                    xx = np.reshape(xx, [self._batch_size, num_patches_vert * num_patches_horiz, -1])
-                    for img in np.array_split(xx, self._batch_size):
-                        total_outputs = np.append(total_outputs, img, axis=0)
+                xx_output_size = [self._batch_size, num_patches_vert * num_patches_horiz,
+                                  self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
             else:
-                for i in range(int(num_batches)):
-                    xx = self._session.run(x_pred)
-                    xx = np.reshape(xx, [self._batch_size, -1])
-                    for img in np.array_split(xx, self._batch_size):
-                        total_outputs = np.append(total_outputs, img, axis=0)
+                xx_output_size = [self._batch_size,
+                                  self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
 
-            # delete weird first row
+            for i in range(int(num_batches)):
+                xx = self._session.run(x_pred)
+                xx = np.reshape(xx, xx_output_size)
+                for img in np.array_split(xx, self._batch_size):
+                    total_outputs = np.append(total_outputs, img, axis=0)
+
+            # Delete the weird first row and any outputs which are overruns from the last batch
             total_outputs = np.delete(total_outputs, 0, 0)
-
-            # delete any outputs which are overruns from the last batch
             if remainder != 0:
                 for i in range(remainder):
                     total_outputs = np.delete(total_outputs, -1, 0)
@@ -686,202 +684,30 @@ class ObjectDetectionModel(DPPModel):
         return total_outputs
 
     def forward_pass_with_interpreted_outputs(self, x):
-        with self._graph.as_default():
-            # check for patching needs
-            if self._with_patching:
-                # we want the largest multiple of patch height/width that is smaller than the original
-                # image height/width, for the final image dimensions
-                patch_height = self._patch_height
-                patch_width = self._patch_width
-                final_height = (self._image_height // patch_height) * patch_height
-                final_width = (self._image_width // patch_width) * patch_width
-                num_patches_vert = self._image_height // patch_height
-                num_patches_horiz = self._image_width // patch_width
-                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
-                # is equal on all sides of image
-                offset_height = (self._image_height - final_height) // 2
-                offset_width = (self._image_width - final_width) // 2
-                # pre-allocate output dimensions
-                total_outputs = np.empty([1,
-                                          num_patches_horiz * num_patches_vert,
-                                          self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
-            else:
-                total_outputs = np.empty(
-                    [1, self._grid_w * self._grid_h * (5 * self._NUM_BOXES + self._NUM_CLASSES)])
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
+        total_outputs = self.forward_pass_with_file_inputs(x)
+        n_images = total_outputs.shape[0]
 
-            if remainder != 0:
-                num_batches += 1
-                remainder = self._batch_size - remainder
-
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = x
-            self._parse_images(images)
-
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size,
-                                    num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._with_patching:
-                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height,
-                                                       final_width)
-                # Split the images up into the multiple slices of size patch_height x patch_width
-                ksizes = [1, patch_height, patch_width, 1]
-                strides = [1, patch_height, patch_width, 1]
-                rates = [1, 1, 1, 1]
-                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
-
-            if self._load_from_saved:
-                self.load_state()
-            self._initialize_queue_runners()
-            # Run model on them
-            x_pred = self.forward_pass(x_test, deterministic=True)
-
-            if self._with_patching:
-                for i in range(int(num_batches)):
-                    xx = self._session.run(x_pred)
-                    xx = np.reshape(xx, [self._batch_size, num_patches_vert * num_patches_horiz, -1])
-                    for img in np.array_split(xx, self._batch_size):
-                        total_outputs = np.append(total_outputs, img, axis=0)
-            else:
-                for i in range(int(num_batches)):
-                    xx = self._session.run(x_pred)
-                    xx = np.reshape(xx, [self._batch_size, -1])
-                    for img in np.array_split(xx, self._batch_size):
-                        total_outputs = np.append(total_outputs, img, axis=0)
-
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
-            # delete any outputs which are overruns from the last batch
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
-
-        # Perform yolo needs
-        # this is currently for patching, need a way to be more general or maybe just need to write both ways out
-        # fully
-        total_pred_boxes = []
         if self._with_patching:
-            num_patches = num_patches_vert * num_patches_horiz
-            for img_data in total_outputs:
-                ###################################################################################################
-                # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
-                # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
-                # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
-                # this may likely need to be made more general in future
-                ###################################################################################################
-                for i in range(num_patches):
-                    for j in range(self._grid_w * self._grid_h):
-                        # We first find the responsible box by finding the one with the highest confidence
-                        box_conf1 = expit(img_data[i, j * 26 + 4])
-                        box_conf2 = expit(img_data[i, j * 26 + 9])
-                        box_conf3 = expit(img_data[i, j * 26 + 14])
-                        box_conf4 = expit(img_data[i, j * 26 + 19])
-                        box_conf5 = expit(img_data[i, j * 26 + 24])
-                        box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
-                        max_conf_idx = int(np.argmax(box_confs))
-                        # Then we check if the responsible box is above the threshold for detecting an object
-                        if box_confs[max_conf_idx] > 0.6:
-                            # This box has detected an object, so we extract and convert its coords
-                            pred_box = img_data[i, j*26+5*max_conf_idx:j*26+5*max_conf_idx+4]
+            num_patches_vert = self._image_height // self._patch_height
+            num_patches_horiz = self._image_width // self._patch_width
+            num_patches = num_patches_horiz * num_patches_vert
 
-                            # centers from which x and y offsets are applied to, these are in 'grid coords'
-                            c_x = j % self._grid_w
-                            c_y = j // self._grid_w
-                            # x and y go from 'grid coords' to 'patch coords' to 'full img coords'
-                            x = (expit(pred_box[0]) + c_x) * (patch_width / self._grid_w) \
-                                + (i % num_patches_horiz) * patch_width
-                            y = (expit(pred_box[1]) + c_y) * (patch_height / self._grid_h) \
-                                + (i // num_patches_horiz) * patch_height
-                            # get the anchor box based on the highest conf (responsible box)
-                            prior_w = self._ANCHORS[max_conf_idx][0]
-                            prior_h = self._ANCHORS[max_conf_idx][1]
-                            # w and h go from 'grid coords' to 'full img coords'
-                            w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
-                            h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
-                            # turn into points
-                            x1y1 = (int(x - w / 2), int(y - h / 2))
-                            x2y2 = (int(x + w / 2), int(y + h / 2))
-                            total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
-
-                # Non - maximal suppression (Probably make into a general function)
-                all_boxes = np.array(total_pred_boxes)
-                idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
-                final_boxes_idxs = []
-                while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
-                    last = len(idxs) - 1  # since sorted in reverse order, the last one has the highest conf
-                    i = idxs[last]
-                    final_boxes_idxs.append(i)  # add it to the maximal list, then check for duplicates to delete
-                    suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
-                    for pos in range(0, last):  # search for duplicates
-                        j = idxs[pos]
-                        iou = self.__compute_iou(all_boxes[i], all_boxes[j])
-                        if iou > 0.3:  # maybe should make this a tunable parameter
-                            suppress.append(pos)
-                    idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
-
-            # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
-            interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
-            return interpreted_outputs
+            im_preds = []
+            for i in range(n_images):
+                patch_preds = []
+                for j in range(num_patches):
+                    _, conv_preds = self.__yolo_coord_convert(None, total_outputs[i, j, ...])
+                    filtered_preds = self.__yolo_filter_predictions(conv_preds)
+                    patch_preds.append(filtered_preds)
+                im_preds.append(patch_preds)
         else:
-            # no patching
-            print(total_outputs.shape)
-            for img_data in total_outputs:
-                ###################################################################################################
-                # img_data is [x,y,w,h,conf,x,y,w,h,conf,x,y,......, classes]
-                # currently 5 boxes and 1 class are fixed amounts, hence we pull 5 box confs and we use multiples
-                # of 26 because 5 (boxes) * 5 (x,y,w,h,conf) + 1 (class) = 26
-                # this may likely need to be made more general in future
-                ###################################################################################################
-                for i in range(self._grid_w * self._grid_h):
-                    # x,y,w,h,conf,x,y,w,h,cong,x,y,...... classes
-                    box_conf1 = expit(img_data[i * 26 + 4])
-                    box_conf2 = expit(img_data[i * 26 + 9])
-                    box_conf3 = expit(img_data[i * 26 + 14])
-                    box_conf4 = expit(img_data[i * 26 + 19])
-                    box_conf5 = expit(img_data[i * 26 + 24])
-                    box_confs = [box_conf1, box_conf2, box_conf3, box_conf4, box_conf5]
-                    max_conf_idx = int(np.argmax(box_confs))
+            im_preds = []
+            for i in range(n_images):
+                _, conv_preds = self.__yolo_coord_convert(None, total_outputs[i, ...])
+                filtered_preds = self.__yolo_filter_predictions(conv_preds)
+                im_preds.append(filtered_preds)
 
-                    if box_confs[max_conf_idx] > 0.6:
-                        pred_box = img_data[i * 26 + 5 * max_conf_idx: i * 26 + 5 * max_conf_idx + 4]
-
-                        # centers from which x and y offsets are applied to, these are in 'grid coords'
-                        c_x = i % self._grid_w
-                        c_y = i // self._grid_w
-                        # x and y go from 'grid coords' to 'full img coords'
-                        x = (expit(pred_box[0]) + c_x) * (self._image_width / self._grid_w)
-                        y = (expit(pred_box[1]) + c_y) * (self._image_height / self._grid_h)
-                        # get the anchor box based on the highest conf (responsible box)
-                        prior_w = self._ANCHORS[max_conf_idx][0]
-                        prior_h = self._ANCHORS[max_conf_idx][1]
-                        # w and h go from 'grid coords' to 'full img coords'
-                        w = (np.exp(pred_box[2]) * prior_w) * (self._image_width / self._grid_w)
-                        h = (np.exp(pred_box[3]) * prior_h) * (self._image_height / self._grid_h)
-                        x1y1 = (int(x - w / 2), int(y - h / 2))
-                        x2y2 = (int(x + w / 2), int(y + h / 2))
-                        total_pred_boxes.append([x1y1[0], x1y1[1], x2y2[0], x2y2[1], box_confs[max_conf_idx]])
-
-                # Non - maximal suppression (Probably make into a general function)
-                all_boxes = np.array(total_pred_boxes)
-                idxs = np.argsort(all_boxes[:, 4])  # sorts them smallest to largest by confidence
-                final_boxes_idxs = []
-                while len(idxs) > 0:  # sometimes we may delete multiple boxes so we use a while instead of for
-                    last = len(idxs) - 1  # since sorted in reverse order, the last one has highest conf
-                    i = idxs[last]
-                    final_boxes_idxs.append(i)  # add it to the maximal list, then check for duplicates to delete
-                    suppress = [last]  # this is the list of idxs of boxes to stop checking (they will deleted)
-                    for pos in range(0, last):  # search for duplicates
-                        j = idxs[pos]
-                        iou = self.__compute_iou(all_boxes[i], all_boxes[j])
-                        if iou > 0.3:  # maybe should make this a tunable parameter
-                            suppress.append(pos)
-                    idxs = np.delete(idxs, suppress)  # remove the box that was added and its duplicates
-
-            # [[x1,y1,x2,y2,conf],[x1,y1,x2,y2,conf],...]
-            interpreted_outputs = np.array(all_boxes[final_boxes_idxs, :])
-            return interpreted_outputs
+        return im_preds
 
     def __compute_iou(self, box1, box2):
         """
