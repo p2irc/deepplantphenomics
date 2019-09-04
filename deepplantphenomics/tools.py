@@ -39,6 +39,7 @@ class tools(object):
 
         return predictions
 
+    @staticmethod
     def count_canola_flowers(x, batch_size=1, image_height=300, image_width=300, image_depth=3):
 
         net = networks.countCeptionCounter(
