@@ -1,4 +1,6 @@
-DPP provides 2 different models that can be used for object counting. One of those models is the [Count-ception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers in images.
+DPP provides 2 different models that can be used for object counting. One of those models is the [Count-ception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers. It does so by producing maps of redundant counts and processing them into a single object count.
+
+![Redundant Count Map Examples](flower-counter-output.png)
 
 The structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](Tutorial-Training-The-Leaf-Counter.md) for a detailed description of this). This covers the differences in model setup and data/label loading specific to training a Countception model in DPP.
 
@@ -80,8 +82,3 @@ model.load_countception_dataset_from_pkl_file()
 ```
 
 For more information about how the pickle file is generated, please refer to the [paper](https://arxiv.org/abs/1703.08710) and the [github repo](https://github.com/roggirg/count-ception_mbm).
-
-
-## Prediction output of the Count-ception network
-
-When a trained Count-ception network is used to predict the total count of flowers in an image, an intermediate count map is generated first. See flower-counter-output.png for an example output of count map. This count map is then processed to obtain the total count in the input image. 
