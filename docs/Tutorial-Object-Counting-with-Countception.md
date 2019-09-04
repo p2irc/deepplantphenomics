@@ -1,10 +1,10 @@
-DPP provides 2 different models that can be used for object counting. One of those models is the [Countception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers in images.
+DPP provides 2 different models that can be used for object counting. One of those models is the [Count-ception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers in images.
 
 The structure and process of setting up and training a model is similar to other DPP models (see the [Leaf Counter training tutorial](Tutorial-Training-The-Leaf-Counter.md) for a detailed description of this). This covers the differences in model setup and data/label loading specific to training a Countception model in DPP.
 
 ## Full Example
 
-Below is a working example of training a Countception object counter in DPP. 
+Below is a working example of training a Count-ception object counter in DPP. 
 
 ```python
 #
@@ -63,9 +63,9 @@ add_convolutional_layer(self, filter_dimension, stride_length, activation_functi
 ```
 In the current implementation in DPP, a receptive field of 32 is used. For this setting, the first convolutional layer uses a 3x3 filter with `padding=32`, the second convolutional layer uses a 14x14 filter with `padding=0` and the third convolutional layer uses a 18x18 filter with `padding=0`. To use other receptive fields, these parameters should be modified and set properly. Each convolutional layer uses `xavier` weight initialization and the `LeakyReLu` activation function.
 
-## Predefined Countception Network
+## Predefined Count-ception Network
 
-While the network layers were described above, the Countception network (with default parameters) is available as a predefined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
+While the network layers were described above, the Count-ception network (with default parameters) is available as a predefined model in DPP. After configuring the model settings and loading in the dataset, the model layers can be setup using:
 
 ```python
 model.use_predefined_model('countception')
@@ -80,3 +80,8 @@ model.load_countception_dataset_from_pkl_file()
 ```
 
 For more information about how the pickle file is generated, please refer to the [paper](https://arxiv.org/abs/1703.08710) and the [github repo](https://github.com/roggirg/count-ception_mbm).
+
+
+## Prediction output of the Count-ception network
+
+When a trained Count-ception network is used to predict the total count of flowers in an image, an intermediate count map is generated first. See flower-counter-output.png for an example output of count map. This count map is then processed to obtain the total count in the input image. 
