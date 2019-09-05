@@ -1,4 +1,4 @@
-DPP provides 2 different models that can be used for object counting. One of those models is the [Count-ception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers. It does so by producing maps of redundant counts and processing them into a single object count.
+DPP provides two different techniques that can be used for object counting. One of those models is the [Count-ception object counter](https://arxiv.org/abs/1703.08710), which is useful for tasks like counting dense canola flowers. It does so by producing maps of redundant counts and processing them into a single object count.
 
 ![Redundant Count Map Examples](flower-counter-output.png)
 
@@ -6,7 +6,7 @@ The structure and process of setting up and training a model is similar to other
 
 ## Full Example
 
-Below is a working example of training a Count-ception object counter in DPP. 
+Below is a working example of training a Countception object counter in DPP. 
 
 ```python
 #
@@ -37,7 +37,7 @@ model.use_predefined_model('countception')
 model.begin_training()
 ```
 
-## Count-ception Network Layers
+## Count-ception Network Layers (Advanced)
 
 The Countception network consists of six convolutional layers and six parallel convolutional blocks. The Count-ception network can be recreated with the following layers:
 

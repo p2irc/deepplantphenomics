@@ -1,4 +1,4 @@
-DPP provides 2 different models that can be used for object counting. One of those models is an object counter that predicts heatmaps of object locations.
+DPP provides two different techniques that can be used for object counting. One of those models is an object counter that predicts heatmaps of object locations (also known as *density estimation*).
 
 The structure and process of training a heatmap-based object counter is similar to other models (see the [Leaf Counter training tutorial](Tutorial-Training-The-Leaf-Counter.md) for more details). This mostly covers the settings and data loading differences for heatmap object counters.
 
