@@ -162,10 +162,12 @@ class DPPModel(ABC):
         self._queue_capacity = 50
         self._report_rate = report_rate
 
-        # Multi-threading
+        # Multi-threading and GPU
         self._num_threads = 1
         self._coord = None
         self._threads = None
+        self._use_gpus = False
+        self._num_gpus = 1
 
         # Now do actual initialization stuff
         # Add the run level to the tensorboard path
@@ -210,6 +212,25 @@ class DPPModel(ABC):
             raise ValueError("num_threads must be positive")
 
         self._num_threads = num_threads
+
+    def set_number_of_gpus(self, num_gpus):
+        """Set the number of GPUs to use for graph evaluation"""
+        if not isinstance(num_gpus, int):
+            raise TypeError("num_gpus must be an int")
+        if num_gpus <= 0:
+            raise ValueError("num_gpus must be positive")
+
+        self._num_gpus = num_gpus
+
+    def set_use_gpus(self, use_gpus):
+        """Set whether to use GPUs for graph evaluation or use only the CPU"""
+        if not isinstance(use_gpus, bool):
+            raise TypeError("use_gpus must be a bool")
+        if use_gpus and not tf.test.is_gpu_available():
+            raise RuntimeError("No GPUs are available for use. Make sure there are available GPUs and that your "
+                               "Tensorflow package supports them (i.e. install tensorflow-gpu).")
+
+        self._use_gpus = use_gpus
 
     def set_processed_images_dir(self, im_dir):
         """Set the directory for storing processed images when pre-processing is used"""
@@ -466,6 +487,13 @@ class DPPModel(ABC):
         self._patch_width = width
         self._with_patching = True
 
+    def _get_device_list(self):
+        """Returns the list of CPU and/or GPU devices to construct and evaluate graphs for"""
+        if not self._use_gpus:
+            return ['/device:cpu:0']
+        else:
+            return ['/device:gpu:' + str(x) for x in range(self._num_gpus)]
+
     def _add_layers_to_graph(self):
         """
         Adds the layers in self.layers to the computational graph.
@@ -482,27 +510,30 @@ class DPPModel(ABC):
         Add graph components that parse the input images and labels into tensors and split them into training,
         validation, and testing sets
         """
-        if self._raw_test_labels is not None:
-            # currently think of moderation features as None so they are passed in hard-coded
-            self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                self._raw_test_image_files, self._raw_test_labels, None,
-                                self._raw_val_image_files, self._raw_val_labels, None)
-        elif self._images_only:
-            self._parse_images(self._raw_image_files)
-        else:
-            # Split the data into training, validation, and testing sets. If there is no validation set or no moderation
-            # features being used they will be returned as 0 (for validation) or None (for moderation features)
-            train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
-            # Parse the images and set the appropriate environment variables
-            self._parse_dataset(train_images, train_labels, train_mf,
-                                test_images, test_labels, test_mf,
-                                val_images, val_labels, val_mf)
+        # Preprocessing has to be done on the CPU to limit inter-device data transfer
+        with tf.device("/CPU:0"):
+            if self._raw_test_labels is not None:
+                # currently think of moderation features as None so they are passed in hard-coded
+                self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                    self._raw_test_image_files, self._raw_test_labels, None,
+                                    self._raw_val_image_files, self._raw_val_labels, None)
+            elif self._images_only:
+                self._parse_images(self._raw_image_files)
+            else:
+                # Split the data into training, validation, and testing sets. If there is no validation set or no
+                # moderation features being used they will be returned as 0 (for validation) or None (for moderation
+                # features)
+                train_images, train_labels, train_mf, \
+                        test_images, test_labels, test_mf, \
+                        val_images, val_labels, val_mf, = \
+                        loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                               self._validation_split, self._all_moderation_features,
+                                               self._training_augmentation_images, self._training_augmentation_labels,
+                                               self._split_labels)
+                # Parse the images and set the appropriate environment variables
+                self._parse_dataset(train_images, train_labels, train_mf,
+                                    test_images, test_labels, test_mf,
+                                    val_images, val_labels, val_mf)
 
     def _graph_extract_patch(self, x, offsets=None):
         """
@@ -524,47 +555,75 @@ class DPPModel(ABC):
                                      normalized=False, centered=False)
         return x, offsets
 
-    def _graph_add_optimizer(self):
-        """
-        Adds graph components for setting and running an optimization operation
-        :return: The optimizer's gradients, variables, and the global_grad_norm
-        """
-        # Identify which optimizer we are using
+    def _graph_make_optimizer(self):
+        """Generate a new optimizer object for computing and applying gradients"""
         if self._optimizer == 'adagrad':
-            self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
             self._log('Using Adagrad optimizer')
+            return tf.train.AdagradOptimizer(self._learning_rate)
         elif self._optimizer == 'adadelta':
-            self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-            self._log('Using adadelta optimizer')
+            self._log('Using Adadelta optimizer')
+            return tf.train.AdadeltaOptimizer(self._learning_rate)
         elif self._optimizer == 'sgd':
-            self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
             self._log('Using SGD optimizer')
+            return tf.train.GradientDescentOptimizer(self._learning_rate)
         elif self._optimizer == 'adam':
-            self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
             self._log('Using Adam optimizer')
+            return tf.train.AdamOptimizer(self._learning_rate)
         elif self._optimizer == 'sgd_momentum':
-            self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
             self._log('Using SGD with momentum optimizer')
+            return tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
         else:
             warnings.warn('Unrecognized optimizer requested')
             exit()
 
-        # Compute gradients, clip them, the apply the clipped gradients
-        # This is broken up so that we can add gradients to tensorboard
-        # need to make the 5.0 an adjustable hyperparameter
-        gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+    def _graph_get_gradients(self, loss):
+        """
+        Add graph components for getting an optimizer and gradients given some losses
+        :param loss: The loss value to use when computing the gradients
+        :return: The graph's gradients, variables, and the global gradient norm from clipping
+        """
+        optimizer = self._graph_make_optimizer()
+        gradients, variables = zip(*optimizer.compute_gradients(loss))
         gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-        self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
-
         return gradients, variables, global_grad_norm
+
+    def _graph_average_gradients(self, graph_gradients):
+        """
+        Add graph components for averaging the computed gradients from multiple runs of a graph (i.e. over gradients
+        from multiple GPUs)
+        :param graph_gradients: A list of the computed gradient lists from each (GPU) run
+        :return: A list of the averaged gradients across each run
+        """
+        # No averaging needed if there's only gradients from one run (because a CPU or 1 GPU was used)
+        if len(graph_gradients) == 1:
+            return graph_gradients[0]
+
+        averaged_gradients = []
+        for gradients in graph_gradients:
+            grads = [tf.expand_dims(g, 0) for g in gradients]
+            grads = tf.concat(grads, axis=0)
+            grads = tf.reduce_mean(grads, axis=0)
+            averaged_gradients.append(grads)
+
+        return averaged_gradients
+
+    def _graph_apply_gradients(self, gradients, variables):
+        """
+        Add graph components for applying gradients to variables
+        :param gradients: The gradients to be applied
+        :param variables: The variables to apply the gradients to
+        :return: An operation for applying gradients to the graph variables
+        """
+        optimizer = self._graph_make_optimizer()
+        return optimizer.apply_gradients(zip(gradients, variables))
 
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
         Adds graph components common to every problem type related to outputting losses and other summary variables to
         Tensorboard.
-        :param l2_cost: ...
-        :param gradients: ...
-        :param global_grad_norm: ...
+        :param l2_cost: The L2 loss component of the computed cost
+        :param gradients: The gradients for the variables in the graph
+        :param global_grad_norm: The global norm used to normalize the gradients
         """
         self._log('Creating Tensorboard summaries...')
 
@@ -704,9 +763,9 @@ class DPPModel(ABC):
                 tqdm_range = tqdm(range(self._maximum_training_batches))
                 for i in tqdm_range:
                     start_time = time.time()
-
                     self._global_epoch = i
                     self._session.run(self._graph_ops['optimizer'])
+
                     if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
                         if self._tb_dir is not None:
                             self._training_batch_results(i, start_time, tqdm_range, train_writer)

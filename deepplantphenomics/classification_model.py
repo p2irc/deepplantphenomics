@@ -43,14 +43,9 @@ class ClassificationModel(DPPModel):
 
     def _assemble_graph(self):
         with self._graph.as_default():
-
-            self._log('Parsing dataset...')
-            self._graph_parse_data()
-
-            self._log('Creating layer parameters...')
-            self._add_layers_to_graph()
-
             self._log('Assembling graph...')
+            self._log('Graph: Parsing dataset...')
+            self._graph_parse_data()  # Always done on CPU
 
             # Define batches
             if self._has_moderation:
@@ -74,34 +69,50 @@ class ClassificationModel(DPPModel):
             if self._with_patching:
                 x, offsets = self._graph_extract_patch(x)
 
-            # Run the network operations
-            if self._has_moderation:
-                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
-            else:
-                xx = self.forward_pass(x, deterministic=False)
+            # Run the training on possibly multiple GPUs
+            device_gradients = []
+            device_variables = []
+            for n, d in enumerate(self._get_device_list()):  # Build a graph on either a CPU or all of the GPUs
+                with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    self._log('Graph: Creating layer parameters...')
+                    self._add_layers_to_graph()
 
-            # Define regularization cost
-            if self._reg_coeff is not None:
-                l2_cost = tf.squeeze(tf.reduce_sum(
-                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                     if isinstance(layer, layers.fullyConnectedLayer)]))
-            else:
-                l2_cost = 0.0
+                    # Run the network operations
+                    if self._has_moderation:
+                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+                    else:
+                        xx = self.forward_pass(x, deterministic=False)
 
-            # Define cost function based on which one was selected via set_loss_function
-            if self._loss_fn == 'softmax cross entropy':
-                sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-            self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
+                    # Define regularization cost
+                    self._log('Graph: Calculating loss and gradients...')
+                    if self._reg_coeff is not None:
+                        l2_cost = tf.squeeze(tf.reduce_sum(
+                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                             if isinstance(layer, layers.fullyConnectedLayer)]))
+                    else:
+                        l2_cost = 0.0
 
-            # Set the optimizer and get the gradients from it
-            gradients, variables, global_grad_norm = self._graph_add_optimizer()
+                    # Define cost function based on which one was selected via set_loss_function
+                    if self._loss_fn == 'softmax cross entropy':
+                        sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+                    self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
 
-            # for classification problems we will compute the training accuracy, this is also used for tensorboard
-            self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
-            correct_predictions = tf.equal(self.__class_predictions, tf.argmax(y, 1))
-            self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
+                    # For classification problems, we will compute the training accuracy as well; this is also used
+                    # for Tensorboard
+                    self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
+                    correct_predictions = tf.equal(self.__class_predictions, tf.argmax(y, 1))
+                    self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
-            # Calculate test accuracy
+                    # Set the optimizer and get the gradients from it
+                    gradients, variables, global_grad_norm = self._graph_get_gradients(self._graph_ops['cost'])
+                    device_gradients.append(gradients)
+                    device_variables.append(variables)
+
+            average_gradients = self._graph_average_gradients(device_gradients)
+            opt_variables = device_variables[0]
+            self._graph_ops['optimizer'] = self._graph_apply_gradients(average_gradients, opt_variables)
+
+            # Calculate test and validation accuracy
             if self._has_moderation:
                 if self._testing:
                     x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
@@ -127,9 +138,11 @@ class ClassificationModel(DPPModel):
                                                                      num_threads=self._num_threads,
                                                                      capacity=self._queue_capacity)
             if self._testing:
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                x_test = tf.reshape(x_test,
+                                    shape=[-1, self._image_height, self._image_width, self._image_depth])
             if self._validation:
-                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                x_val = tf.reshape(x_val,
+                                   shape=[-1, self._image_height, self._image_width, self._image_depth])
 
             # If using patching, we need to properly pull similar patches from the test and validation images
             if self._with_patching:
@@ -138,6 +151,7 @@ class ClassificationModel(DPPModel):
                 if self._validation:
                     x_val, _ = self._graph_extract_patch(x_val, offsets)
 
+            # Run the testing and validation, whose graph should only be on 1 device
             if self._has_moderation:
                 if self._testing:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
@@ -151,7 +165,7 @@ class ClassificationModel(DPPModel):
                 if self._validation:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-            # compute the loss and accuracy
+            # Compute the loss and accuracy for testing and validation
             if self._testing:
                 test_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_test_predicted']), 1)
                 test_correct_predictions = tf.equal(test_class_predictions,
@@ -160,13 +174,14 @@ class ClassificationModel(DPPModel):
                 self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
             if self._validation:
                 self.__val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
-                val_correct_predictions = tf.equal(self.__val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
+                val_correct_predictions = tf.equal(self.__val_class_predictions,
+                                                   tf.argmax(self._graph_ops['y_val'], 1))
                 self._graph_ops['val_losses'] = val_correct_predictions
                 self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
-                self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+                self._graph_tensorboard_summary(l2_cost, average_gradients, opt_variables, global_grad_norm)
 
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time
@@ -191,7 +206,6 @@ class ClassificationModel(DPPModel):
                                 epoch_accuracy,
                                 epoch_val_accuracy,
                                 samples_per_sec))
-
         else:
             loss, epoch_accuracy = self._session.run([self._graph_ops['cost'],
                                                       self._graph_ops['accuracy']])
@@ -217,7 +231,7 @@ class ClassificationModel(DPPModel):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            # Initialize storage for the retreived test variables
+            # Initialize storage for the retrieved test variables
             loss_sum = 0.0
 
             # Main test loop
@@ -229,7 +243,7 @@ class ClassificationModel(DPPModel):
             # implemented)
             mean = (loss_sum / num_batches)
             self._log('Average test accuracy: {:.5f}'.format(mean))
-            return 1.0-mean.astype(np.float32)
+            return 1.0 - mean.astype(np.float32)
 
     def forward_pass_with_file_inputs(self, x):
         with self._graph.as_default():
