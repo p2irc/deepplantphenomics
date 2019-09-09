@@ -498,13 +498,13 @@ class DPPModel(ABC):
     def _add_layers_to_graph(self):
         """
         Adds the layers in self.layers to the computational graph.
-
-        Currently _assemble_graph is doing too many things, so this is needed as a separate function so that other
-        functions such as load_state can add layers to the graph without performing everything else in assemble_graph
         """
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
-                layer.add_to_graph()
+                # Adding layers to the graph mostly involves setting up the required variables. Those variables should
+                # be on the CPU in case we are using multiple GPUs and need to share them across multiple graph towers.
+                with tf.device('/device:cpu:0'):
+                    layer.add_to_graph()
 
     def _graph_parse_data(self):
         """
@@ -512,7 +512,7 @@ class DPPModel(ABC):
         validation, and testing sets
         """
         # Preprocessing has to be done on the CPU to limit inter-device data transfer
-        with tf.device("/CPU:0"):
+        with tf.device("/device:cpu:0"):
             if self._raw_test_labels is not None:
                 # currently think of moderation features as None so they are passed in hard-coded
                 self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,

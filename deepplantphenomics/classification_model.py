@@ -69,14 +69,15 @@ class ClassificationModel(DPPModel):
             if self._with_patching:
                 x, offsets = self._graph_extract_patch(x)
 
+            # Set up the graph layers. This is always done on the CPU
+            self._log('Graph: Creating layer parameters...')
+            self._add_layers_to_graph()
+
             # Run the training on possibly multiple GPUs
             device_gradients = []
             device_variables = []
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either a CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
-                    self._log('Graph: Creating layer parameters...')
-                    self._add_layers_to_graph()
-
                     # Run the network operations
                     if self._has_moderation:
                         xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)

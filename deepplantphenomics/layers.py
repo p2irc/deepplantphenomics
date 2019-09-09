@@ -297,9 +297,7 @@ class moderationLayer(object):
 
 
 class batchNormLayer(object):
-
     def __init__(self, name, input_size, epsilon=1e-5, decay=0.9):
-
         self.name = name
         self.input_size = input_size
         self.output_size = input_size
@@ -307,7 +305,6 @@ class batchNormLayer(object):
         self.decay = decay
 
     def add_to_graph(self):
-
         shape = self.output_size[-1]
 
         zeros = tf.constant_initializer(0.0)
@@ -320,7 +317,6 @@ class batchNormLayer(object):
         self.test_var = tf.get_variable(self.name+'_pop_var', shape=shape, initializer=ones, trainable=False)
 
     def forward_pass(self, x, deterministic):
-
         mean, var = tf.nn.moments(x, axes=(0, 1, 2))
 
         # deterministic = False in training, True in testing
@@ -340,7 +336,6 @@ class batchNormLayer(object):
 
 class paralConvBlock(object):
     """A block consists of two parallel convolutional layers"""
-
     def __init__(self, name, input_size, filter_dimension_1, filter_dimension_2):
 
         self.name = name
@@ -371,12 +366,10 @@ class paralConvBlock(object):
         self.output_size[-1] = self.conv1.output_size[-1] + self.conv2.output_size[-1]
 
     def add_to_graph(self):
-
         self.conv1.add_to_graph()
         self.conv2.add_to_graph()
 
     def forward_pass(self, x, deterministic):
-
         conv1_out = self.conv1.forward_pass(x, deterministic)
         conv2_out = self.conv2.forward_pass(x, deterministic)
         output = tf.concat([conv1_out, conv2_out], axis=3)
