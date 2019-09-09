@@ -194,7 +194,8 @@ class DPPModel(ABC):
                     isinstance(layer, layers.convLayer) or isinstance(layer, layers.fullyConnectedLayer))
 
     def _reset_session(self):
-        self._session = tf.Session(graph=self._graph)
+        self._session = tf.Session(graph=self._graph,
+                                   config=tf.ConfigProto(allow_soft_placement=True))
 
     def _reset_graph(self):
         self._graph = tf.Graph()
