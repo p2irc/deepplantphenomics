@@ -600,7 +600,7 @@ class DPPModel(ABC):
             return graph_gradients[0]
 
         averaged_gradients = []
-        for gradients in graph_gradients:
+        for gradients in zip(*graph_gradients):
             grads = [tf.expand_dims(g, 0) for g in gradients]
             grads = tf.concat(grads, axis=0)
             grads = tf.reduce_mean(grads, axis=0)
