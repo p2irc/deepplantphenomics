@@ -1,5 +1,5 @@
 ## Predefined Model Architectures
-[Individual layers](Neural-Network-Layers) can be used to create any custom model. There are some common architectures, however, that don't have to be made from scratch and are predefined.
+[Individual layers](Neural-Network-Layers.md) can be used to create any custom model. There are some common architectures, however, that don't have to be made from scratch and are predefined.
 
 ```python
 model.use_predefined_model(model_name)
@@ -19,6 +19,10 @@ A classic image classification network (Simonyan, K., & Zisserman, A. (2014). *V
 ### `yolov2`
 
 The convolutional architecture used by the authors of YOLOv2, the object detection system implemented in DPP. (Redmon, J., & Farhadi, A. (2017). *YOLO9000: better, faster, stronger.* In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 7263-7271).)
+
+### `countception`
+
+The convolutional architecture used in the Count-ception paper, meant for object counting via redundant counting. (Paul Cohen, J., Boucher, G., Glastonbury, C. A., Lo, H. Z., & Bengio, Y. (2017). *Count-ception: Counting by fully convolutional redundant counting.* In Proceedings of the IEEE International Conference on Computer Vision (pp. 18-26).)
 
 ### `xsmall`
 

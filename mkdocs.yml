@@ -3,18 +3,23 @@ site_name: Deep Plant Phenomics
 pages:
     - Home: index.md
     - Documentation:
-      - DPPmodel API:
+      - Model API:
+        - Model Types: Model-Types.md
         - Loaders: Loaders.md
         - Neural Network Layers: Neural-Network-Layers.md
-        - Predefined Model Architectures: Predefined-Model-Architectures.md
         - Model Options: Model-Options.md
+        - Predefined Model Architectures: Predefined-Model-Architectures.md
         - Data Fusion Options: Data-Fusion-Options.md
         - Semantic Segmentation: Semantic-Segmentation.md
       - Tools: Tools.md
-      - Hyperparameter  Optimization: Hyperparameter-Optimization.md
+      - Hyperparameter Optimization: Hyperparameter-Optimization.md
       - Tutorials:
         - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
         - Tutorial - Deploying your Trained Model: Tutorial-Deployment.md
         - Tutorial - Training an Object Detector: Tutorial-Training-An-Object-Detector.md
+        - Object Counting:
+          - Object Counting Models: Object-Counting-Models.md
+          - Tutorial - Object Counting with Countception: Tutorial-Object-Counting-with-Countception.md
+          - Tutorial - Object Counting with Heatmaps: Tutorial-Object-Counting-with-Heatmaps.md
 
 theme: readthedocs

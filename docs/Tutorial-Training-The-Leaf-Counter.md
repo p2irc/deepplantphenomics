@@ -13,10 +13,10 @@ Let's break down the setup of our model. See the documentation on model options 
 ```python
 import deepplantphenomics as dpp
 
-model = dpp.DPPModel(debug=True, save_checkpoints=False, tensorboard_dir='/home/user/tensorlogs', report_rate=20)
+model = dpp.RegressionModel(debug=True, save_checkpoints=False, tensorboard_dir='/home/user/tensorlogs', report_rate=20)
 ```
 
-These lines import the DPP library and start a new model. We specify `debug=True` to see console output, `save_checkpoints=False` prevents the saving of checkpoints during training (it will still save the model at the end), and `tensorboard_dir` specifies the location to write [Tensorboard](https://www.tensorflow.org/how_tos/summaries_and_tensorboard/) accumulators so we can visualize the training process. `report_rate=20` means that we will report results for one training batch and one testing batch every 20 batches.
+These lines import the DPP library and start a new model for regression problems. We specify `debug=True` to see console output, `save_checkpoints=False` prevents the saving of checkpoints during training (it will still save the model at the end), and `tensorboard_dir` specifies the location to write [Tensorboard](https://www.tensorflow.org/how_tos/summaries_and_tensorboard/) accumulators so we can visualize the training process. `report_rate=20` means that we will report results for one training batch and one testing batch every 20 batches.
 
 ```python
 # 3 channels for colour, 1 channel for greyscale
@@ -34,17 +34,17 @@ These lines tell us about the input images. In this case, we are going to use ba
 Since the size of images varies in this dataset, we are going to choose to resize them to 128x128. We could also choose to resize them by cropping or padding instead.
 
 ```python
-model.set_problem_type('regression')
 model.set_num_regression_outputs(1)
-model.set_train_test_split(0.8)
+model.set_test_split(0.2)
+model.set_validation_split(0.0)
 model.set_learning_rate(0.0001)
 model.set_weight_initializer('xavier')
 model.set_maximum_training_epochs(500)
 ```
 
-These are hyperparameters to use for training. The first two lines specify that we are doing a regression problem (trying to estimate a number), with one output (the number of leaves).
+These are hyper-parameters to use for training. The first line specifies that we are doing a regression problem with one output: the number of leaves.
 
-We are going to use 80% of the examples for training, and 20% for testing. We are not using any regularization. We will use an initial learning rate of 0.0001. We are going to initialize our layer weights using the Xavier (Glorot) initialization scheme.
+We are going to use 20% of the examples for testing and none of them for validation, meaning that 80% of the examples are used for training. We are not using any regularization. We will use an initial learning rate of 0.0001. We are going to initialize our layer weights using the Xavier (Glorot) initialization scheme.
 
 We will train until 500 epochs - i.e. until we have seen all of the examples in the training set 500 times.
 
@@ -64,7 +64,7 @@ model.set_augmentation_crop(True)
 
 At test time, the images will be cropped to center in order to maintain the same input size. To illustrate the importance of data augmentation, here are test regression loss results showing the difference adding each augmentation makes:
 
-![augmentation-results](./leaf-counter-augmentation.png)
+![augmentation-results](leaf-counter-augmentation.png)
 
 ## Loading the Data
 

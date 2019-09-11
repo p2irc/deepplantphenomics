@@ -2,6 +2,7 @@ from . import networks
 import numpy as np
 import cv2
 
+
 class tools(object):
     """
     Provides stand-alone phenotyping tools which can be called statically.
@@ -23,7 +24,6 @@ class tools(object):
 
         return predictions
 
-
     @staticmethod
     def segment_vegetation(x, batch_size=8):
         """
@@ -35,7 +35,19 @@ class tools(object):
         net.shut_down()
 
         # round for binary mask
-        #predictions = np.round(predictions)
-        _, predictions = cv2.threshold(predictions.astype(np.float32),0.5,1.0,cv2.THRESH_BINARY)
+        _, predictions = cv2.threshold(predictions.astype(np.float32), 0.5, 1.0, cv2.THRESH_BINARY)
+
+        return predictions
+
+    @staticmethod
+    def count_canola_flowers(x, batch_size=1, image_height=300, image_width=300, image_depth=3):
+
+        net = networks.countCeptionCounter(
+            batch_size=batch_size, image_height=image_height, image_width=image_width, image_depth=image_depth)
+        predictions = net.forward_pass(x)
+        net.shut_down()
+
+        # round for counts
+        predictions = np.round(predictions)
 
         return predictions

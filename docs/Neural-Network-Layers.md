@@ -28,7 +28,17 @@ model.add_convolutional_layer(filter_dimension=[5, 5, 3, 32], stride_length=1, a
 
 The filter dimension is in the order `[x_size, y_size, depth, num_filters]` where `x_size` and `y_size` are spatial dimensions, `depth` is the full depth of the input volume, and `num_filters` is the desired number of filters in this layer. The output of this layer will be spatially smaller if a `stride_length` > 1 is used, and will always have a depth of `num_filters`.
 
-Replication padding is used at the boundaries. 
+Replication padding is used at the boundaries if no explicit padding is given, otherwise the given explicit padding will be used.
+
+## Parallel Convolutional Block
+
+The parallel convolutional block consists of two parallel convolutional layers of different filter dimensions. The input of this block goes to both convolutional layers and the outputs of the two convolutional layers are stacked together to form the output of this block.
+
+```
+model.add_paral_conv_block(filter_dimension_1, filter_dimension_2)
+```
+
+Both filter_dimension_1 and filter_dimension_2 are in the order `[x_size, y_size, depth, num_filters]`.
 
 ## Pooling Layer
 
@@ -93,4 +103,3 @@ model.add_output_layer()
 The number of units in this layer corresponds to the number of outputs - for example, the number of regression values, or the number of classes in the classification task. If the task being performed is semantic segmentation, then the output size is the same width and height as the input.
 
 The `output_size` parameter is optional and only used in rare cases where you want to override the calculated output size - for example, when the number of classes is not known because the dataset has not been loaded yet.
-

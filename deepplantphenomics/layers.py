@@ -2,9 +2,10 @@ import tensorflow as tf
 import math
 import copy
 
+
 class convLayer(object):
     def __init__(self, name, input_size, filter_dimension, stride_length,
-                 activation_function, initializer):
+                 activation_function, initializer, padding=None, batch_norm=False, epsilon=1e-5, decay=0.9):
         self.name = name
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
@@ -12,12 +13,23 @@ class convLayer(object):
         self.__initializer = initializer
         self.input_size = input_size
         self.output_size = copy.deepcopy(input_size)
+        self.batch_norm_layer = None
 
-        padding = 2*(math.floor(filter_dimension[0] / 2))
-        self.output_size[1] = int((self.output_size[1] - filter_dimension[0] + padding) / stride_length + 1)
-        padding = 2 * (math.floor(filter_dimension[1] / 2))
-        self.output_size[2] = int((self.output_size[2] - filter_dimension[1] + padding) / stride_length + 1)
+        if padding is None:
+            padding_row = math.floor(filter_dimension[0] / 2)
+            padding_col = math.floor(filter_dimension[1] / 2)
+        else:
+            padding_row = padding
+            padding_col = padding
+
+        self.padding = [[0, 0], [padding_row, padding_row], [padding_col, padding_col], [0, 0]]
+        self.output_size[1] = int((self.output_size[1] - filter_dimension[0] + 2 * padding_row) / stride_length + 1)
+        self.output_size[2] = int((self.output_size[2] - filter_dimension[1] + 2 * padding_col) / stride_length + 1)
         self.output_size[-1] = filter_dimension[-1]
+
+        if batch_norm:
+            self.batch_norm_layer = batchNormLayer(name=self.name + '_batch_norm', input_size=self.output_size,
+                                                   epsilon=epsilon, decay=decay)
 
     def add_to_graph(self):
         if self.__initializer == 'xavier':
@@ -35,13 +47,18 @@ class convLayer(object):
                                       initializer=tf.constant_initializer(0.1),
                                       dtype=tf.float32)
 
-    def forward_pass(self, x, deterministic):
-        # For convention, just use a symmetrical stride with same padding
+        if self.batch_norm_layer is not None:
+            self.batch_norm_layer.add_to_graph()
+
+    def forward_pass(self, x, deterministic=False):
         activations = tf.nn.conv2d(x, self.weights,
                                    strides=[1, self.__stride_length, self.__stride_length, 1],
-                                   padding='SAME')
+                                   padding=self.padding)
 
         activations = tf.nn.bias_add(activations, self.biases)
+
+        if self.batch_norm_layer is not None:
+            activations = self.batch_norm_layer.forward_pass(activations, deterministic)
 
         # Apply a non-linearity specified by the user
         if self.__activation_function == 'relu':
@@ -56,6 +73,7 @@ class convLayer(object):
         self.activations = activations
 
         return activations
+
 
 class upsampleLayer(object):
     def __init__(self, name, input_size, filter_size, num_filters, upscale_factor,
@@ -74,7 +92,7 @@ class upsampleLayer(object):
             self.strides = [1, upscale_factor, upscale_factor, 1]
             h = self.input_size[1] * upscale_factor
             w = self.input_size[2] * upscale_factor
-        else: # otherwise scaled individually
+        else:  # otherwise scaled individually
             self.strides = [1, upscale_factor[0], upscale_factor[1], 1]
             h = self.input_size[1] * upscale_factor[0]
             w = self.input_size[2] * upscale_factor[1]
@@ -161,7 +179,8 @@ class poolingLayer(object):
 
 
 class fullyConnectedLayer(object):
-    def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer, regularization_coefficient):
+    def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer,
+                 regularization_coefficient):
         self.name = name
         self.input_size = input_size
         self.output_size = output_size
@@ -184,7 +203,8 @@ class fullyConnectedLayer(object):
         else:
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=[vec_size, self.output_size],
-                                           initializer=tf.truncated_normal_initializer(stddev=math.sqrt(2.0/self.output_size)),
+                                           initializer=tf.truncated_normal_initializer(
+                                               stddev=math.sqrt(2.0/self.output_size)),
                                            dtype=tf.float32)
 
         self.biases = tf.get_variable(self.name + '_bias',
@@ -277,19 +297,88 @@ class moderationLayer(object):
 
 
 class batchNormLayer(object):
-    """Batch normalization layer"""
-    __layer = None
 
-    def __init__(self, name, input_size):
+    def __init__(self, name, input_size, epsilon=1e-5, decay=0.9):
+
+        self.name = name
         self.input_size = input_size
         self.output_size = input_size
-        self.name = name
+        self.epsilon = epsilon
+        self.decay = decay
 
     def add_to_graph(self):
-        self.__layer = tf.keras.layers.BatchNormalization()
+
+        shape = self.output_size[-1]
+
+        zeros = tf.constant_initializer(0.0)
+        ones = tf.constant_initializer(1.0)
+
+        self.offset = tf.get_variable(self.name+'_offset', shape=shape, initializer=zeros, trainable=True)
+        self.scale = tf.get_variable(self.name+'_scale', shape=shape, initializer=ones, trainable=True)
+
+        self.test_mean = tf.get_variable(self.name+'_pop_mean', shape=shape, initializer=zeros, trainable=False)
+        self.test_var = tf.get_variable(self.name+'_pop_var', shape=shape, initializer=ones, trainable=False)
 
     def forward_pass(self, x, deterministic):
-        # Batch size is always fixed, so we will always calculate based on a static batch size.
-        x = self.__layer.apply(x, training=True)
 
-        return x
+        mean, var = tf.nn.moments(x, axes=(0, 1, 2))
+
+        # deterministic = False in training, True in testing
+        if deterministic:
+            y = tf.nn.batch_normalization(x, self.test_mean, self.test_var, self.offset, self.scale, self.epsilon,
+                                          name=self.name + '_batchnorm')
+        else:
+            train_mean_op = tf.assign(self.test_mean, self.test_mean * self.decay + mean * (1 - self.decay))
+            train_var_op = tf.assign(self.test_var, self.test_var * self.decay + var * (1 - self.decay))
+
+            with tf.control_dependencies([train_mean_op, train_var_op]):
+                y = tf.nn.batch_normalization(x, mean, var, self.offset, self.scale, self.epsilon,
+                                              name=self.name + '_batchnorm')
+
+        return y
+
+
+class paralConvBlock(object):
+    """A block consists of two parallel convolutional layers"""
+
+    def __init__(self, name, input_size, filter_dimension_1, filter_dimension_2):
+
+        self.name = name
+
+        self.conv1 = convLayer(name=self.name + "_conv1",
+                               input_size=input_size,
+                               filter_dimension=filter_dimension_1,
+                               stride_length=1,
+                               activation_function='lrelu',
+                               initializer='xavier',
+                               padding=0,
+                               batch_norm=True,
+                               epsilon=1e-5,
+                               decay=0.9)
+
+        self.conv2 = convLayer(name=self.name + "_conv2",
+                               input_size=input_size,
+                               filter_dimension=filter_dimension_2,
+                               stride_length=1,
+                               activation_function='lrelu',
+                               initializer='xavier',
+                               padding=1,
+                               batch_norm=True,
+                               epsilon=1e-5,
+                               decay=0.9)
+
+        self.output_size = copy.deepcopy(self.conv1.output_size)
+        self.output_size[-1] = self.conv1.output_size[-1] + self.conv2.output_size[-1]
+
+    def add_to_graph(self):
+
+        self.conv1.add_to_graph()
+        self.conv2.add_to_graph()
+
+    def forward_pass(self, x, deterministic):
+
+        conv1_out = self.conv1.forward_pass(x, deterministic)
+        conv2_out = self.conv2.forward_pass(x, deterministic)
+        output = tf.concat([conv1_out, conv2_out], axis=3)
+
+        return output
