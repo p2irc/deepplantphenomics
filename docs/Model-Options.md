@@ -4,17 +4,18 @@
 set_number_of_threads()
 ```
 
-Set number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
+Set the number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
 
 ## Learning Hyperparameters
+#### All Models
 
 ```
 set_batch_size()
 ```
 
-Sets the number of examples in each mini-batch. Recall that smaller batches mean more gradient updates per epoch.
+Sets the number of examples in each mini-batch. Defaults to 1. Recall that smaller batches mean more gradient updates per epoch.
 
 ```
 set_maximum_training_epochs()
@@ -26,7 +27,7 @@ Sets the number of epochs to train to before stopping. An epoch is one full cycl
 set_learning_rate()
 ```
 
-Set the initial learning rate. If you're not sure what learning rate is appropriate, err on the side of a smaller learning rate.
+Set the initial learning rate. Defaults to 0.001. If you're not sure what learning rate is appropriate, err on the side of a smaller learning rate.
 
 ```
 set_optimizer()
@@ -50,19 +51,70 @@ Set the coefficient for L2 weight decay (regularization).
 set_weight_initializer()
 ```
 
-Set the weight initialization scheme for convolutional and fully connected layers. Default is `'normal'`, other option is `'xavier'`. Note that you may experience gradient problems with relu activations and xavier initialization.
+Set the weight initialization scheme for convolutional and fully connected layers. Default is `'xavier'`, other option is `'normal'`. Note that you may experience gradient problems with relu activations and xavier initialization.
 
 ```
-set_problem_type()
+set_test_split()
 ```
 
-Set the type of problem for the model. Default is `'classification'`, other options are `'regression'` or `'semantic_segmentation'` (really just pixel-wise regression with a fully convolutional network, but useful for segmentation applications. See [semantic segmentation](/Semantic-Segmentation/)).
+Set the ratio of the total number of samples to use as a testing set after training. Defaults to 0.10 (i.e. 10% of the samples).
 
 ```
-set_train_test_split()
+set_validation_split()
 ```
 
-Set the ratio of training samples to testing samples.
+Set the ratio of the total number of samples to use as a validation set during training. Defaults to 0.10 (i.e. 10% of the samples).
+
+```
+set_loss_function()
+```
+
+Sets the loss function to be used by the model during training and testing. The supported loss functions vary with the specific problem type/`Model`:
+
+- `ClassificationModel`: `softmax cross entropy` only
+- `RegressionModel`: `l2`, `l1`, `smooth l1`, and `log loss`
+- `SemanticSegmentationModel`: `sigmoid cross entropy` only
+- `ObjectDetectionModel`: `yolo` only
+- `CountCeptionModel`: `l1` only
+- `HeatmapObjectCountingModel`: `sigmoid cross entropy` only
+
+#### Regression Models Only
+
+```
+set_num_regression_outputs()
+```
+
+Sets the number of response variables for the regression model.
+
+#### Object Detection Models Only
+
+```
+set_yolo_parameters(grid_size=[7,7],
+                    class_list=['plant'], 
+                    anchors=[[159, 157], [103, 133], [91, 89], [64, 65], [142, 101]])
+```
+
+Sets several parameters needed for the Yolo-based object detector.
+
+- Yolo splits images into a grid and makes bounding box predictions in each grid square.`grid_size` defines the number of grid squares along the image width and height. Defaults to [7,7].
+- `class_list` is a list of names for possible object classes in images. This defaults to a single 'plant' class. (DPP currently only supports one class at a time)
+- `anchors` defines the widths and heights of anchors/prior boxes which the bounding box predictions use as a basis for detecting objects of various sizes and aspect ratios. The five anchors listed above are the default values and should be fine for most detectors.
+
+```
+set_yolo_thresholds(thresh_sig=0.6, 
+                    thresh_overlap=0.3, 
+                    thresh_correct=0.5)
+```
+
+Sets the Intersection-over-Union (IoU) thresholds internally used by the YOLO model to detect objects and calculate average precision. `thresh_sig` controls the minimum IoU for taking a detection as significant, `thresh_overlap` controls the minimum IoU for overlapping detections (at which point only the more confidant one is taken), and `thresh_correct` controls the minimum IoU for saying a detection is correct during validation and testing.
+
+#### Heatmap Object Counting Models Only
+
+```
+set_density_map_sigma(sigma)
+```
+
+Sets the standard deviation used for gaussians when generating ground truth heatmaps from point locations of objects. See [the heatmap dataset loader](Loaders.md) for more info.
 
 ## Input Options
 
@@ -70,13 +122,13 @@ Set the ratio of training samples to testing samples.
 set_image_dimensions(image_height, image_width, image_depth)
 ```
 
-Specify the image dimensions for images in the dataset (depth is the number of channels). This can be the dimensions you want to resize to if you're using `set_resize_images()` or `set_crop_or_pad_images()`.
+Specify the image dimensions for images in the dataset, taking depth as the number of channels. These will be the dimensions you want to resize to if you're using `set_resize_images()` or `set_crop_or_pad_images()`.
 
 ```
 set_original_image_dimensions(image_height, image_width)
 ```
 
-Specify the original size of the image, before resizing. This is only needed in special cases, for instance, if you are resizing input images but using image coordinate labels which reference the original size.
+Specify the original size of the image, before resizing. This is only needed in special cases; for instance, you would use this if you are resizing input images but using image coordinate labels which reference the original size.
 
 ```
 add_preprocessor()
@@ -88,7 +140,7 @@ Add pre-processors. For more information see the documentation for pre-processor
 set_crop_or_pad_images(True)
 ```
 
-Resize images by cropping or padding, as opposed to plain resizing.
+Resize images by either cropping or padding them, as opposed to plain resizing.
 
 ```
 set_resize_images(True)
@@ -120,13 +172,21 @@ Randomly flip training images vertically.
 set_augmentation_crop(True, crop_ratio)
 ```
 
-Randomly crop images during training, and crop images to center during testing. The size of the crop is specified by `crop_ratio`, and defaults to `0.75`, or 75% of the original image.
+Randomly crop images during training, and crop images to their center during testing. The size of the crop is specified by `crop_ratio`, and defaults to `0.75` (i.e. 75% of the original image).
 
 ```
 set_augmentation_brightness_and_contrast(True)
 ```
 
-Randomly adjust contrast and/or brightness on training images.
+Randomly adjust the contrast and/or brightness on training images.
+
+```
+set_augmentation_rotation(True, crop_borders=False)
+```
+
+Randomly rotate training images by any angle within 0-360 degrees (for classification and regression tasks). Parts of the image may get rotated outside of the image after rotation. By default, this will also leave black borders around the image. Setting `crop_borders` to `True` will perform a centre crop to remove the black borders generated by rotation.
+
+**A warning on using centre cropping with rotation augmentation:** In order to maintain similar feature scales between images, the cropping uses the tightest possible crop required for any given image to remove black borders (i.e. the crop required for 45 degree rotation). This will crop out at least 50% of the image (more for higher aspect ratios). If using this, ensure that the main content of the images is in the centre.
 
 
 ```
@@ -139,4 +199,4 @@ Load a second set of images with corresponding labels in a csv file to augment t
 set_patch_size(height=128, width=128)
 ```
 
-Train on randomly extracted patches, of size `height`x`width`, of the original images. Testing is then performed by splitting the image into patches of `height`x`width`, passing the patches individually through the network, and then stitching the results back together to form the full image. 
+Train on randomly extracted patches (of size `height`x`width`) of the original images. Testing is then performed by splitting the image into patches of `height`x`width`, passing the patches individually through the network, and then stitching the results back together to form the full image. 

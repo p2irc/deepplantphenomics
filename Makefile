@@ -1,9 +1,11 @@
 clean: 
-	find . -name '*.pyc' -delete
-	rm -r ./site
+	pip uninstall -y deepplantphenomics
 
 documentation:
 	mkdocs build
 
 install:
-	python setup.py install
+	pip install .
+
+test:
+	python -m pytest .

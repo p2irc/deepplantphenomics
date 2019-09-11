@@ -1,8 +1,9 @@
 import tensorflow as tf
-import xml.etree.ElementTree as tree
+import xml.etree.ElementTree as Tree
 import numpy as np
 import random
 import os
+import datetime
 
 
 def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_features=None, augmentation_images=None,
@@ -13,32 +14,55 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
 
-    total_samples = len(labels)
-    mask = [0] * total_samples
-    val_mask_num = 1 # this changes depending on whether we are using testing or not
-    val_start_idx = 0 # if no testing then we idx from beginning, else we change this if there is testing
+    # check if there is a previously saved mask to load from current directory
+    mask = []
+    try:
+        prev_mask_file = open("mask_ckpt.txt", "r")
+        found_prev_mask_file = True
 
-    if test_ratio != 0:
-        # creating a mask [1,1,1,...,0,0,0]
-        num_test = int(total_samples * (test_ratio))
-        mask[:num_test] = [1] * num_test
-        val_mask_num = 2
-        val_start_idx = num_test
+        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                "Previous mask found. Loading 'mask_ckpt.txt'"))
+        for line in prev_mask_file:
+            mask.append(int(line.rstrip()))
+        prev_mask_file.close()
+    except Exception:
+        found_prev_mask_file = False
 
-    if validation_ratio != 0:
-        # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
-        # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
-        num_val = int(total_samples * (validation_ratio))
-        mask[val_start_idx : val_start_idx+num_val] = [val_mask_num] * num_val
+    if not found_prev_mask_file:  # we build the mask
+        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
+                                'No previous mask found. Building new mask.'))
+        total_samples = len(labels)
+        mask = [0] * total_samples
+        val_mask_num = 1  # this changes depending on whether we are using testing or not
+        val_start_idx = 0  # if no testing then we idx from beginning, else we change this if there is testing
 
-    # If we're using a training augmentation set, add them to the training portion
-    if augmentation_images is not None and augmentation_labels is not None:
-        images = images + augmentation_images
-        labels = labels + augmentation_labels
-        mask = mask + ([0] * len(augmentation_labels))
+        if test_ratio != 0:
+            # creating a mask [1,1,1,...,0,0,0]
+            num_test = int(total_samples * test_ratio)
+            mask[:num_test] = [1] * num_test
+            val_mask_num = 2
+            val_start_idx = num_test
 
-    # make the split random <-- ESSENTIAL
-    random.shuffle(mask)
+        if validation_ratio != 0:
+            # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
+            # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
+            num_val = int(total_samples * validation_ratio)
+            mask[val_start_idx: val_start_idx + num_val] = [val_mask_num] * num_val
+
+        # If we're using a training augmentation set, add them to the training portion
+        if augmentation_images is not None and augmentation_labels is not None:
+            images = images + augmentation_images
+            labels = labels + augmentation_labels
+            mask = mask + ([0] * len(augmentation_labels))
+
+        # make the split random <-- ESSENTIAL
+        random.shuffle(mask)
+
+        # save the mask file in current directory for future use
+        prev_mask_file = open('mask_ckpt.txt', 'w+')
+        for entry in mask:
+            prev_mask_file.write(str(entry) + '\n')
+        prev_mask_file.close()
 
     # create partitions, we set train/validation to None if they're not being used
     if test_ratio != 0 and validation_ratio != 0:
@@ -52,7 +76,8 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         train_images, val_images = tf.dynamic_partition(images, mask, 2)
         train_labels, val_labels = tf.dynamic_partition(labels, mask, 2)
         test_images, test_labels = None, None
-    else: # must be just training, still need queues for rest of dpp code to load/interact with
+    else:
+        # must be just training, still need queues for rest of dpp code to load/interact with
         # dynamic_partition returns a list, which is fine in the above cases but in the following case it returns
         # a list of length 1, hence we index into it with [0] to get what we want
         train_images = tf.dynamic_partition(images, mask, 1)[0]
@@ -65,9 +90,8 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
     if moderation_features is not None:
         train_mf, test_mf, val_mf = tf.dynamic_partition(moderation_features, mask, 2)
 
-    return train_images, train_labels, train_mf,\
-           test_images, test_labels, test_mf,\
-           val_images, val_labels, val_mf
+    return train_images, train_labels, train_mf, test_images, test_labels, test_mf, val_images, val_labels, val_mf
+
 
 def label_string_to_tensor(x, batch_size, num_outputs=None):
     sparse = tf.string_split(x, delimiter=' ')
@@ -88,12 +112,13 @@ def read_csv_labels(file_name, column_number=False, character=','):
         line = line.rstrip()
 
         if column_number is False:
-            labels.append(line.split(character)[0]) # without [0], length 1 lists are added to labels
+            labels.append(line.split(character)[0])  # without [0], length 1 lists are added to labels
         else:
             temp = line.split(character)
             labels.append(temp[column_number])
 
     return labels
+
 
 def read_csv_rows(file_name, column_number=False, character=','):
     """
@@ -154,14 +179,14 @@ def string_labels_to_sequential(labels):
 
 
 def indices_to_onehot_array(idx):
-    onehot = np.zeros((idx.size, idx.max()+1))
+    onehot = np.zeros((idx.size, idx.max() + 1))
     onehot[np.arange(idx.size), idx] = 1
 
     return onehot
 
 
 def read_single_bounding_box_from_pascal_voc(file_name):
-    root = tree.parse(file_name)
+    root = Tree.parse(file_name)
 
     filename = os.path.basename(root.find('path').text)
 
@@ -198,7 +223,8 @@ def box_coordinates_to_pascal_voc_coordinates(coords):
     min_y = coords[1]
     max_y = coords[5]
 
-    return (min_x, max_x, min_y, max_y)
+    return min_x, max_x, min_y, max_y
+
 
 def box_coordinates_to_xywh_coordinates(coords):
     """Converts x1,y1,x2,y2 to x,y,w,h where x,y is center point and w,h is width and height of the box"""
@@ -209,8 +235,7 @@ def box_coordinates_to_xywh_coordinates(coords):
 
     w = x2 - x1
     h = y2 - y1
-    x = int(w/2 + x1)
-    y = int(h/2 + y1)
+    x = int(w / 2 + x1)
+    y = int(h / 2 + y1)
 
-
-    return (x, y, w, h)
+    return x, y, w, h

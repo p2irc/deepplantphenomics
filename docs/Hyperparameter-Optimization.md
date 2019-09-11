@@ -1,4 +1,4 @@
-The performance of the training process is sensitive to different constants called hyperparameters. DPP supports automatic hyperparameter optimization via athe grid search method in order to evaluate performance under many different combinations of hyperparameter values.
+The performance of the training process is sensitive to different constants called hyperparameters. DPP supports automatic hyperparameter optimization via the grid search method in order to evaluate performance under many different combinations of hyperparameter values.
 
 ## Training with Hyperparameter Search
 

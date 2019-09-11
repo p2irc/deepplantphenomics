@@ -2,7 +2,7 @@
 
 ## Vegetation Segmentation Network
 
-The vegetaion segmentation network can perform automatic segmentation of foreground pixels from background pixels. It outputs arrays which can be output to a file using a Python library like [Pillow](https://python-pillow.org/).
+The vegetation segmentation network can perform automatic segmentation of foreground pixels from background pixels. It outputs arrays which can be output to a file using a Python library like [Pillow](https://python-pillow.org/).
 
 ```
 import deepplantphenomics as dpp
@@ -48,14 +48,17 @@ my_files = ['one.png', 'two.png', 'three.png']
 leaf_counts = dpp.tools.predict_rosette_leaf_count(my_files)
 ```
 
-## Arabidopsis Strain (Mutant) Classifier
+## Canola Flower Counter
 
-The strain classsifier is used to classify the species/strain/mutant using top-down images of arabidopsis thaliana rosettes.
+The canola flower counter provides an estimate of the number of flowers in an image.
 
 ```
 import deepplantphenomics as dpp
 
-my_files = ['one.png', 'two.png', 'three.png']
+image_files = ['one.png', 'two.png', 'three.png']
 
-species = dpp.tools.classify_arabidopsis_strain(my_files)
+y = dpp.tools.count_canola_flowers(image_files)
+
+for k, v in zip(image_files, y):
+    print('%s: %d' % (k, v))
 ```
