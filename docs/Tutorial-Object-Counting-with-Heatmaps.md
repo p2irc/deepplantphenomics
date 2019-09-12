@@ -48,7 +48,9 @@ There are two ways to load in a dataset for training a heatmap-based object coun
 model.load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file)
 ```
 
-The CSV file should contain a mapping of image names to the coordinates of multiple objects in x,y,x,y,... order. This will take the object locations and generate the ground truth heatmap, placing a 2D gaussian distribution at every labeled location. The standard deviation (and thus size) of the gaussians can be set with `set_density_map_sigma(sigma)`.
+The CSV file should contain a mapping of image names to the coordinates of multiple objects in x,y,x,y,... order. This will take the object locations and generate the ground truth heatmap, placing a 2D gaussian distribution at every labeled location. The standard deviation (and thus size) of the gaussians can be set with `set_density_map_sigma(sigma)`. An example generated heatmap is shown below.
+
+![Example Generated Heatmap](heatmap_labels.png)
 
 The other way to load datasets in is to use one of the semantic segmentation loaders:
 
