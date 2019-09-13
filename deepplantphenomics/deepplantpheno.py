@@ -577,13 +577,13 @@ class DPPModel(ABC):
             warnings.warn('Unrecognized optimizer requested')
             exit()
 
-    def _graph_get_gradients(self, loss):
+    def _graph_get_gradients(self, loss, optimizer):
         """
-        Add graph components for getting an optimizer and gradients given some losses
+        Add graph components for getting gradients given an optimizer some losses
         :param loss: The loss value to use when computing the gradients
+        :param optimizer: The optimizer object used to generate the gradients
         :return: The graph's gradients, variables, and the global gradient norm from clipping
         """
-        optimizer = self._graph_make_optimizer()
         gradients, variables = zip(*optimizer.compute_gradients(loss))
         gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
         return gradients, variables, global_grad_norm
@@ -608,14 +608,14 @@ class DPPModel(ABC):
 
         return averaged_gradients
 
-    def _graph_apply_gradients(self, gradients, variables):
+    def _graph_apply_gradients(self, gradients, variables, optimizer):
         """
-        Add graph components for applying gradients to variables
+        Add graph components for using an optimizer applying gradients to variables
         :param gradients: The gradients to be applied
         :param variables: The variables to apply the gradients to
+        :param optimizer: The optimizer object used to apply the gradients
         :return: An operation for applying gradients to the graph variables
         """
-        optimizer = self._graph_make_optimizer()
         return optimizer.apply_gradients(zip(gradients, variables))
 
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):

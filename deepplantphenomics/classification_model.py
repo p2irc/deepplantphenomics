@@ -69,11 +69,16 @@ class ClassificationModel(DPPModel):
             if self._with_patching:
                 x, offsets = self._graph_extract_patch(x)
 
+            # Create an optimizer object for all of the devices
+            optimizer = self._graph_make_optimizer()
+
             # Set up the graph layers. This is always done on the CPU
             self._log('Graph: Creating layer parameters...')
             self._add_layers_to_graph()
 
-            # Run the training on possibly multiple GPUs
+            # Do the forward pass and training output calcs on possibly multiple GPUs
+            device_costs = []
+            device_accuracies = []
             device_gradients = []
             device_variables = []
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either a CPU or all of the GPUs
@@ -96,24 +101,34 @@ class ClassificationModel(DPPModel):
                     # Define cost function based on which one was selected via set_loss_function
                     if self._loss_fn == 'softmax cross entropy':
                         sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
-                    self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
+                    gpu_cost = tf.reduce_mean(tf.concat([sf_logits], axis=0)) + l2_cost
+                    cost_sum = tf.reduce_sum(tf.concat([sf_logits], axis=0))
+                    device_costs.append(cost_sum)
+                    # self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
 
                     # For classification problems, we will compute the training accuracy as well; this is also used
                     # for Tensorboard
                     self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
                     correct_predictions = tf.equal(self.__class_predictions, tf.argmax(y, 1))
-                    self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
+                    accuracy_sum = tf.reduce_sum(tf.cast(correct_predictions, tf.float32))
+                    device_accuracies.append(accuracy_sum)
+                    # self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
                     # Set the optimizer and get the gradients from it
-                    gradients, variables, global_grad_norm = self._graph_get_gradients(self._graph_ops['cost'])
+                    gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
                     device_gradients.append(gradients)
                     device_variables.append(variables)
 
+            # Average the gradients from each GPU and apply them
             average_gradients = self._graph_average_gradients(device_gradients)
             opt_variables = device_variables[0]
-            self._graph_ops['optimizer'] = self._graph_apply_gradients(average_gradients, opt_variables)
+            self._graph_ops['optimizer'] = self._graph_apply_gradients(average_gradients, opt_variables, optimizer)
 
-            # Calculate test and validation accuracy
+            # Average the costs and accuracies from each GPU
+            self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
+            self._graph_ops['accuracy'] = tf.reduce_sum(device_accuracies) / self._batch_size
+
+            # Calculate test and validation accuracy (on a single device)
             if self._has_moderation:
                 if self._testing:
                     x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
