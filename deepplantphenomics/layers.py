@@ -270,6 +270,19 @@ class dropoutLayer(object):
             return tf.nn.dropout(x, self.p)
 
 
+class globalAveragePoolingLayer(object):
+    """Layer which performs global average pooling"""
+    def __init__(self, name, input_size):
+        self.name = name
+        self.input_size = input_size
+        self.output_size = copy.deepcopy(input_size)
+        self.output_size[1] = 1
+        self.output_size[2] = 1
+
+    def forward_pass(self, x, deterministic):
+        return tf.reduce_mean(x, axis=[1, 2])
+
+
 class moderationLayer(object):
     """Layer for fusing moderating data into the input vector"""
     def __init__(self, input_size, feature_size, reshape, batch_size):

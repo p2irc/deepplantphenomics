@@ -15,6 +15,9 @@ A classic image classification network (Krizhevsky, A., Sutskever, I., & Hinton,
 
 A classic image classification network (Simonyan, K., & Zisserman, A. (2014). *Very deep convolutional networks for large-scale image recognition.* arXiv preprint arXiv:1409.1556.)
 
+### `resnet-18`
+
+A modern image classification network (He, K., Zhang, X., Ren, S., & Sun, J. (2016). *Deep residual learning for image recognition*. In Proceedings of the IEEE conference on computer vision and pattern recognition).
 
 ### `yolov2`
 
@@ -30,12 +33,12 @@ A tiny convolutional network with three low-capacity convolutional layers, three
 
 ### `small`
 
-A slightly higher-capacity feature extractor with five layers, using batch norm between each block of convolutional layers. Same 64-unit fully connected layer as `xsmall` to avoid overfitting problems with plant phenotyping datasets.
+A slightly higher-capacity feature extractor with five layers, using batch norm on convolutional layers. Same 64-unit fully connected layer as `xsmall` to avoid overfitting problems with plant phenotyping datasets.
 
 ### `medium`
 
-Uses the full vgg-16 feature extractor, but with batch normalization instead of dropout. A slightly larger 256-unit fully connected layer.
+Uses the full vgg-16 feature extractor, but with batch normalization on convolutional layers and no dropout. A slightly larger 256-unit fully connected layer.
 
 ### `large`
 
-Uses the full vgg-16 feature extractor, but with batch normalization instead of dropout. Two fully connected layers with 512 and 384 units respectively. 
+Uses the full vgg-16 feature extractor, but with batch normalization on convolutional layers and no dropout. Two fully connected layers with 512 and 384 units respectively. 
