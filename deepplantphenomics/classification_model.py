@@ -44,35 +44,38 @@ class ClassificationModel(DPPModel):
     def _assemble_graph(self):
         with self._graph.as_default():
             self._log('Assembling graph...')
+
             self._log('Graph: Parsing dataset...')
-            self._graph_parse_data()  # Always done on CPU
+            # Only do preprocessing on the CPU to limit data transfer between devices
+            with tf.device("/device:cpu:0"):
+                self._graph_parse_data()
 
-            # Define batches
-            if self._has_moderation:
-                x, y, mod_w = tf.train.shuffle_batch(
-                    [self._train_images, self._train_labels, self._train_moderation_features],
-                    batch_size=self._batch_size,
-                    num_threads=self._num_threads,
-                    capacity=self._queue_capacity,
-                    min_after_dequeue=self._batch_size)
-            else:
-                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                              batch_size=self._batch_size,
-                                              num_threads=self._num_threads,
-                                              capacity=self._queue_capacity,
-                                              min_after_dequeue=self._batch_size)
+                # Define batches
+                if self._has_moderation:
+                    x, y, mod_w = tf.train.shuffle_batch(
+                        [self._train_images, self._train_labels, self._train_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity,
+                        min_after_dequeue=self._batch_size)
+                else:
+                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                                  batch_size=self._batch_size,
+                                                  num_threads=self._num_threads,
+                                                  capacity=self._queue_capacity,
+                                                  min_after_dequeue=self._batch_size)
 
-            # Reshape input to the expected image dimensions
-            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                # Reshape input to the expected image dimensions
+                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            # If we are using patching, we extract a random patch from the image here
-            if self._with_patching:
-                x, offsets = self._graph_extract_patch(x)
+                # If we are using patching, we extract a random patch from the image here
+                if self._with_patching:
+                    x, offsets = self._graph_extract_patch(x)
 
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
-            # Set up the graph layers. This is always done on the CPU
+            # Set up the graph layers
             self._log('Graph: Creating layer parameters...')
             self._add_layers_to_graph()
 
@@ -81,7 +84,7 @@ class ClassificationModel(DPPModel):
             device_accuracies = []
             device_gradients = []
             device_variables = []
-            for n, d in enumerate(self._get_device_list()):  # Build a graph on either a CPU or all of the GPUs
+            for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
                     # Run the network operations
                     if self._has_moderation:
@@ -104,7 +107,6 @@ class ClassificationModel(DPPModel):
                     gpu_cost = tf.reduce_mean(tf.concat([sf_logits], axis=0)) + l2_cost
                     cost_sum = tf.reduce_sum(tf.concat([sf_logits], axis=0))
                     device_costs.append(cost_sum)
-                    # self._graph_ops['cost'] = tf.add(tf.reduce_mean(tf.concat([sf_logits], axis=0)), l2_cost)
 
                     # For classification problems, we will compute the training accuracy as well; this is also used
                     # for Tensorboard
@@ -112,7 +114,6 @@ class ClassificationModel(DPPModel):
                     correct_predictions = tf.equal(self.__class_predictions, tf.argmax(y, 1))
                     accuracy_sum = tf.reduce_sum(tf.cast(correct_predictions, tf.float32))
                     device_accuracies.append(accuracy_sum)
-                    # self._graph_ops['accuracy'] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
                     # Set the optimizer and get the gradients from it
                     gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
@@ -128,7 +129,7 @@ class ClassificationModel(DPPModel):
             self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
             self._graph_ops['accuracy'] = tf.reduce_sum(device_accuracies) / self._batch_size
 
-            # Calculate test and validation accuracy (on a single device)
+            # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
             if self._has_moderation:
                 if self._testing:
                     x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(

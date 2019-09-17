@@ -499,11 +499,17 @@ class DPPModel(ABC):
         """
         Adds the layers in self.layers to the computational graph.
         """
+        # Adding layers to the graph mostly involves setting up the required variables. Those variables should be on
+        # the CPU if we are using multiple GPUs and need to share them across multiple graph towers. Otherwise, they
+        # can go on whatever device Tensorflow deems sensible.
+        if self._use_gpus and self._num_gpus > 1:
+            d = '/device:cpu:0'
+        else:
+            d = None
+
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
-                # Adding layers to the graph mostly involves setting up the required variables. Those variables should
-                # be on the CPU in case we are using multiple GPUs and need to share them across multiple graph towers.
-                with tf.device('/device:cpu:0'):
+                with tf.device(d):
                     layer.add_to_graph()
 
     def _graph_parse_data(self):
@@ -511,30 +517,28 @@ class DPPModel(ABC):
         Add graph components that parse the input images and labels into tensors and split them into training,
         validation, and testing sets
         """
-        # Preprocessing has to be done on the CPU to limit inter-device data transfer
-        with tf.device("/device:cpu:0"):
-            if self._raw_test_labels is not None:
-                # currently think of moderation features as None so they are passed in hard-coded
-                self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
-                                    self._raw_test_image_files, self._raw_test_labels, None,
-                                    self._raw_val_image_files, self._raw_val_labels, None)
-            elif self._images_only:
-                self._parse_images(self._raw_image_files)
-            else:
-                # Split the data into training, validation, and testing sets. If there is no validation set or no
-                # moderation features being used they will be returned as 0 (for validation) or None (for moderation
-                # features)
-                train_images, train_labels, train_mf, \
-                        test_images, test_labels, test_mf, \
-                        val_images, val_labels, val_mf, = \
-                        loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                               self._validation_split, self._all_moderation_features,
-                                               self._training_augmentation_images, self._training_augmentation_labels,
-                                               self._split_labels)
-                # Parse the images and set the appropriate environment variables
-                self._parse_dataset(train_images, train_labels, train_mf,
-                                    test_images, test_labels, test_mf,
-                                    val_images, val_labels, val_mf)
+        if self._raw_test_labels is not None:
+            # currently think of moderation features as None so they are passed in hard-coded
+            self._parse_dataset(self._raw_train_image_files, self._raw_train_labels, None,
+                                self._raw_test_image_files, self._raw_test_labels, None,
+                                self._raw_val_image_files, self._raw_val_labels, None)
+        elif self._images_only:
+            self._parse_images(self._raw_image_files)
+        else:
+            # Split the data into training, validation, and testing sets. If there is no validation set or no
+            # moderation features being used they will be returned as 0 (for validation) or None (for moderation
+            # features)
+            train_images, train_labels, train_mf, \
+                    test_images, test_labels, test_mf, \
+                    val_images, val_labels, val_mf, = \
+                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
+                                           self._validation_split, self._all_moderation_features,
+                                           self._training_augmentation_images, self._training_augmentation_labels,
+                                           self._split_labels)
+            # Parse the images and set the appropriate environment variables
+            self._parse_dataset(train_images, train_labels, train_mf,
+                                test_images, test_labels, test_mf,
+                                val_images, val_labels, val_mf)
 
     def _graph_extract_patch(self, x, offsets=None):
         """
@@ -595,7 +599,7 @@ class DPPModel(ABC):
         :param graph_gradients: A list of the computed gradient lists from each (GPU) run
         :return: A list of the averaged gradients across each run
         """
-        # No averaging needed if there's only gradients from one run (because a CPU or 1 GPU was used)
+        # No averaging needed if there's only gradients from one run (because a single device, CPU or GPU, was used)
         if len(graph_gradients) == 1:
             return graph_gradients[0]
 
