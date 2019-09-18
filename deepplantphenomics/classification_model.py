@@ -101,7 +101,8 @@ class ClassificationModel(DPPModel):
                     else:
                         l2_cost = 0.0
 
-                    # Define cost function based on which one was selected via set_loss_function
+                    # Define the cost function, then get the cost for this device's sub-batch and any parts of the cost
+                    # needed to later get the overall batch's cost
                     if self._loss_fn == 'softmax cross entropy':
                         sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
                     gpu_cost = tf.reduce_mean(tf.concat([sf_logits], axis=0)) + l2_cost

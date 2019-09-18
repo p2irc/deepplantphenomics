@@ -51,69 +51,94 @@ class RegressionModel(DPPModel):
 
     def _assemble_graph(self):
         with self._graph.as_default():
-
-            self._log('Parsing dataset...')
-            self._graph_parse_data()
-
-            self._log('Creating layer parameters...')
-            self._add_layers_to_graph()
-
             self._log('Assembling graph...')
 
-            # Define batches
-            if self._has_moderation:
-                x, y, mod_w = tf.train.shuffle_batch(
-                    [self._train_images, self._train_labels, self._train_moderation_features],
-                    batch_size=self._batch_size,
-                    num_threads=self._num_threads,
-                    capacity=self._queue_capacity,
-                    min_after_dequeue=self._batch_size)
-            else:
-                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                              batch_size=self._batch_size,
-                                              num_threads=self._num_threads,
-                                              capacity=self._queue_capacity,
-                                              min_after_dequeue=self._batch_size)
+            self._log('Graph: Parsing dataset...')
+            # Only do preprocessing on the CPU to limit data transfer between devices
+            with tf.device('device:cpu:0'):
+                self._graph_parse_data()
 
-            # Reshape input to the expected image dimensions
-            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                # Define batches
+                if self._has_moderation:
+                    x, y, mod_w = tf.train.shuffle_batch(
+                        [self._train_images, self._train_labels, self._train_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity,
+                        min_after_dequeue=self._batch_size)
+                else:
+                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                                  batch_size=self._batch_size,
+                                                  num_threads=self._num_threads,
+                                                  capacity=self._queue_capacity,
+                                                  min_after_dequeue=self._batch_size)
 
-            # This is a regression problem, so we should deserialize the label
-            y = loaders.label_string_to_tensor(y, self._batch_size, self._num_regression_outputs)
+                # Reshape input to the expected image dimensions
+                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            # If we are using patching, we extract a random patch from the image here
-            if self._with_patching:
-                x, offsets = self._graph_extract_patch(x)
+                # This is a regression problem, so we should deserialize the label
+                y = loaders.label_string_to_tensor(y, self._batch_size, self._num_regression_outputs)
 
-            # Run the network operations
-            if self._has_moderation:
-                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
-            else:
-                xx = self.forward_pass(x, deterministic=False)
+                # If we are using patching, we extract a random patch from the image here
+                if self._with_patching:
+                    x, offsets = self._graph_extract_patch(x)
 
-            # Define regularization cost
-            if self._reg_coeff is not None:
-                l2_cost = tf.squeeze(tf.reduce_sum(
-                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                     if isinstance(layer, layers.fullyConnectedLayer)]))
-            else:
-                l2_cost = 0.0
+            # Create an optimizer object for all of the devices
+            optimizer = self._graph_make_optimizer()
 
-            # Define cost function based on which one was selected via set_loss_function
-            if self._loss_fn == 'l2':
-                self._regression_loss = self.__batch_mean_l2_loss(tf.subtract(xx, y))
-            elif self._loss_fn == 'l1':
-                self._regression_loss = self.__batch_mean_l1_loss(tf.subtract(xx, y))
-            elif self._loss_fn == 'smooth l1':
-                self._regression_loss = self.__batch_mean_smooth_l1_loss(tf.subtract(xx, y))
-            elif self._loss_fn == 'log loss':
-                self._regression_loss = self.__batch_mean_log_loss(tf.subtract(xx, y))
-            self._graph_ops['cost'] = tf.add(self._regression_loss, l2_cost)
+            # Set up the graph layers
+            self._log('Graph: Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            # Set the optimizer and get the gradients from it
-            gradients, variables, global_grad_norm = self._graph_add_optimizer()
+            # Do the forward pass and training output calcs on possibly multiple GPUs
+            device_costs = []
+            device_gradients = []
+            device_variables = []
+            for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
+                with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    # Run the network operations
+                    if self._has_moderation:
+                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+                    else:
+                        xx = self.forward_pass(x, deterministic=False)
 
-            # Calculate test accuracy
+                    # Define regularization cost
+                    self._log('Graph: Calculating loss and gradients...')
+                    if self._reg_coeff is not None:
+                        l2_cost = tf.squeeze(tf.reduce_sum(
+                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                             if isinstance(layer, layers.fullyConnectedLayer)]))
+                    else:
+                        l2_cost = 0.0
+
+                    # Define the cost function
+                    val_diffs = tf.subtract(xx, y)
+                    if self._loss_fn == 'l2':
+                        diff_loss = self.__l2_norm(val_diffs)
+                    elif self._loss_fn == 'l1':
+                        diff_loss = self.__l1_norm(val_diffs)
+                    elif self._loss_fn == 'smooth l1':
+                        diff_loss = self.__smooth_l1_norm(val_diffs)
+                    elif self._loss_fn == 'log loss':
+                        diff_loss = self.__log_norm(val_diffs)
+                    gpu_cost = tf.reduce_mean(diff_loss) + l2_cost
+                    device_costs.append(tf.reduce_sum(diff_loss))
+
+                    # Set the optimizer and get the gradients from it
+                    gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
+                    device_gradients.append(gradients)
+                    device_variables.append(variables)
+
+            # Average the gradients from each GPU and apply them
+            average_gradients = self._graph_average_gradients(device_gradients)
+            opt_variables = device_variables[0]
+            self._graph_ops['optimizer'] = self._graph_apply_gradients(average_gradients, opt_variables, optimizer)
+
+            # Average the costs and accuracies from each GPU
+            self._regression_loss = tf.reduce_sum(device_costs) / self._batch_size
+            self._graph_ops['cost'] = self._regression_loss + l2_cost
+
+            # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
             if self._has_moderation:
                 if self._testing:
                     x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
@@ -159,6 +184,7 @@ class RegressionModel(DPPModel):
                 if self._validation:
                     x_val, _ = self._graph_extract_patch(x_val, offsets)
 
+            # Run the testing and validation, whose graph should only be on 1 device
             if self._has_moderation:
                 if self._testing:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
@@ -172,7 +198,7 @@ class RegressionModel(DPPModel):
                 if self._validation:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-            # compute the loss and accuracy based on problem type
+            # Compute the loss and accuracy for testing and validation
             if self._testing:
                 if self._num_regression_outputs == 1:
                     self._graph_ops['test_losses'] = tf.squeeze(tf.stack(
@@ -317,43 +343,17 @@ class RegressionModel(DPPModel):
         interpreted_outputs = self.forward_pass_with_file_inputs(x)
         return interpreted_outputs
 
-    def __batch_mean_l2_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector L2 norm"""
-        with self._graph.as_default():
-            agg = self.__l2_norm(x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
-
     def __l2_norm(self, x):
         """Returns the L2 norm of a tensor"""
         with self._graph.as_default():
             y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
-
         return y
-
-    def __batch_mean_l1_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector L1 norm"""
-        with self._graph.as_default():
-            agg = self.__l1_norm(x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
 
     def __l1_norm(self, x):
         """Returns the L1 norm of a tensor"""
         with self._graph.as_default():
             y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
-
         return y
-
-    def __batch_mean_smooth_l1_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector smooth L1 norm"""
-        with self._graph.as_default():
-            agg = self.__smooth_l1_norm(x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
 
     def __smooth_l1_norm(self, x):
         """Returns the smooth L1 norm of a tensor"""
@@ -363,18 +363,13 @@ class RegressionModel(DPPModel):
             y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
                                               0.5*ex**2,
                                               huber_delta*(ex-0.5*huber_delta)), x)
-
         return y
 
-    def __batch_mean_log_loss(self, x):
-        """Given a batch of vectors, calculates the mean per-vector log loss"""
+    def __log_norm(self, x):
+        """Returns the log norm of a tensor"""
         with self._graph.as_default():
-            x = tf.abs(x)
-            x = tf.clip_by_value(x, 0, 0.9999999)
-            agg = -tf.log(1-x)
-            mean = tf.reduce_mean(agg)
-
-        return mean
+            y = tf.map_fn(lambda ex: -tf.log(1 - tf.clip_by_value(tf.abs(ex), 0, 0.9999999)), x)
+        return y
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         if len(self._layers) < 1:
