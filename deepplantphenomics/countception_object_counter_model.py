@@ -51,6 +51,10 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 # Reshape input to the expected image dimensions
                 x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
@@ -66,7 +70,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
                     # Run the network operations
-                    xx = self.forward_pass(x, deterministic=False)
+                    xx = self.forward_pass(x_sub_batches[n], deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -79,7 +83,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
                     # Define cost function
                     if self._loss_fn == 'l1':
-                        val_diff = tf.abs(tf.subtract(xx, y))
+                        val_diff = tf.abs(tf.subtract(xx, y_sub_batches[n]))
                         gt = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
                         pr = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
                         acc_diff = tf.abs(gt - pr)

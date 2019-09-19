@@ -251,6 +251,10 @@ class ObjectDetectionModel(DPPModel):
                 vec_size = 1 + self._NUM_CLASSES + 4
                 y = tf.reshape(y, [self._batch_size, self._grid_w * self._grid_h, vec_size])
 
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
@@ -258,7 +262,6 @@ class ObjectDetectionModel(DPPModel):
             self._log('Graph: Creating layer parameters...')
             self._add_layers_to_graph()
 
-            # Run the network operations
             # Do the forward pass and training output calcs on possibly multiple GPUs
             device_costs = []
             device_gradients = []
@@ -267,9 +270,9 @@ class ObjectDetectionModel(DPPModel):
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x, deterministic=False)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -284,7 +287,7 @@ class ObjectDetectionModel(DPPModel):
                     if self._loss_fn == 'yolo':
                         xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
                                              self._NUM_BOXES * 5 + self._NUM_CLASSES])
-                        yolo_loss = self._yolo_loss_function(y, xx)
+                        yolo_loss = self._yolo_loss_function(y_sub_batches[n], xx)
                         num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
                     gpu_cost = tf.squeeze(yolo_loss / num_image_loss + l2_cost)
                     device_costs.append(yolo_loss)

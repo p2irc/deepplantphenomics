@@ -83,6 +83,10 @@ class RegressionModel(DPPModel):
                 if self._with_patching:
                     x, offsets = self._graph_extract_patch(x)
 
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
@@ -98,9 +102,9 @@ class RegressionModel(DPPModel):
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x, deterministic=False)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -112,7 +116,7 @@ class RegressionModel(DPPModel):
                         l2_cost = 0.0
 
                     # Define the cost function
-                    val_diffs = tf.subtract(xx, y)
+                    val_diffs = tf.subtract(xx, y_sub_batches[n])
                     if self._loss_fn == 'l2':
                         diff_loss = self.__l2_norm(val_diffs)
                     elif self._loss_fn == 'l1':
@@ -401,14 +405,8 @@ class RegressionModel(DPPModel):
             num_out = output_size
 
         with self._graph.as_default():
-            layer = layers.fullyConnectedLayer('output',
-                                               copy.deepcopy(self._last_layer().output_size),
-                                               num_out,
-                                               reshape,
-                                               self._batch_size,
-                                               None,
-                                               self._weight_initializer,
-                                               regularization_coefficient)
+            layer = layers.fullyConnectedLayer('output', copy.deepcopy(self._last_layer().output_size), num_out,
+                                               reshape, None, self._weight_initializer, regularization_coefficient)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)

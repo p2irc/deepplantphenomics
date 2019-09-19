@@ -168,6 +168,7 @@ class DPPModel(ABC):
         self._threads = None
         self._use_gpus = False
         self._num_gpus = 1
+        self._subbatch_size = self._batch_size
 
         # Now do actual initialization stuff
         # Add the run level to the tensorboard path
@@ -214,15 +215,6 @@ class DPPModel(ABC):
 
         self._num_threads = num_threads
 
-    def set_number_of_gpus(self, num_gpus):
-        """Set the number of GPUs to use for graph evaluation"""
-        if not isinstance(num_gpus, int):
-            raise TypeError("num_gpus must be an int")
-        if num_gpus <= 0:
-            raise ValueError("num_gpus must be positive")
-
-        self._num_gpus = num_gpus
-
     def set_use_gpus(self, use_gpus):
         """Set whether to use GPUs for graph evaluation or use only the CPU"""
         if not isinstance(use_gpus, bool):
@@ -232,6 +224,24 @@ class DPPModel(ABC):
                                "Tensorflow package supports them (i.e. install tensorflow-gpu).")
 
         self._use_gpus = use_gpus
+        if not use_gpus:
+            self._num_gpus = 1
+
+    def set_number_of_gpus(self, num_gpus):
+        """Set the number of GPUs to use for graph evaluation"""
+        if not isinstance(num_gpus, int):
+            raise TypeError("num_gpus must be an int")
+        if num_gpus <= 0:
+            raise ValueError("num_gpus must be positive")
+        if not self._use_gpus:
+            raise RuntimeError("GPUs must be in use before setting the number to use. Use set_use_gpus() first.")
+
+        self._num_gpus = num_gpus
+        if self._batch_size % num_gpus == 0:
+            self._subbatch_size = self._batch_size // num_gpus
+        else:
+            raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
+                               .format(num_gpus, self._batch_size))
 
     def set_processed_images_dir(self, im_dir):
         """Set the directory for storing processed images when pre-processing is used"""
@@ -249,6 +259,12 @@ class DPPModel(ABC):
 
         self._batch_size = size
         self._queue_capacity = size * 5
+
+        if size % self._num_gpus == 0:
+            self._subbatch_size = size // self._num_gpus
+        else:
+            raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
+                               .format(self._num_gpus, size))
 
     def set_test_split(self, ratio):
         """Set a ratio for the total number of samples to use as a testing set"""
@@ -1042,13 +1058,13 @@ class DPPModel(ABC):
         apply_crop = (self._augmentation_crop and self._all_images is None and self._train_images is None)
 
         if apply_crop:
-            size = [self._batch_size, int(self._image_height * self._crop_amount),
+            size = [self._subbatch_size, int(self._image_height * self._crop_amount),
                     int(self._image_width * self._crop_amount), self._image_depth]
         else:
-            size = [self._batch_size, self._image_height, self._image_width, self._image_depth]
+            size = [self._subbatch_size, self._image_height, self._image_width, self._image_depth]
 
         if self._with_patching:
-            size = [self._batch_size, self._patch_height, self._patch_width, self._image_depth]
+            size = [self._subbatch_size, self._patch_height, self._patch_width, self._image_depth]
 
         with self._graph.as_default():
             layer = layers.inputLayer(size)
@@ -1064,8 +1080,8 @@ class DPPModel(ABC):
         feat_size = self._moderation_features_size
 
         with self._graph.as_default():
-            layer = layers.moderationLayer(copy.deepcopy(
-                self._last_layer().output_size), feat_size, reshape, self._batch_size)
+            layer = layers.moderationLayer(copy.deepcopy(self._last_layer().output_size),
+                                           feat_size, reshape, self._subbatch_size)
 
         self._layers.append(layer)
 
@@ -1103,12 +1119,14 @@ class DPPModel(ABC):
             raise ValueError("stride_length must be positive")
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
+
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
             raise ValueError(
                 "'" + activation_function + "' is not one of the currently supported activation functions." +
                 " Choose one of: " +
                 " ".join("'" + x + "'" for x in self._supported_activation_functions))
+
         if padding is not None:
             if not isinstance(padding, int):
                 raise TypeError("padding must be an int")
@@ -1299,11 +1317,13 @@ class DPPModel(ABC):
             raise ValueError("output_size must be positive")
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
+
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
             raise ValueError("'" + activation_function + "' is not one of the currently supported activation " +
                              "functions. Choose one of: " +
                              " ".join("'"+x+"'" for x in self._supported_activation_functions))
+
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
                 raise TypeError("regularization_coefficient must be a float or None")
@@ -1322,13 +1342,8 @@ class DPPModel(ABC):
             regularization_coefficient = 0.0
 
         with self._graph.as_default():
-            layer = layers.fullyConnectedLayer(layer_name,
-                                               copy.deepcopy(self._last_layer().output_size),
-                                               output_size,
-                                               reshape,
-                                               self._batch_size,
-                                               activation_function,
-                                               self._weight_initializer,
+            layer = layers.fullyConnectedLayer(layer_name, copy.deepcopy(self._last_layer().output_size), output_size,
+                                               reshape, activation_function, self._weight_initializer,
                                                regularization_coefficient)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))

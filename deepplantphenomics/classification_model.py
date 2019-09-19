@@ -72,6 +72,10 @@ class ClassificationModel(DPPModel):
                 if self._with_patching:
                     x, offsets = self._graph_extract_patch(x)
 
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
@@ -88,9 +92,9 @@ class ClassificationModel(DPPModel):
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x, deterministic=False)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -103,8 +107,10 @@ class ClassificationModel(DPPModel):
 
                     # Define the cost function, then get the cost for this device's sub-batch and any parts of the cost
                     # needed to later get the overall batch's cost
+                    yy = tf.argmax(y_sub_batches[n], 1)
+
                     if self._loss_fn == 'softmax cross entropy':
-                        sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=tf.argmax(y, 1))
+                        sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=yy)
                     gpu_cost = tf.reduce_mean(tf.concat([sf_logits], axis=0)) + l2_cost
                     cost_sum = tf.reduce_sum(tf.concat([sf_logits], axis=0))
                     device_costs.append(cost_sum)
@@ -112,7 +118,7 @@ class ClassificationModel(DPPModel):
                     # For classification problems, we will compute the training accuracy as well; this is also used
                     # for Tensorboard
                     self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
-                    correct_predictions = tf.equal(self.__class_predictions, tf.argmax(y, 1))
+                    correct_predictions = tf.equal(self.__class_predictions, yy)
                     accuracy_sum = tf.reduce_sum(tf.cast(correct_predictions, tf.float32))
                     device_accuracies.append(accuracy_sum)
 
@@ -338,14 +344,8 @@ class ClassificationModel(DPPModel):
             num_out = output_size
 
         with self._graph.as_default():
-            layer = layers.fullyConnectedLayer('output',
-                                               copy.deepcopy(self._last_layer().output_size),
-                                               num_out,
-                                               reshape,
-                                               self._batch_size,
-                                               None,
-                                               self._weight_initializer,
-                                               regularization_coefficient)
+            layer = layers.fullyConnectedLayer('output', copy.deepcopy(self._last_layer().output_size), num_out,
+                                               reshape, None, self._weight_initializer, regularization_coefficient)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)

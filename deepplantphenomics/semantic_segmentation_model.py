@@ -70,6 +70,10 @@ class SemanticSegmentationModel(DPPModel):
                 if self._with_patching:
                     x, offsets = self._graph_extract_patch(x)
 
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
@@ -85,9 +89,9 @@ class SemanticSegmentationModel(DPPModel):
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x, deterministic=False)
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
                     self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
 
                     # Define regularization cost
@@ -101,7 +105,7 @@ class SemanticSegmentationModel(DPPModel):
 
                     # Define cost function  based on which one was selected via set_loss_function
                     if self._loss_fn == 'sigmoid cross entropy':
-                        pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
+                        pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y_sub_batches[n])
                     gpu_cost = tf.squeeze(tf.reduce_mean(pixel_loss) + l2_cost)
                     cost_sum = tf.reduce_sum(pixel_loss)
                     device_costs.append(cost_sum)
