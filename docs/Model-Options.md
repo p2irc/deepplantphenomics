@@ -1,12 +1,26 @@
-## Multithreading Options
+## Multithreading and Multi-GPU Options
 
 ```
-set_number_of_threads()
+set_number_of_threads(1)
 ```
 
 Set the number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
+
+```
+set_use_gpus(True)
+```
+
+Enables/disables the use of GPUs for model training, particularly for doing forward passes and calculating losses and gradients. By default this is disabled and training is done on the CPU. GPU usage requires that your Tensorflow package supports GPUs (i.e. the `tensorflow-gpu` package is installed).
+
+Note that some parts of training, like data input and preprocessing, are always done on the CPU. Model testing and validation, meanwhile, are unaffected and will run on either the CPU or a single GPU, whichever is faster.
+
+```
+set_number_of_gpus(1)
+```
+
+Sets the number of GPUs to use for model training. This should be set to at least 1 and can't be set until GPU usage is enabled. Using 2+ GPUs can make model training faster, provided that the model is complex enough for training to be slower than the overhead from transferring dat to/from the GPUs. Faster multi-GPU training also correlates with having enough data flowing through the model to otherwise overwhelm a single GPU.
 
 ## Learning Hyperparameters
 #### All Models
