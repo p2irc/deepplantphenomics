@@ -1,4 +1,5 @@
 import pytest
+import unittest.mock as mock
 import numpy as np
 import os.path
 import tensorflow as tf
@@ -25,16 +26,66 @@ def test_set_number_of_threads(model):
         model.set_number_of_threads(-1)
 
 
+def test_set_use_gpus(model):
+    assert model._use_gpus is False
+
+    with mock.patch('tensorflow.test.is_gpu_available') as mock_method:
+        mock_method.return_value = False
+        with pytest.raises(TypeError):
+            model.set_use_gpus('1')
+        with pytest.raises(RuntimeError):
+            model.set_use_gpus(True)
+
+        mock_method.return_value = True
+        model.set_use_gpus(True)
+        assert model._use_gpus is True
+
+
+def test_set_number_of_gpus(model):
+    assert model._num_gpus == 1
+
+    with pytest.raises(RuntimeError):
+        model.set_number_of_gpus(1)
+
+    model._use_gpus = True
+    with pytest.raises(ValueError):
+        model.set_number_of_gpus(0)
+    with pytest.raises(TypeError):
+        model.set_number_of_gpus('2')
+
+    with pytest.raises(RuntimeError):
+        model.set_number_of_gpus(2)
+    model._batch_size = 2
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 2
+    assert model._subbatch_size == 1
+
+
 def test_set_processed_images_dir(model):
     with pytest.raises(TypeError):
         model.set_processed_images_dir(5)
 
 
 def test_set_batch_size(model):
+    assert model._batch_size == 1
+    assert model._subbatch_size == 1
+
     with pytest.raises(TypeError):
         model.set_batch_size(5.0)
     with pytest.raises(ValueError):
         model.set_batch_size(-1)
+
+    model.set_batch_size(2)
+    assert model._batch_size == 2
+    assert model._subbatch_size == 2
+
+    model._use_gpus = True
+    model._num_gpus = 2
+    with pytest.raises(RuntimeError):
+        model.set_batch_size(3)
+    model.set_batch_size(4)
+    assert model._batch_size == 4
+    assert model._subbatch_size == 2
 
 
 def test_set_num_regression_outputs():
@@ -444,8 +495,8 @@ def test_add_output_layer():
     model1 = dpp.ClassificationModel()
     model2 = dpp.SemanticSegmentationModel()
     model3 = dpp.CountCeptionModel()
-    model1.set_image_dimensions(5,5,3)
-    model2.set_image_dimensions(5,5,3)
+    model1.set_image_dimensions(5, 5, 3)
+    model2.set_image_dimensions(5, 5, 3)
 
     with pytest.raises(RuntimeError):
         model1.add_output_layer(2.5, 3)
