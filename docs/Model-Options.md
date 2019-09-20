@@ -22,6 +22,8 @@ set_number_of_gpus(1)
 
 Sets the number of GPUs to use for model training. This should be set to at least 1 and can't be set until GPU usage is enabled. Using 2+ GPUs can make model training faster, provided that the model is complex enough for training to be slower than the overhead from transferring dat to/from the GPUs. Faster multi-GPU training also correlates with having enough data flowing through the model to otherwise overwhelm a single GPU.
 
+Setting this after setting the batch size will also check whether batches can be evenly split across the desired number of GPUs; an error is raised if they can't be evenly split.
+
 ## Learning Hyperparameters
 #### All Models
 
@@ -30,6 +32,8 @@ set_batch_size()
 ```
 
 Sets the number of examples in each mini-batch. Defaults to 1. Recall that smaller batches mean more gradient updates per epoch.
+
+Setting this after setting the number of GPUs for multi-GPU training will also check whether the batch size can be evenly split across the current number of GPUs; an error is raised if they can't be evenly split.
 
 ```
 set_maximum_training_epochs()
