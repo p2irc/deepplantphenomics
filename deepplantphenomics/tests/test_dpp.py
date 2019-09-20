@@ -28,6 +28,7 @@ def test_set_number_of_threads(model):
 
 def test_set_use_gpus(model):
     assert model._use_gpus is False
+    assert model._num_gpus == 1
 
     with mock.patch('tensorflow.test.is_gpu_available') as mock_method:
         mock_method.return_value = False
@@ -39,6 +40,11 @@ def test_set_use_gpus(model):
         mock_method.return_value = True
         model.set_use_gpus(True)
         assert model._use_gpus is True
+
+        model._num_gpus = 2
+        model.set_use_gpus(False)
+        assert model._use_gpus is False
+        assert model._num_gpus == 1
 
 
 def test_set_number_of_gpus(model):
