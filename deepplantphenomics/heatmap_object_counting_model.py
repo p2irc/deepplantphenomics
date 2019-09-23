@@ -194,21 +194,21 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         return den_map
 
-    def _parse_apply_preprocessing(self, input_queue):
+    def _parse_apply_preprocessing(self, images, labels):
         # This is tricky. If we read in the heatmaps as images, then we want to use the version in
         # SemanticSegmentationModel, which treats the labels like regular images. If we instead generated the heatmaps
         # from points in a CSV file, then we want to treat the labels like other labels, which the version in DPPModel
         # does. super() will let us choose which one by making it look through this or Semantic...Model's MRO.
         if not self.__label_from_image_file:
             # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_apply_preprocessing(input_queue)
+            return super(SemanticSegmentationModel, self)._parse_apply_preprocessing(images, labels)
         else:
-            return super()._parse_apply_preprocessing(input_queue)
+            return super()._parse_apply_preprocessing(images, labels)
 
-    def _parse_force_set_shape(self):
+    def _parse_force_set_shape(self, images, labels):
         # See _parse_apply_preprocessing for an explanation of whats going on here
         if not self.__label_from_image_file:
             # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_force_set_shape()
+            return super(SemanticSegmentationModel, self)._parse_force_set_shape(images, labels)
         else:
-            return super()._parse_force_set_shape()
+            return super()._parse_force_set_shape(images, labels)

@@ -414,37 +414,18 @@ class SemanticSegmentationModel(DPPModel):
         self._raw_labels = seg_files
         self._split_labels = False  # Band-aid fix
 
-    def _parse_apply_preprocessing(self, input_queue):
-        # Apply pre-processing to the image labels too (which are images for semantic segmentation), then convert them
-        # back to binary masks if they were resized
-        images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
-        labels = self._parse_preprocess_images(tf.read_file(input_queue[1]), channels=1)
-        if self._resize_images:
-            labels = tf.reduce_mean(labels, axis=2, keepdims=True)
+    def _parse_apply_preprocessing(self, images, labels):
+        # Apply pre-processing to the image labels too (which are images for semantic segmentation)
+        images = self._parse_read_images(images, channels=self._image_depth)
+        labels = self._parse_read_images(labels, channels=1)
         return images, labels
 
-    def _parse_crop_or_pad(self):
-        self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,
-                                                                    self._image_width)
-        self._train_labels = tf.image.resize_image_with_crop_or_pad(self._train_labels, self._image_height,
-                                                                    self._image_width)
-        if self._testing:
-            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                       self._image_width)
-            self._test_labels = tf.image.resize_image_with_crop_or_pad(self._test_labels, self._image_height,
-                                                                       self._image_width)
-        if self._validation:
-            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                      self._image_width)
-            self._val_labels = tf.image.resize_image_with_crop_or_pad(self._val_labels, self._image_height,
-                                                                      self._image_width)
+    def _parse_crop_or_pad(self, images, labels):
+        images = tf.image.resize_image_with_crop_or_pad(images, self._image_height, self._image_width)
+        labels = tf.image.resize_image_with_crop_or_pad(labels, self._image_height, self._image_width)
+        return images, labels
 
-    def _parse_force_set_shape(self):
-        self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
-        self._train_labels.set_shape([self._image_height, self._image_width, 1])
-        if self._testing:
-            self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            self._test_labels.set_shape([self._image_height, self._image_width, 1])
-        if self._validation:
-            self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            self._val_labels.set_shape([self._image_height, self._image_width, 1])
+    def _parse_force_set_shape(self, images, labels):
+        images.set_shape([self._image_height, self._image_width, self._image_depth])
+        labels.set_shape([self._image_height, self._image_width, self._image_depth])
+        return images, labels
