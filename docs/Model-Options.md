@@ -9,18 +9,12 @@ Set the number of threads for input queue runners and preprocessing tasks. Using
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
 
 ```
-set_use_gpus(True)
-```
-
-Enables/disables the use of GPUs for model training, particularly for doing forward passes and calculating losses and gradients. By default this is disabled and training is done on the CPU. GPU usage requires that your Tensorflow package supports GPUs (i.e. the `tensorflow-gpu` package is installed).
-
-Note that some parts of training, like data input and preprocessing, are always done on the CPU. Model testing and validation, meanwhile, are unaffected and will run on either the CPU or a single GPU, whichever is faster.
-
-```
 set_number_of_gpus(1)
 ```
 
-Sets the number of GPUs to use for model training. This should be set to at least 1 and can't be set until GPU usage is enabled. Using 2+ GPUs can make model training faster, provided that the model is complex enough for training to be slower than the overhead from transferring dat to/from the GPUs. Faster multi-GPU training also correlates with having enough data flowing through the model to otherwise overwhelm a single GPU.
+Sets the number of GPUs to use for model training. This should be set to at least 1. Setting it higher than the number of GPUs available is equivalent to setting it to exactly that number (i.e. setting it to 4 with 2 GPUs will set it to 2).
+
+Using 2+ GPUs can make model training faster, provided that the model is complex enough for training to be slower than the overhead from transferring dat to/from the GPUs. Faster multi-GPU training also correlates with having enough data flowing through the model to otherwise overwhelm a single GPU.
 
 Setting this after setting the batch size will also check whether batches can be evenly split across the desired number of GPUs; an error is raised if they can't be evenly split.
 
