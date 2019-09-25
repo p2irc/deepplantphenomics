@@ -1,4 +1,5 @@
 import pytest
+import unittest.mock as mock
 import numpy as np
 import os.path
 import tensorflow as tf
@@ -25,16 +26,65 @@ def test_set_number_of_threads(model):
         model.set_number_of_threads(-1)
 
 
+def test_set_number_of_gpus(model):
+    assert model._num_gpus == 1
+    assert model._batch_size == 1
+    assert model._subbatch_size == 1
+    model._max_gpus = 2
+
+    # Test sanity checks for type and value range
+    with pytest.raises(ValueError):
+        model.set_number_of_gpus(0)
+    with pytest.raises(TypeError):
+        model.set_number_of_gpus('2')
+
+    # Test subbatch sets and errors when enough GPUs are available
+    with pytest.raises(RuntimeError):
+        model.set_number_of_gpus(2)  # Can't split 1 item across 2 GPUs
+    model._batch_size = 2
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 2
+    assert model._subbatch_size == 1
+
+    # Test subbatch sets and errors when enough GPUs aren't available
+    model._max_gpus = 1
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 1
+    assert model._subbatch_size == 2
+
+    model._max_gpus = 0
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 1
+    assert model._subbatch_size == 2
+
+
 def test_set_processed_images_dir(model):
     with pytest.raises(TypeError):
         model.set_processed_images_dir(5)
 
 
 def test_set_batch_size(model):
+    assert model._batch_size == 1
+    assert model._subbatch_size == 1
+
+    # Test sanity checks for type and value range
     with pytest.raises(TypeError):
         model.set_batch_size(5.0)
     with pytest.raises(ValueError):
         model.set_batch_size(-1)
+
+    # Test normal batch size sets (i.e. with 1 GPU)
+    model.set_batch_size(2)
+    assert model._batch_size == 2
+    assert model._subbatch_size == 2
+
+    # Test batch size sets with multiple GPUs and errors
+    model._num_gpus = 2
+    with pytest.raises(RuntimeError):
+        model.set_batch_size(3)  # Can't split 3 item across 2 GPUs
+    model.set_batch_size(4)
+    assert model._batch_size == 4
+    assert model._subbatch_size == 2
 
 
 def test_set_num_regression_outputs():

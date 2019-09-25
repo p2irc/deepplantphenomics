@@ -179,30 +179,29 @@ class poolingLayer(object):
 
 
 class fullyConnectedLayer(object):
-    def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer,
+    def __init__(self, name, input_size, output_size, reshape, activation_function, initializer,
                  regularization_coefficient):
         self.name = name
         self.input_size = input_size
         self.output_size = output_size
         self.__reshape = reshape
-        self.__batch_size = batch_size
         self.__activation_function = activation_function
         self.__initializer = initializer
         self.regularization_coefficient = regularization_coefficient
 
-    def add_to_graph(self):
         # compute the vectorized size for weights if we will need to reshape it
-        if self.__reshape:
-            vec_size = self.input_size[1] * self.input_size[2] * self.input_size[3]
+        if reshape:
+            self.__vec_size = self.input_size[1] * self.input_size[2] * self.input_size[3]
         else:
-            vec_size = self.input_size
+            self.__vec_size = self.input_size
 
+    def add_to_graph(self):
         if self.__initializer == 'xavier':
-            self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, self.output_size],
+            self.weights = tf.get_variable(self.name + '_weights', shape=[self.__vec_size, self.output_size],
                                            initializer=tf.contrib.layers.xavier_initializer())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
-                                           shape=[vec_size, self.output_size],
+                                           shape=[self.__vec_size, self.output_size],
                                            initializer=tf.truncated_normal_initializer(
                                                stddev=math.sqrt(2.0/self.output_size)),
                                            dtype=tf.float32)
@@ -215,7 +214,7 @@ class fullyConnectedLayer(object):
     def forward_pass(self, x, deterministic):
         # Reshape into a column vector if necessary
         if self.__reshape is True:
-            x = tf.reshape(x, [self.__batch_size, -1])
+            x = tf.reshape(x, [-1, self.__vec_size])
 
         activations = tf.matmul(x, self.weights)
         activations = tf.add(activations, self.biases)
@@ -292,16 +291,16 @@ class moderationLayer(object):
 
         # compute the vectorized size for weights if we will need to reshape it
         if reshape:
-            vec_size = input_size[1] * input_size[2] * input_size[3]
+            self.__vec_size = input_size[1] * input_size[2] * input_size[3]
         else:
-            vec_size = input_size
+            self.__vec_size = input_size
 
-        self.output_size = vec_size + feature_size
+        self.output_size = self.__vec_size + feature_size
 
     def forward_pass(self, x, deterministic, features):
         # Reshape into a column vector if necessary
         if self.__reshape is True:
-            x = tf.reshape(x, [self.__batch_size, -1])
+            x = tf.reshape(x, [-1, self.__vec_size])
 
         # Append the moderating features onto the vector
         x = tf.concat([x, features], axis=1)
@@ -311,7 +310,6 @@ class moderationLayer(object):
 
 class batchNormLayer(object):
     def __init__(self, name, input_size, epsilon=1e-5, decay=0.9):
-
         self.name = name
         self.input_size = input_size
         self.output_size = input_size

@@ -40,62 +40,90 @@ class SemanticSegmentationModel(DPPModel):
 
     def _assemble_graph(self):
         with self._graph.as_default():
-
-            self._log('Parsing dataset...')
-            self._graph_parse_data()
-
-            self._log('Creating layer parameters...')
-            self._add_layers_to_graph()
-
             self._log('Assembling graph...')
 
-            # Define batches
-            if self._has_moderation:
-                x, y, mod_w = tf.train.shuffle_batch(
-                    [self._train_images, self._train_labels, self._train_moderation_features],
-                    batch_size=self._batch_size,
-                    num_threads=self._num_threads,
-                    capacity=self._queue_capacity,
-                    min_after_dequeue=self._batch_size)
-            else:
-                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                              batch_size=self._batch_size,
-                                              num_threads=self._num_threads,
-                                              capacity=self._queue_capacity,
-                                              min_after_dequeue=self._batch_size)
+            self._log('Graph: Parsing dataset...')
+            # Only do preprocessing on the CPU to limit data transfer between devices
+            with tf.device('/device:cpu:0'):
+                self._graph_parse_data()
 
-            # Reshape input and labels to the expected image dimensions
-            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
+                # Define batches
+                if self._has_moderation:
+                    x, y, mod_w = tf.train.shuffle_batch(
+                        [self._train_images, self._train_labels, self._train_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity,
+                        min_after_dequeue=self._batch_size)
+                else:
+                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                                  batch_size=self._batch_size,
+                                                  num_threads=self._num_threads,
+                                                  capacity=self._queue_capacity,
+                                                  min_after_dequeue=self._batch_size)
 
-            # If we are using patching, we extract a random patch from the image here
-            if self._with_patching:
-                x, offsets = self._graph_extract_patch(x)
+                # Reshape input and labels to the expected image dimensions
+                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
 
-            # Run the network operations
-            if self._has_moderation:
-                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
-            else:
-                xx = self.forward_pass(x, deterministic=False)
-            self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
+                # If we are using patching, we extract a random patch from the image here
+                if self._with_patching:
+                    x, offsets = self._graph_extract_patch(x)
 
-            # Define regularization cost
-            if self._reg_coeff is not None:
-                l2_cost = tf.squeeze(tf.reduce_sum(
-                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                     if isinstance(layer, layers.fullyConnectedLayer)]))
-            else:
-                l2_cost = 0.0
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
 
-            # Define cost function  based on which one was selected via set_loss_function
-            if self._loss_fn == 'sigmoid cross entropy':
-                pixel_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y))
-            self._graph_ops['cost'] = tf.squeeze(tf.add(pixel_loss, l2_cost))
+            # Create an optimizer object for all of the devices
+            optimizer = self._graph_make_optimizer()
 
-            # Set the optimizer and get the gradients from it
-            gradients, variables, global_grad_norm = self._graph_add_optimizer()
+            # Set up the graph layers
+            self._log('Graph: Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            # Calculate test accuracy
+            # Do the forward pass and training output calcs on possibly multiple GPUs
+            device_costs = []
+            device_gradients = []
+            device_variables = []
+            for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
+                with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    # Run the network operations
+                    if self._has_moderation:
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
+                    else:
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
+                    self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
+
+                    # Define regularization cost
+                    self._log('Graph: Calculating loss and gradients...')
+                    if self._reg_coeff is not None:
+                        l2_cost = tf.squeeze(tf.reduce_sum(
+                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                             if isinstance(layer, layers.fullyConnectedLayer)]))
+                    else:
+                        l2_cost = 0.0
+
+                    # Define cost function  based on which one was selected via set_loss_function
+                    if self._loss_fn == 'sigmoid cross entropy':
+                        pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y_sub_batches[n])
+                    gpu_cost = tf.squeeze(tf.reduce_mean(pixel_loss) + l2_cost)
+                    cost_sum = tf.reduce_sum(pixel_loss)
+                    device_costs.append(cost_sum)
+
+                    # Set the optimizer and get the gradients from it
+                    gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
+                    device_gradients.append(gradients)
+                    device_variables.append(variables)
+
+            # Average the gradients from each GPU and apply them
+            average_gradients = self._graph_average_gradients(device_gradients)
+            opt_variables = device_variables[0]
+            self._graph_ops['optimizer'] = self._graph_apply_gradients(average_gradients, opt_variables, optimizer)
+
+            # Average the costs and accuracies from each GPU
+            self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
+
+            # Calculate test  and validation accuracy (on a single device at Tensorflow's discretion)
             if self._has_moderation:
                 if self._testing:
                     x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
@@ -139,6 +167,7 @@ class SemanticSegmentationModel(DPPModel):
                     x_val, _ = self._graph_extract_patch(x_val, offsets)
                     self._graph_ops['y_val'], _ = self._graph_extract_patch(self._graph_ops['y_val'], offsets)
 
+            # Run the testing and validation, whose graph should only be on 1 device
             if self._has_moderation:
                 if self._testing:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
@@ -152,7 +181,7 @@ class SemanticSegmentationModel(DPPModel):
                 if self._validation:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-            # compute the loss and accuracy based on problem type
+            # Compute the loss and accuracy for testing and validation
             if self._testing:
                 self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self._graph_ops['x_test_predicted'], labels=self._graph_ops['y_test']), axis=2)
@@ -179,7 +208,7 @@ class SemanticSegmentationModel(DPPModel):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            # Initialize storage for the retreived test variables
+            # Initialize storage for the retrieved test variables
             all_losses = np.empty(shape=1)
 
             # Main test loop
@@ -234,7 +263,7 @@ class SemanticSegmentationModel(DPPModel):
                 patch_width = self._patch_width
                 final_height = (self._image_height // patch_height) * patch_height
                 final_width = (self._image_width // patch_width) * patch_width
-                # find image differences to determine recentering crop coords, we divide by 2 so that the leftover
+                # find image differences to determine re-centering crop coords, we divide by 2 so that the leftover
                 # is equal on all sides of image
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2

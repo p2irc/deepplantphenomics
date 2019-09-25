@@ -1,6 +1,7 @@
 from . import layers, loaders, definitions
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.client import device_lib
 import os
 import json
 import datetime
@@ -164,15 +165,23 @@ class DPPModel(ABC):
         self._queue_capacity = 50
         self._report_rate = report_rate
 
-        # Multi-threading
+        # Multi-threading and GPU
         self._num_threads = 1
         self._coord = None
         self._threads = None
+        self._num_gpus = 1
+        self._max_gpus = 1  # Set this properly below
+        self._subbatch_size = self._batch_size
 
         # Now do actual initialization stuff
         # Add the run level to the tensorboard path
         if self._tb_dir is not None:
             self._tb_dir = "{0}/{1}".format(self._tb_dir, datetime.datetime.now().strftime("%d%B%Y%I:%M%p"))
+
+        # Determine the maximum number of GPUs we can use (using code from https://stackoverflow.com/a/38580201 to find
+        # out how many we can actually reach). If this ends up as 0, then other code knows to construct CPU-only graphs.
+        gpu_list = [x.name for x in device_lib.list_local_devices() if x.device_type == 'GPU']
+        self._max_gpus = len(gpu_list)
 
         if initialize:
             self._log('TensorFlow loaded...')
@@ -194,7 +203,8 @@ class DPPModel(ABC):
                     isinstance(layer, layers.convLayer) or isinstance(layer, layers.fullyConnectedLayer))
 
     def _reset_session(self):
-        self._session = tf.Session(graph=self._graph)
+        self._session = tf.Session(graph=self._graph,
+                                   config=tf.ConfigProto(allow_soft_placement=True))
 
     def _reset_graph(self):
         self._graph = tf.Graph()
@@ -213,6 +223,26 @@ class DPPModel(ABC):
 
         self._num_threads = num_threads
 
+    def set_number_of_gpus(self, num_gpus):
+        """Set the number of GPUs to use for graph evaluation. Setting this higher than the number of available GPUs
+        has the same effect as setting this to exactly that amount (i.e. setting this to 4 with 2 GPUs available will
+        still only use 2 GPUs)."""
+        if not isinstance(num_gpus, int):
+            raise TypeError("num_gpus must be an int")
+        if num_gpus <= 0:
+            raise ValueError("num_gpus must be positive")
+
+        if self._max_gpus != 0:
+            self._num_gpus = num_gpus if (num_gpus <= self._max_gpus) else self._max_gpus
+        else:
+            self._num_gpus = 1  # So batch-setting code doesn't gobble a goose
+
+        if self._batch_size % self._num_gpus == 0:
+            self._subbatch_size = self._batch_size // self._num_gpus
+        else:
+            raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
+                               .format(self._num_gpus, self._batch_size))
+
     def set_processed_images_dir(self, im_dir):
         """Set the directory for storing processed images when pre-processing is used"""
         if not isinstance(im_dir, str):
@@ -229,6 +259,12 @@ class DPPModel(ABC):
 
         self._batch_size = size
         self._queue_capacity = size * 5
+
+        if size % self._num_gpus == 0:
+            self._subbatch_size = size // self._num_gpus
+        else:
+            raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
+                               .format(self._num_gpus, size))
 
     def set_test_split(self, ratio):
         """Set a ratio for the total number of samples to use as a testing set"""
@@ -468,16 +504,29 @@ class DPPModel(ABC):
         self._patch_width = width
         self._with_patching = True
 
+    def _get_device_list(self):
+        """Returns the list of CPU and/or GPU devices to construct and evaluate graphs for"""
+        if not tf.test.is_gpu_available():
+            return ['/device:cpu:0']
+        else:
+            return ['/device:gpu:' + str(x) for x in range(self._num_gpus)]
+
     def _add_layers_to_graph(self):
         """
         Adds the layers in self.layers to the computational graph.
-
-        Currently _assemble_graph is doing too many things, so this is needed as a separate function so that other
-        functions such as load_state can add layers to the graph without performing everything else in assemble_graph
         """
+        # Adding layers to the graph mostly involves setting up the required variables. Those variables should be on
+        # the CPU if we are using multiple GPUs and need to share them across multiple graph towers. Otherwise, they
+        # can go on whatever device Tensorflow deems sensible.
+        if tf.test.is_gpu_available() and self._num_gpus > 1:
+            d = '/device:cpu:0'
+        else:
+            d = None  # Effectively /device:cpu:0 for CPU-only or /device:gpu:0 for 1 GPU
+
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
-                layer.add_to_graph()
+                with tf.device(d):
+                    layer.add_to_graph()
 
     def _graph_parse_data(self):
         """
@@ -492,8 +541,9 @@ class DPPModel(ABC):
         elif self._images_only:
             self._parse_images(self._raw_image_files)
         else:
-            # Split the data into training, validation, and testing sets. If there is no validation set or no moderation
-            # features being used they will be returned as 0 (for validation) or None (for moderation features)
+            # Split the data into training, validation, and testing sets. If there is no validation set or no
+            # moderation features being used they will be returned as 0 (for validation) or None (for moderation
+            # features)
             train_images, train_labels, train_mf, \
                     test_images, test_labels, test_mf, \
                     val_images, val_labels, val_mf, = \
@@ -526,47 +576,75 @@ class DPPModel(ABC):
                                      normalized=False, centered=False)
         return x, offsets
 
-    def _graph_add_optimizer(self):
-        """
-        Adds graph components for setting and running an optimization operation
-        :return: The optimizer's gradients, variables, and the global_grad_norm
-        """
-        # Identify which optimizer we are using
+    def _graph_make_optimizer(self):
+        """Generate a new optimizer object for computing and applying gradients"""
         if self._optimizer == 'adagrad':
-            self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
             self._log('Using Adagrad optimizer')
+            return tf.train.AdagradOptimizer(self._learning_rate)
         elif self._optimizer == 'adadelta':
-            self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-            self._log('Using adadelta optimizer')
+            self._log('Using Adadelta optimizer')
+            return tf.train.AdadeltaOptimizer(self._learning_rate)
         elif self._optimizer == 'sgd':
-            self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
             self._log('Using SGD optimizer')
+            return tf.train.GradientDescentOptimizer(self._learning_rate)
         elif self._optimizer == 'adam':
-            self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
             self._log('Using Adam optimizer')
+            return tf.train.AdamOptimizer(self._learning_rate)
         elif self._optimizer == 'sgd_momentum':
-            self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
             self._log('Using SGD with momentum optimizer')
+            return tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
         else:
             warnings.warn('Unrecognized optimizer requested')
             exit()
 
-        # Compute gradients, clip them, the apply the clipped gradients
-        # This is broken up so that we can add gradients to tensorboard
-        # need to make the 5.0 an adjustable hyperparameter
-        gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+    def _graph_get_gradients(self, loss, optimizer):
+        """
+        Add graph components for getting gradients given an optimizer some losses
+        :param loss: The loss value to use when computing the gradients
+        :param optimizer: The optimizer object used to generate the gradients
+        :return: The graph's gradients, variables, and the global gradient norm from clipping
+        """
+        gradients, variables = zip(*optimizer.compute_gradients(loss))
         gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-        self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
-
         return gradients, variables, global_grad_norm
+
+    def _graph_average_gradients(self, graph_gradients):
+        """
+        Add graph components for averaging the computed gradients from multiple runs of a graph (i.e. over gradients
+        from multiple GPUs)
+        :param graph_gradients: A list of the computed gradient lists from each (GPU) run
+        :return: A list of the averaged gradients across each run
+        """
+        # No averaging needed if there's only gradients from one run (because a single device, CPU or GPU, was used)
+        if len(graph_gradients) == 1:
+            return graph_gradients[0]
+
+        averaged_gradients = []
+        for gradients in zip(*graph_gradients):
+            grads = [tf.expand_dims(g, 0) for g in gradients]
+            grads = tf.concat(grads, axis=0)
+            grads = tf.reduce_mean(grads, axis=0)
+            averaged_gradients.append(grads)
+
+        return averaged_gradients
+
+    def _graph_apply_gradients(self, gradients, variables, optimizer):
+        """
+        Add graph components for using an optimizer applying gradients to variables
+        :param gradients: The gradients to be applied
+        :param variables: The variables to apply the gradients to
+        :param optimizer: The optimizer object used to apply the gradients
+        :return: An operation for applying gradients to the graph variables
+        """
+        return optimizer.apply_gradients(zip(gradients, variables))
 
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
         Adds graph components common to every problem type related to outputting losses and other summary variables to
         Tensorboard.
-        :param l2_cost: ...
-        :param gradients: ...
-        :param global_grad_norm: ...
+        :param l2_cost: The L2 loss component of the computed cost
+        :param gradients: The gradients for the variables in the graph
+        :param global_grad_norm: The global norm used to normalize the gradients
         """
         self._log('Creating Tensorboard summaries...')
 
@@ -706,9 +784,9 @@ class DPPModel(ABC):
                 tqdm_range = tqdm(range(self._maximum_training_batches))
                 for i in tqdm_range:
                     start_time = time.time()
-
                     self._global_epoch = i
                     self._session.run(self._graph_ops['optimizer'])
+
                     if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
                         if self._tb_dir is not None:
                             self._training_batch_results(i, start_time, tqdm_range, train_writer)
@@ -990,13 +1068,13 @@ class DPPModel(ABC):
         apply_crop = (self._augmentation_crop and self._all_images is None and self._train_images is None)
 
         if apply_crop:
-            size = [self._batch_size, int(self._image_height * self._crop_amount),
+            size = [self._subbatch_size, int(self._image_height * self._crop_amount),
                     int(self._image_width * self._crop_amount), self._image_depth]
         else:
-            size = [self._batch_size, self._image_height, self._image_width, self._image_depth]
+            size = [self._subbatch_size, self._image_height, self._image_width, self._image_depth]
 
         if self._with_patching:
-            size = [self._batch_size, self._patch_height, self._patch_width, self._image_depth]
+            size = [self._subbatch_size, self._patch_height, self._patch_width, self._image_depth]
 
         with self._graph.as_default():
             layer = layers.inputLayer(size)
@@ -1012,8 +1090,8 @@ class DPPModel(ABC):
         feat_size = self._moderation_features_size
 
         with self._graph.as_default():
-            layer = layers.moderationLayer(copy.deepcopy(
-                self._last_layer().output_size), feat_size, reshape, self._batch_size)
+            layer = layers.moderationLayer(copy.deepcopy(self._last_layer().output_size),
+                                           feat_size, reshape, self._subbatch_size)
 
         self._layers.append(layer)
 
@@ -1051,12 +1129,14 @@ class DPPModel(ABC):
             raise ValueError("stride_length must be positive")
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
+
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
             raise ValueError(
                 "'" + activation_function + "' is not one of the currently supported activation functions." +
                 " Choose one of: " +
                 " ".join("'" + x + "'" for x in self._supported_activation_functions))
+
         if padding is not None:
             if not isinstance(padding, int):
                 raise TypeError("padding must be an int")
@@ -1247,11 +1327,13 @@ class DPPModel(ABC):
             raise ValueError("output_size must be positive")
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
+
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
             raise ValueError("'" + activation_function + "' is not one of the currently supported activation " +
                              "functions. Choose one of: " +
                              " ".join("'"+x+"'" for x in self._supported_activation_functions))
+
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
                 raise TypeError("regularization_coefficient must be a float or None")
@@ -1270,13 +1352,8 @@ class DPPModel(ABC):
             regularization_coefficient = 0.0
 
         with self._graph.as_default():
-            layer = layers.fullyConnectedLayer(layer_name,
-                                               copy.deepcopy(self._last_layer().output_size),
-                                               output_size,
-                                               reshape,
-                                               self._batch_size,
-                                               activation_function,
-                                               self._weight_initializer,
+            layer = layers.fullyConnectedLayer(layer_name, copy.deepcopy(self._last_layer().output_size), output_size,
+                                               reshape, activation_function, self._weight_initializer,
                                                regularization_coefficient)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))

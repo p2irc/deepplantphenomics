@@ -1,12 +1,22 @@
-## Multithreading Options
+## Multithreading and Multi-GPU Options
 
 ```
-set_number_of_threads()
+set_number_of_threads(1)
 ```
 
 Set the number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
+
+```
+set_number_of_gpus(1)
+```
+
+Sets the number of GPUs to use for model training. This should be set to at least 1. Setting it higher than the number of GPUs available is equivalent to setting it to exactly that number (i.e. setting it to 4 with 2 GPUs will set it to 2).
+
+Using 2+ GPUs can make model training faster, provided that the model is complex enough for the GPU operations to be slower than the overhead from transferring data to/from the GPUs. Otherwise, the speedup from a multi-GPU setup will be overshadowed by the time required to move data between the GPUs and system memory.
+
+Setting this after setting the batch size will also check whether batches can be evenly split across the desired number of GPUs; an error is raised if they can't be evenly split.
 
 ## Learning Hyperparameters
 #### All Models
@@ -16,6 +26,8 @@ set_batch_size()
 ```
 
 Sets the number of examples in each mini-batch. Defaults to 1. Recall that smaller batches mean more gradient updates per epoch.
+
+Setting this after setting the number of GPUs for multi-GPU training will also check whether the batch size can be evenly split across the current number of GPUs; an error is raised if they can't be evenly split.
 
 ```
 set_maximum_training_epochs()

@@ -135,7 +135,8 @@ class ObjectDetectionModel(DPPModel):
         elements: [object/no-object, class, x, y, w, h]
         :param y_pred: Tensor with predicted bounding boxes for each grid square in each image. Predictions consist of
         one box and confidence [x, y, w, h, conf] for each anchor plus 1 element for specifying the class (only one atm)
-        :return Scalar Tensor with the Yolo loss for the bounding box predictions
+        :return Scalar Tensor with the Yolo loss for the bounding box predictions. Technically, this is the sum of the
+        Yolo loss for each image in the passed-in batch.
         """
 
         prior_boxes = tf.convert_to_tensor(self._ANCHORS)
@@ -182,8 +183,6 @@ class ObjectDetectionModel(DPPModel):
         # confidence loss #
         # grids that do contain an object, 1 * iou means we simply take the difference between the
         # iou's and the predicted confidence
-
-        # this is how the paper does it, the above 6 lines is experimental
         obj_num_grids = tf.shape(predicted_boxes)[0]  # [num_boxes, 5, 5]
         loss_obj = tf.cast((1 / obj_num_grids), dtype='float32') * tf.reduce_sum(
             tf.square(tf.subtract(ious, predicted_boxes[..., 4])))
@@ -222,64 +221,92 @@ class ObjectDetectionModel(DPPModel):
 
     def _assemble_graph(self):
         with self._graph.as_default():
-
-            self._log('Parsing dataset...')
-            self._graph_parse_data()
-
-            self._log('Creating layer parameters...')
-            self._add_layers_to_graph()
-
             self._log('Assembling graph...')
 
-            # Define batches
-            if self._has_moderation:
-                x, y, mod_w = tf.train.shuffle_batch(
-                    [self._train_images, self._train_labels, self._train_moderation_features],
-                    batch_size=self._batch_size,
-                    num_threads=self._num_threads,
-                    capacity=self._queue_capacity,
-                    min_after_dequeue=self._batch_size)
-            else:
-                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                              batch_size=self._batch_size,
-                                              num_threads=self._num_threads,
-                                              capacity=self._queue_capacity,
-                                              min_after_dequeue=self._batch_size)
+            self._log('Graph: Parsing dataset...')
+            # Only do preprocessing on the CPU to limit data transfer between devices
+            with tf.device('device:cpu:0'):
+                self._graph_parse_data()
 
-            # Reshape input to the expected image dimensions
-            x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                # Define batches
+                if self._has_moderation:
+                    x, y, mod_w = tf.train.shuffle_batch(
+                        [self._train_images, self._train_labels, self._train_moderation_features],
+                        batch_size=self._batch_size,
+                        num_threads=self._num_threads,
+                        capacity=self._queue_capacity,
+                        min_after_dequeue=self._batch_size)
+                else:
+                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
+                                                  batch_size=self._batch_size,
+                                                  num_threads=self._num_threads,
+                                                  capacity=self._queue_capacity,
+                                                  min_after_dequeue=self._batch_size)
 
-            # Deserialize the label
-            y = loaders.label_string_to_tensor(y, self._batch_size)
-            vec_size = 1 + self._NUM_CLASSES + 4
-            y = tf.reshape(y, [self._batch_size, self._grid_w * self._grid_h, vec_size])
+                # Reshape input to the expected image dimensions
+                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
 
-            # Run the network operations
-            if self._has_moderation:
-                xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
-            else:
-                xx = self.forward_pass(x, deterministic=False)
+                # Deserialize the label
+                y = loaders.label_string_to_tensor(y, self._batch_size)
+                vec_size = 1 + self._NUM_CLASSES + 4
+                y = tf.reshape(y, [self._batch_size, self._grid_w * self._grid_h, vec_size])
 
-            # Define regularization cost
-            if self._reg_coeff is not None:
-                l2_cost = tf.squeeze(tf.reduce_sum(
-                    [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                     if isinstance(layer, layers.fullyConnectedLayer)]))
-            else:
-                l2_cost = 0.0
+                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
+                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
+                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
 
-            # Define cost function  based on which one was selected via set_loss_function
-            if self._loss_fn == 'yolo':
-                self._yolo_loss = self._yolo_loss_function(
-                    y, tf.reshape(xx, [self._batch_size,
-                                       self._grid_w * self._grid_h,
-                                       self._NUM_BOXES * 5 + self._NUM_CLASSES]))
-            self._graph_ops['cost'] = tf.squeeze(tf.add(self._yolo_loss, l2_cost))
+            # Create an optimizer object for all of the devices
+            optimizer = self._graph_make_optimizer()
 
-            # Set the optimizer and get the gradients from it
-            gradients, variables, global_grad_norm = self._graph_add_optimizer()
+            # Set up the graph layers
+            self._log('Graph: Creating layer parameters...')
+            self._add_layers_to_graph()
 
-            # Calculate test accuracy
+            # Do the forward pass and training output calcs on possibly multiple GPUs
+            device_costs = []
+            device_gradients = []
+            device_variables = []
+            for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
+                with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    # Run the network operations
+                    if self._has_moderation:
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
+                    else:
+                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
+
+                    # Define regularization cost
+                    self._log('Graph: Calculating loss and gradients...')
+                    if self._reg_coeff is not None:
+                        l2_cost = tf.squeeze(tf.reduce_sum(
+                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                             if isinstance(layer, layers.fullyConnectedLayer)]))
+                    else:
+                        l2_cost = 0.0
+
+                    # Define the cost function
+                    if self._loss_fn == 'yolo':
+                        xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
+                                             self._NUM_BOXES * 5 + self._NUM_CLASSES])
+                        yolo_loss = self._yolo_loss_function(y_sub_batches[n], xx)
+                        num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
+                    gpu_cost = tf.squeeze(yolo_loss / num_image_loss + l2_cost)
+                    device_costs.append(yolo_loss)
+
+                    # Set the optimizer and get the gradients from it
+                    gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
+                    device_gradients.append(gradients)
+                    device_variables.append(variables)
+
+            # Average the gradients from each GPU and apply them
+            average_gradients = self._graph_average_gradients(device_gradients)
+            opt_variables = device_variables[0]
+            self._graph_ops['optimizer'] = self._graph_apply_gradients(average_gradients, opt_variables, optimizer)
+
+            # Average the costs and accuracies from each GPU
+            self._yolo_loss = 0
+            self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
+
+            # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
             if self._has_moderation:
                 if self._testing:
                     x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
@@ -323,6 +350,7 @@ class ObjectDetectionModel(DPPModel):
                                                              self._grid_w * self._grid_h,
                                                              vec_size])
 
+            # Run the testing and validation, whose graph should only be on 1 device
             if self._has_moderation:
                 if self._testing:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
@@ -348,15 +376,17 @@ class ObjectDetectionModel(DPPModel):
                                                                  self._grid_w * self._grid_h,
                                                                  self._NUM_BOXES * 5 + self._NUM_CLASSES])
 
-            # compute the loss and accuracy based on problem type
+            # Compute the loss for testing and validation
             if self._testing:
                 if self._loss_fn == 'yolo':
-                    self._graph_ops['test_losses'] = self._yolo_loss_function(self._graph_ops['y_test'],
-                                                                              self._graph_ops['x_test_predicted'])
+                    self._graph_ops['test_losses'] = \
+                        self._yolo_loss_function(self._graph_ops['y_test'],
+                                                 self._graph_ops['x_test_predicted']) / self._batch_size
             if self._validation:
                 if self._loss_fn == 'yolo':
-                    self._graph_ops['val_losses'] = self._yolo_loss_function(self._graph_ops['y_val'],
-                                                                             self._graph_ops['x_val_predicted'])
+                    self._graph_ops['val_losses'] = \
+                        self._yolo_loss_function(self._graph_ops['y_val'],
+                                                 self._graph_ops['x_val_predicted']) / self._batch_size
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
