@@ -258,42 +258,34 @@ class ClassificationModel(DPPModel):
             self._log('Average test accuracy: {:.5f}'.format(mean))
             return 1.0 - mean.astype(np.float32)
 
-    def forward_pass_with_file_inputs(self, x):
+    def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
             total_outputs = np.empty([1, self._last_layer().output_size])
 
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
-
-            if remainder != 0:
+            num_batches = len(images) // self._batch_size
+            if len(images) % self._batch_size != 0:
                 num_batches += 1
-                remainder = self._batch_size - remainder
 
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = x
             self._parse_images(images)
-
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            # x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
+            # x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            im_data = self._all_images.batch(self._batch_size).prefetch(1)
+            x_test = im_data.make_one_shot_iterator().get_next()
 
             if self._load_from_saved:
                 self.load_state()
-            self._initialize_queue_runners()
+            # self._initialize_queue_runners()
+
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
-                for img in np.array_split(xx, self._batch_size):
+                for img in np.array_split(xx, xx.shape[0]):
                     total_outputs = np.append(total_outputs, img, axis=0)
 
             # delete weird first row
             total_outputs = np.delete(total_outputs, 0, 0)
-
-            # delete any outputs which are overruns from the last batch
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
 
         return total_outputs
 

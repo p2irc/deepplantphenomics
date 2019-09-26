@@ -764,10 +764,10 @@ class DPPModel(ABC):
             print('assembled the graph')
 
             # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
+            if self._load_from_saved:
                 self._has_trained = True
                 self.load_state()
-                self._initialize_queue_runners()
+                # self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
                 self.shut_down()
             else:
@@ -776,7 +776,7 @@ class DPPModel(ABC):
 
                 self._log('Initializing parameters...')
                 self._session.run(tf.global_variables_initializer())
-                self._initialize_queue_runners()
+                # self._initialize_queue_runners()
 
                 self._log('Beginning training...')
                 self._set_learning_rate()
@@ -907,9 +907,8 @@ class DPPModel(ABC):
         """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
         self._log('Shutdown requested, ending session...')
 
-        self._coord.request_stop()
-        self._coord.join(self._threads)
-
+        # self._coord.request_stop()
+        # self._coord.join(self._threads)
         self._session.close()
 
     def _get_weights_as_image(self, kernel, size=None):
