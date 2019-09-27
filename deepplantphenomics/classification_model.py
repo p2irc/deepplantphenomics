@@ -254,14 +254,11 @@ class ClassificationModel(DPPModel):
                 num_batches += 1
 
             self._parse_images(images)
-            # x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            # x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
             im_data = self._all_images.batch(self._batch_size).prefetch(1)
             x_test = im_data.make_one_shot_iterator().get_next()
 
             if self._load_from_saved:
                 self.load_state()
-            # self._initialize_queue_runners()
 
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)

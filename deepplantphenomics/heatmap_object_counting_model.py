@@ -44,32 +44,22 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                 exit()
 
             # Initialize storage for the retrieved test variables
-            all_losses = np.empty(shape=1)
-            all_y = np.empty(shape=[1, self._image_height, self._image_width, 1])
-            all_predictions = np.empty(shape=[1, self._image_height, self._image_width, 1])
+            all_losses = []
+            all_y = []
+            all_predictions = []
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
                 r_losses, r_y, r_predictions = self._session.run([self._graph_ops['test_losses'],
                                                                   self._graph_ops['y_test'],
                                                                   self._graph_ops['x_test_predicted']])
-                all_losses = np.concatenate((all_losses, r_losses), axis=0)
-                all_y = np.concatenate((all_y, r_y), axis=0)
-                all_predictions = np.concatenate((all_predictions, r_predictions), axis=0)
+                all_losses.append(r_losses)
+                all_y.append(r_y)
+                all_predictions.append(r_predictions)
 
-            all_losses = np.delete(all_losses, 0)
-            all_y = np.delete(all_y, 0, axis=0)
-            all_predictions = np.delete(all_predictions, 0, axis=0)
-
-            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
-            # we want to get rid of)
-            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
-            if extra != self._batch_size:
-                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
-                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
-                all_losses = all_losses[mask_extra, ...]
-                all_y = all_y[mask_extra, ...]
-                all_predictions = all_predictions[mask_extra, ...]
+            all_losses = np.concatenate(all_losses, axis=0)
+            all_y = np.concatenate(all_y, axis=0)
+            all_predictions = np.concatenate(all_predictions, axis=0)
 
             # For heatmap object counting losses, like with semantic segmentation, we want relative and abs mean, std
             # of L2 norms, plus a histogram of errors
@@ -166,7 +156,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                 heatmaps.append(self.__points_to_density_map(points))
             else:
                 # There are no objects, so the heatmap is blank
-                heatmaps.append(np.full([self._image_height, self._image_width], 0))
+                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0))
 
         heatmaps = np.stack(heatmaps)
 
@@ -187,9 +177,9 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         """
         # The simple way to do this is to place single pixel 1's on a blank image at each point and then apply a
         # gaussian filter to that image. The result is our density map.
-        den_map = np.zeros([self._image_height, self._image_width], dtype=np.float32)
+        den_map = np.zeros([self._image_height, self._image_width, 1], dtype=np.float32)
         for p in points:
-            den_map[p[0], p[1]] = 1
+            den_map[p[0], p[1], 0] = 1
         den_map = gaussian_filter(den_map, self._density_sigma, mode='constant')
 
         return den_map
@@ -204,6 +194,22 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             return super(SemanticSegmentationModel, self)._parse_apply_preprocessing(images, labels)
         else:
             return super()._parse_apply_preprocessing(images, labels)
+
+    def _parse_resize_images(self, images, labels):
+        # See _parse_apply_preprocessing for an explanation of whats going on here
+        if not self.__label_from_image_file:
+            # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
+            return super(SemanticSegmentationModel, self)._parse_resize_images(images, labels)
+        else:
+            return super()._parse_resize_images(images, labels)
+
+    def _parse_crop_or_pad(self, images, labels):
+        # See _parse_apply_preprocessing for an explanation of whats going on here
+        if not self.__label_from_image_file:
+            # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
+            return super(SemanticSegmentationModel, self)._parse_crop_or_pad(images, labels)
+        else:
+            return super()._parse_crop_or_pad(images, labels)
 
     def _parse_force_set_shape(self, images, labels):
         # See _parse_apply_preprocessing for an explanation of whats going on here
