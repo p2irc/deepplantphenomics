@@ -93,14 +93,10 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
     return train_images, train_labels, train_mf, test_images, test_labels, test_mf, val_images, val_labels, val_mf
 
 
-def label_string_to_tensor(x, batch_size, num_outputs=None):
-    sparse = tf.string_split(x, delimiter=' ')
+def label_string_to_tensor(x, batch_size, num_outputs=-1):
+    sparse = tf.string_split(x, sep=' ')
     values = tf.string_to_number(sparse.values)
-    if num_outputs is None:
-        dense = tf.reshape(values, [batch_size, -1])
-    else:
-        dense = tf.reshape(values, (batch_size, num_outputs))
-
+    dense = tf.reshape(values, [batch_size, num_outputs])
     return dense
 
 

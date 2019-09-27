@@ -42,15 +42,6 @@ class ClassificationModel(DPPModel):
         self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
     def _assemble_graph(self):
-        def _batch_and_iterate(dataset, shuffle=False):
-            if shuffle:
-                dataset = dataset.shuffle(10000)
-            dataset = dataset.batch(self._subbatch_size)
-            dataset = dataset.repeat()
-            dataset = dataset.prefetch(self._num_gpus)
-            data_iter = dataset.make_one_shot_iterator()
-            return data_iter
-
         with self._graph.as_default():
             self._log('Assembling graph...')
 
@@ -60,18 +51,18 @@ class ClassificationModel(DPPModel):
                 self._graph_parse_data()
 
                 # Batch the datasets and create iterators for them
-                train_iter = _batch_and_iterate(self._train_dataset, shuffle=True)
+                train_iter = self._batch_and_iterate(self._train_dataset, shuffle=True)
                 if self._testing:
-                    test_iter = _batch_and_iterate(self._test_dataset)
+                    test_iter = self._batch_and_iterate(self._test_dataset)
                 if self._validation:
-                    val_iter = _batch_and_iterate(self._val_dataset)
+                    val_iter = self._batch_and_iterate(self._val_dataset)
 
                 if self._has_moderation:
-                    train_mod_iter = _batch_and_iterate(self._train_moderation_features)
+                    train_mod_iter = self._batch_and_iterate(self._train_moderation_features)
                     if self._testing:
-                        test_mod_iter = _batch_and_iterate(self._test_moderation_features)
+                        test_mod_iter = self._batch_and_iterate(self._test_moderation_features)
                     if self._validation:
-                        val_mod_iter = _batch_and_iterate(self._val_moderation_features)
+                        val_mod_iter = self._batch_and_iterate(self._val_moderation_features)
 
                 # # Reshape input to the expected image dimensions
                 # x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
@@ -79,10 +70,6 @@ class ClassificationModel(DPPModel):
                 # # If we are using patching, we extract a random patch from the image here
                 # if self._with_patching:
                 #     x, offsets = self._graph_extract_patch(x)
-                #
-                # # Split the current training batch into sub-batches if we are constructing more than 1 training tower
-                # x_sub_batches = tf.split(x, self._num_gpus, axis=0)
-                # y_sub_batches = tf.split(y, self._num_gpus, axis=0)
 
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()

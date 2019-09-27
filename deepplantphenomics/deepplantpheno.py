@@ -713,6 +713,22 @@ class DPPModel(ABC):
         """
         pass
 
+    def _batch_and_iterate(self, dataset, shuffle=False):
+        """
+        Sets up batching and prefetching for a Dataset, with optional shuffling (for training), and returns an iterator
+        for the final Dataset.
+        :param dataset: The Dataset to prepare with batching and prefetching
+        :param shuffle: A flag for whether to shuffle the Dataset items
+        :return: A one-shot iterator for the prepared Dataset
+        """
+        if shuffle:
+            dataset = dataset.shuffle(10000)
+        dataset = dataset.batch(self._subbatch_size)
+        dataset = dataset.repeat()
+        dataset = dataset.prefetch(self._num_gpus)
+        data_iter = dataset.make_one_shot_iterator()
+        return data_iter
+
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         """
         Calculates and reports mid-training losses and other statistics, both through the console and through writing
