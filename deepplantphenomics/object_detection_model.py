@@ -612,12 +612,6 @@ class ObjectDetectionModel(DPPModel):
                 # is equal on all sides of image
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2
-                # pre-allocate output dimensions
-                total_outputs = np.empty([1, num_patches_horiz * num_patches_vert,
-                                          self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES])
-            else:
-                total_outputs = np.empty(
-                    [1, self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES])
 
             num_batches = len(images) // self._batch_size
             if len(images) % self._batch_size != 0:
@@ -649,14 +643,15 @@ class ObjectDetectionModel(DPPModel):
                 xx_output_size = [self._batch_size,
                                   self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
 
+            total_outputs = []
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
                 xx = np.reshape(xx, xx_output_size)
                 for img in np.array_split(xx, self._batch_size):
-                    total_outputs = np.append(total_outputs, img, axis=0)
+                    total_outputs.append(img)
 
             # Delete the weird first row and any outputs which are overruns from the last batch
-            total_outputs = np.delete(total_outputs, 0, 0)
+            total_outputs = np.concatenate(total_outputs, axis=0)
 
         return total_outputs
 

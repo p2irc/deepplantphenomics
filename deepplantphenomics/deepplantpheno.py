@@ -2179,6 +2179,9 @@ class DPPModel(ABC):
             input_dataset = tf.data.Dataset.from_tensor_slices(images)
             input_dataset = input_dataset.map(lambda x: self._parse_read_images(x, channels=self._image_depth),
                                               num_parallel_calls=self._num_threads)
+            input_dataset = input_dataset.map(lambda x:
+                                              tf.image.resize_images(x, [self._image_height, self._image_width]),
+                                              num_parallel_calls=self._num_threads)
 
             if self._augmentation_crop or self._crop_or_pad_images:
                 if self._augmentation_crop:

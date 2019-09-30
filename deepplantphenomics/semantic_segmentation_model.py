@@ -235,10 +235,6 @@ class SemanticSegmentationModel(DPPModel):
                 # is equal on all sides of image
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2
-                # pre-allocate output dimensions
-                total_outputs = np.empty([1, final_height, final_width])
-            else:
-                total_outputs = np.empty([1, self._image_height, self._image_width])
 
             num_batches = len(images) // self._batch_size
             if len(images) % self._batch_size != 0:
@@ -264,47 +260,31 @@ class SemanticSegmentationModel(DPPModel):
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
+            total_outputs = []
             if self._with_patching:
                 num_patch_rows = final_height // patch_height
                 num_patch_cols = final_width // patch_width
+                n_patches = num_patch_rows * num_patch_cols
                 for i in range(num_batches):
                     xx = self._session.run(x_pred)
 
-                    # generalized image stitching
-                    for img in np.array_split(xx, xx.shape[0]):  # for each img in current batch
-                        # we are going to build a list of rows of imgs called img_rows, where each element
-                        # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
-                        # iterate through img_rows concatenating the rows vertically (axis=0) to build
-                        # the full img
+                    for img_patches in np.array_split(xx, xx.shape[0] / n_patches):
+                        # Stitch individual rows together, than stitch the rows into a full image
+                        full_img = []
+                        for col_patches in np.array_split(img_patches, n_patches / num_patch_rows):
+                            row_patches = [col_patches[i] for i in range(num_patch_cols)]
+                            full_img.append(np.concatenate(row_patches, axis=1))
+                        full_img = np.concatenate(full_img, axis=0)
 
-                        img_rows = []
-                        # for each row
-                        for j in range(num_patch_rows):
-                            curr_row = img[j*num_patch_cols]  # start new row with first img
-                            # iterate through the rest of the row, concatenating img's together
-                            for k in range(1, num_patch_cols):
-                                # horizontal cat
-                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
-                            img_rows.append(curr_row)  # add row of img's to the list
-
-                        # start full img with the first full row of imgs
-                        full_img = img_rows[0]
-                        # iterate through rest of rows, concatenating rows together
-                        for row_num in range(1, num_patch_rows):
-                            # vertical cat
-                            full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
-
-                        # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                        full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
-                        total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
+                        # Keep the final image, but with an extra dimension to concatenate the images together
+                        total_outputs.append(np.expand_dims(full_img, axis=0))
             else:
-                for i in range(int(num_batches)):
+                for i in range(num_batches):
                     xx = self._session.run(x_pred)
-                    for img in np.array_split(xx, xx.shape[0]):
-                        total_outputs = np.append(total_outputs, img, axis=0)
+                    for img_patches in np.array_split(xx, xx.shape[0]):
+                        total_outputs.append(img_patches)
 
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
+            total_outputs = np.concatenate(total_outputs, axis=0)
 
         return total_outputs
 

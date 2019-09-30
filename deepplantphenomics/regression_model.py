@@ -275,8 +275,6 @@ class RegressionModel(DPPModel):
 
     def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
-            total_outputs = np.empty([1, self._num_regression_outputs])
-
             num_batches = len(images) // self._batch_size
             if len(images) % self._batch_size != 0:
                 num_batches += 1
@@ -291,13 +289,13 @@ class RegressionModel(DPPModel):
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
+            total_outputs = []
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
                 for img in np.array_split(xx, xx.shape[0]):
-                    total_outputs = np.append(total_outputs, img, axis=0)
+                    total_outputs.append(img)
 
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
+            total_outputs = np.concatenate(total_outputs, axis=0)
 
         return total_outputs
 
