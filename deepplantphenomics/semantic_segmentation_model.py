@@ -191,10 +191,8 @@ class SemanticSegmentationModel(DPPModel):
             for _ in tqdm(range(num_batches)):
                 r_losses = self._session.run(self._graph_ops['test_losses'])
                 all_losses.append(r_losses)
-                # all_losses = np.concatenate((all_losses, r_losses), axis=0)
 
             all_losses = np.concatenate(all_losses, axis=0)
-            # all_losses = np.delete(all_losses, 0)
 
             # For semantic segmentation problems we want relative and abs mean, std of L2 norms, plus a histogram of
             # errors
