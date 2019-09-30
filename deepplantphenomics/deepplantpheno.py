@@ -36,6 +36,7 @@ class DPPModel(ABC):
                                 definitions.AugmentationType.CROP,
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
+    _supports_standardization = True
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -2061,7 +2062,6 @@ class DPPModel(ABC):
                        val_images, val_labels, val_mf):
         """Takes training and testing images and labels, creates input queues internally to this instance"""
         with self._graph.as_default():
-
             # Get the number of training, testing, and validation samples
             self._parse_get_sample_counts(train_images, test_images, val_images)
 
@@ -2161,8 +2161,9 @@ class DPPModel(ABC):
                         num_parallel_calls=self._num_threads)
 
         # Mean-center all inputs
-        input_dataset = input_dataset.map(_with_labels(tf.image.per_image_standardization),
-                                          num_parallel_calls=self._num_threads)
+        if self._supports_standardization:
+            input_dataset = input_dataset.map(_with_labels(tf.image.per_image_standardization),
+                                              num_parallel_calls=self._num_threads)
 
         # Manually set the shape of the image tensors so it matches the shape of the images
         input_dataset = input_dataset.map(self._parse_force_set_shape, num_parallel_calls=self._num_threads)
@@ -2188,7 +2189,9 @@ class DPPModel(ABC):
                     num_parallel_calls=self._num_threads)
 
             # Mean-center all inputs
-            input_dataset = input_dataset.map(tf.image.per_image_standardization, num_parallel_calls=self._num_threads)
+            if self._supports_standardization:
+                input_dataset = input_dataset.map(tf.image.per_image_standardization,
+                                                  num_parallel_calls=self._num_threads)
 
             # Manually set the shape of the image tensors so it matches the shape of the images
             def force_set(x):
