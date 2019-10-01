@@ -4,7 +4,7 @@
 set_number_of_threads(1)
 ```
 
-Set the number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
+Set the number of threads for preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
 
@@ -149,12 +149,6 @@ set_original_image_dimensions(image_height, image_width)
 Specify the original size of the image, before resizing. This is only needed in special cases; for instance, you would use this if you are resizing input images but using image coordinate labels which reference the original size.
 
 ```
-add_preprocessor()
-```
-
-Add pre-processors. For more information see the documentation for pre-processors.
-
-```
 set_crop_or_pad_images(True)
 ```
 
@@ -165,12 +159,6 @@ set_resize_images(True)
 ```
 
 Up-sample or down-sample images to specified size.
-
-```
-set_processed_images_dir()
-```
-
-Set the location to save processed images when pre-processing is used.
 
 ## Data Augmentation Options
 

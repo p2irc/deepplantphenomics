@@ -60,7 +60,6 @@ class DPPModel(ABC):
         self._validation = True
         self._testing = True
         self._hyper_param_search = False
-        self._processed_images_dir = './DPP-Processed'
 
         # Input options
         self._total_classes = 0
@@ -164,13 +163,10 @@ class DPPModel(ABC):
         self._debug = debug
         self._load_from_saved = load_from_saved
         self._tb_dir = tensorboard_dir
-        self._queue_capacity = 50
         self._report_rate = report_rate
 
         # Multi-threading and GPU
         self._num_threads = 1
-        self._coord = None
-        self._threads = None
         self._use_gpus = False
         self._num_gpus = 1
         self._subbatch_size = self._batch_size
@@ -206,13 +202,8 @@ class DPPModel(ABC):
     def _reset_graph(self):
         self._graph = tf.Graph()
 
-    def _initialize_queue_runners(self):
-        self._log('Initializing queue runners...')
-        self._coord = tf.train.Coordinator()
-        self._threads = tf.train.start_queue_runners(sess=self._session, coord=self._coord)
-
     def set_number_of_threads(self, num_threads):
-        """Set number of threads for input queue runners and preprocessing tasks"""
+        """Set number of threads for preprocessing tasks"""
         if not isinstance(num_threads, int):
             raise TypeError("num_threads must be an int")
         if num_threads <= 0:
@@ -248,13 +239,6 @@ class DPPModel(ABC):
             raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
                                .format(num_gpus, self._batch_size))
 
-    def set_processed_images_dir(self, im_dir):
-        """Set the directory for storing processed images when pre-processing is used"""
-        if not isinstance(im_dir, str):
-            raise TypeError("im_dir must be a str")
-
-        self._processed_images_dir = im_dir
-
     def set_batch_size(self, size):
         """Set the batch size"""
         if not isinstance(size, int):
@@ -263,7 +247,6 @@ class DPPModel(ABC):
             raise ValueError("size must be positive")
 
         self._batch_size = size
-        self._queue_capacity = size * 5
 
         if size % self._num_gpus == 0:
             self._subbatch_size = size // self._num_gpus
@@ -784,7 +767,6 @@ class DPPModel(ABC):
             if self._load_from_saved:
                 self._has_trained = True
                 self.load_state()
-                # self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
                 self.shut_down()
             else:
@@ -793,7 +775,6 @@ class DPPModel(ABC):
 
                 self._log('Initializing parameters...')
                 self._session.run(tf.global_variables_initializer())
-                # self._initialize_queue_runners()
 
                 self._log('Beginning training...')
                 self._set_learning_rate()
@@ -921,11 +902,8 @@ class DPPModel(ABC):
         pass
 
     def shut_down(self):
-        """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
+        """End the current session. The model cannot be used anymore after this is done."""
         self._log('Shutdown requested, ending session...')
-
-        # self._coord.request_stop()
-        # self._coord.join(self._threads)
         self._session.close()
 
     def _get_weights_as_image(self, kernel, size=None):
@@ -1837,7 +1815,6 @@ class DPPModel(ABC):
         train_dir = os.path.join(dirname, 'train')
         test_dir = os.path.join(dirname, 'test')
         self._total_classes = 10
-        self._queue_capacity = 60000
 
         train_labels, train_images = loaders.read_csv_labels_and_ids(os.path.join(train_dir, 'train.txt'), 1, 0,
                                                                      character=' ')
@@ -1917,7 +1894,6 @@ class DPPModel(ABC):
         images = sorted_paths
 
         # prepare images for training (if there are any labels loaded)
-
         if self._all_labels is not None:
             labels = self._all_labels
 
@@ -2060,7 +2036,7 @@ class DPPModel(ABC):
     def _parse_dataset(self, train_images, train_labels, train_mf,
                        test_images, test_labels, test_mf,
                        val_images, val_labels, val_mf):
-        """Takes training and testing images and labels, creates input queues internally to this instance"""
+        """Parses training & testing images and labels, creating input pipelines internal to this instance"""
         with self._graph.as_default():
             # Get the number of training, testing, and validation samples
             self._parse_get_sample_counts(train_images, test_images, val_images)

@@ -68,7 +68,7 @@ self.model = dpp.RegressionModel(debug=False, load_from_saved=self.__dir_name)
 
 The parameter `debug=False` suppresses any console output when we use this class. The parameter `load_from_saved=dir_name` loads all of the parameters from the trained network, so the model is exactly as it was when we finished training.
 
-Also note that `self.model.set_number_of_threads(1)` restricts the number of queue runners to only one thread - this is important so that the output of the network will be in the exact same order as the images we feed in. We also must specify `self.model.set_augmentation_crop(True)` so that inputs are cropped to center, as this is the input size our trained network expects due to our use of the crop augmentation during training.
+Also note that `self.model.set_number_of_threads(1)` restricts the preprocessing to only one thread - this is important so that the output of the network will be in the exact same order as the images we feed in. We also must specify `self.model.set_augmentation_crop(True)` so that inputs are cropped to center, as this is the input size our trained network expects due to our use of the crop augmentation during training.
 
 After that, we simply have one function called `forward_pass()` for performing inference, and one function called `shut_down()` to destroy the network and release memory when we are done.
 

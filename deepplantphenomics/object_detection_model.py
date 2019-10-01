@@ -1276,9 +1276,9 @@ class ObjectDetectionModel(DPPModel):
             vec_size = (1 + self._NUM_CLASSES + 4)
             curr_img_labels[int(grid_loc)*vec_size:(int(grid_loc)+1)*vec_size] = \
                 [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
-            # using extend because I had trouble with converting a list of lists to a tensor using our string
-            # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-            # train shuffle batch has been the current hacky fix
+            # using extend because I had trouble with converting a list of lists to a tensor, so making it one list
+            # of all the numbers and then reshaping later when we pull y off the train shuffle batch has been the
+            # current hacky fix
             labels_with_one_hot.append(curr_img_labels)
 
         self._all_labels = labels_with_one_hot
@@ -1338,9 +1338,9 @@ class ObjectDetectionModel(DPPModel):
 
                 vec_size = (1 + self._NUM_CLASSES + 4)
                 curr_img_labels[int(grid_loc) * vec_size:(int(grid_loc) + 1) * vec_size] = curr_box
-                # using extend because I had trouble with converting a list of lists to a tensor using our string
-                # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-                # train shuffle batch has been the current hacky fix
+                # using extend because I had trouble with converting a list of lists to a tensor, so making it one list
+                # of all the numbers and then reshaping later when we pull y off the train shuffle batch has been the
+                # current hacky fix
             labels_with_one_hot.append(curr_img_labels)
 
         self._all_labels = labels_with_one_hot
