@@ -26,45 +26,36 @@ def test_set_number_of_threads(model):
         model.set_number_of_threads(-1)
 
 
-def test_set_use_gpus(model):
-    assert model._use_gpus is False
-    assert model._num_gpus == 1
-
-    with mock.patch('tensorflow.test.is_gpu_available') as mock_method:
-        mock_method.return_value = False
-        with pytest.raises(TypeError):
-            model.set_use_gpus('1')
-        with pytest.raises(RuntimeError):
-            model.set_use_gpus(True)
-
-        mock_method.return_value = True
-        model.set_use_gpus(True)
-        assert model._use_gpus is True
-
-        model._num_gpus = 2
-        model.set_use_gpus(False)
-        assert model._use_gpus is False
-        assert model._num_gpus == 1
-
-
 def test_set_number_of_gpus(model):
     assert model._num_gpus == 1
+    assert model._batch_size == 1
+    assert model._subbatch_size == 1
+    model._max_gpus = 2
 
-    with pytest.raises(RuntimeError):
-        model.set_number_of_gpus(1)
-
-    model._use_gpus = True
+    # Test sanity checks for type and value range
     with pytest.raises(ValueError):
         model.set_number_of_gpus(0)
     with pytest.raises(TypeError):
         model.set_number_of_gpus('2')
 
+    # Test subbatch sets and errors when enough GPUs are available
     with pytest.raises(RuntimeError):
-        model.set_number_of_gpus(2)
+        model.set_number_of_gpus(2)  # Can't split 1 item across 2 GPUs
     model._batch_size = 2
     model.set_number_of_gpus(2)
     assert model._num_gpus == 2
     assert model._subbatch_size == 1
+
+    # Test subbatch sets and errors when enough GPUs aren't available
+    model._max_gpus = 1
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 1
+    assert model._subbatch_size == 2
+
+    model._max_gpus = 0
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 1
+    assert model._subbatch_size == 2
 
 
 def test_set_processed_images_dir(model):
@@ -76,19 +67,21 @@ def test_set_batch_size(model):
     assert model._batch_size == 1
     assert model._subbatch_size == 1
 
+    # Test sanity checks for type and value range
     with pytest.raises(TypeError):
         model.set_batch_size(5.0)
     with pytest.raises(ValueError):
         model.set_batch_size(-1)
 
+    # Test normal batch size sets (i.e. with 1 GPU)
     model.set_batch_size(2)
     assert model._batch_size == 2
     assert model._subbatch_size == 2
 
-    model._use_gpus = True
+    # Test batch size sets with multiple GPUs and errors
     model._num_gpus = 2
     with pytest.raises(RuntimeError):
-        model.set_batch_size(3)
+        model.set_batch_size(3)  # Can't split 3 item across 2 GPUs
     model.set_batch_size(4)
     assert model._batch_size == 4
     assert model._subbatch_size == 2
@@ -421,6 +414,23 @@ def test_add_paral_conv_block(model):
     assert isinstance(model._last_layer(), dpp.layers.paralConvBlock)
 
 
+def test_add_skip_connection(model):
+    model.set_image_dimensions(50, 50, 16)
+    model.set_batch_size(1)
+
+    with pytest.raises(RuntimeError):
+        model.add_skip_connection(downsampled=False)
+    model.add_input_layer()
+
+    model.add_skip_connection(downsampled=False)
+    assert isinstance(model._last_layer(), dpp.layers.skipConnection)
+    assert model._last_layer().output_size == [1, 50, 50, 16]
+
+    model.add_skip_connection(downsampled=True)
+    assert isinstance(model._last_layer(), dpp.layers.skipConnection)
+    assert model._last_layer().output_size == [1, 25, 25, 16]
+
+
 def test_add_pooling_layer(model):
     with pytest.raises(RuntimeError):
         model.add_pooling_layer(1, 1, 'avg')
@@ -635,3 +645,24 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
 #     model.add_pooling_layer(kernel_size=3, stride_length=2)
 #     model.add_output_layer()
 #     model.begin_training()
+
+def test_forward_pass_residual():
+    model = dpp.SemanticSegmentationModel()
+    model.set_image_dimensions(50, 50, 1)
+    model.set_batch_size(1)
+
+    # Set up a small deterministic network with residuals
+    model.add_input_layer()
+    model.add_skip_connection(downsampled=False)
+    model.add_skip_connection(downsampled=False)
+
+    # Create an input image and its expected output
+    test_im = np.full([50, 50, 1], 0.5, dtype=np.float32)
+    expected_im = np.full([50, 50, 1], 1.0, dtype=np.float32)
+
+    # Add the layers and get the forward pass
+    model._add_layers_to_graph()
+    out_im = model.forward_pass(test_im)
+
+    assert out_im.size == expected_im.size
+    assert np.all(out_im == expected_im)

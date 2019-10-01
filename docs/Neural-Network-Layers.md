@@ -84,13 +84,25 @@ model.add_local_response_normalization_layer()
 
 ## Batch Normalization Layer
 
-This layer applies batch normalization (Ioffe & Szegedy, 2015) to the activations of the previous layer. Batch norm layers can be used after convolutional, pooling, or fully connected layers.
+This layer applies batch normalization (Ioffe & Szegedy, 2015) to the activations of the previous layer. This is an alternative to the pre-activation batch normalization offered by the convolutional layer.
 
-Using batch normalization may be detrimental to some regression problems. You should always try your network without batch norm before adding it in and re-tuning your hyperparameters.
+Note that using batch normalization may be detrimental to some regression problems. You should always try your network without batch norm before adding it in and re-tuning your hyperparameters.
 
 ```
 model.add_batch_norm_layer()
 ```
+
+## Residual/Skip Connection
+
+This layer creates a residual connection that skips over blocks of layers in the network (He, K., Zhang, X., Ren, S., & Sun, J. (2016). *Deep residual learning for image recognition*. In Proceedings of the IEEE conference on computer vision and pattern recognition).
+
+The first skip connection layer will have no effect. The second skip connection adds the output from the previous layer with the output at the location of the first skip connection. The third skip connection does the same with the output at the location of the second skip connection, and so on.
+
+```
+model.add_skip_connection(downsampled=False)
+```
+
+The `downsampled` flag is used when the passed values from a previous skip connection form a larger volume than the volume it needs to be added to. When `downsampled` is `True`, a 1x1 linear filter with a stride of 2 is used to spatially downsample the network by half, while doubling the depth dimension.
 
 ## Output Layer
 

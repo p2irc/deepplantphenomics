@@ -269,6 +269,19 @@ class dropoutLayer(object):
             return tf.nn.dropout(x, self.p)
 
 
+class globalAveragePoolingLayer(object):
+    """Layer which performs global average pooling"""
+    def __init__(self, name, input_size):
+        self.name = name
+        self.input_size = input_size
+        self.output_size = copy.deepcopy(input_size)
+        self.output_size[1] = 1
+        self.output_size[2] = 1
+
+    def forward_pass(self, x, deterministic):
+        return tf.reduce_mean(x, axis=[1, 2])
+
+
 class moderationLayer(object):
     """Layer for fusing moderating data into the input vector"""
     def __init__(self, input_size, feature_size, reshape, batch_size):
@@ -374,3 +387,33 @@ class paralConvBlock(object):
         output = tf.concat([conv1_out, conv2_out], axis=3)
 
         return output
+
+
+class skipConnection(object):
+    """Makes a skip connection. Addition ops are handled by the graph-level forward_pass function."""
+    def __init__(self, name, input_size, downsampled):
+        self.name = name
+        self.input_size = input_size
+
+        if downsampled:
+            filters = self.input_size[-1]
+            self.layer = convLayer(name=self.name + '_downsample',
+                                   input_size=self.input_size,
+                                   filter_dimension=[1, 1, filters / 2, filters],
+                                   stride_length=2,
+                                   activation_function=None,
+                                   initializer='xavier')
+            self.output_size = self.layer.output_size
+        else:
+            self.layer = None
+            self.output_size = input_size
+
+    def add_to_graph(self):
+        if self.layer is not None:
+            self.layer.add_to_graph()
+
+    def forward_pass(self, x, deterministic):
+        if self.layer is not None:
+            return self.layer.forward_pass(x, deterministic)
+        else:
+            return x

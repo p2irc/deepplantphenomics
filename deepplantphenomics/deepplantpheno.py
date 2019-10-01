@@ -1,6 +1,7 @@
 from . import layers, loaders, definitions
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.client import device_lib
 import os
 import json
 import datetime
@@ -30,7 +31,8 @@ class DPPModel(ABC):
     _supported_pooling_types = ['max', 'avg']
     _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
                            'yolo']
-    _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large', "countception"]
+    _supported_predefined_models = ['vgg-16', 'alexnet', 'resnet-18', 'yolov2', 'xsmall', 'small', 'medium', 'large',
+                                    "countception"]
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
@@ -144,6 +146,7 @@ class DPPModel(ABC):
         self._num_layers_dropout = 0
         self._num_layers_batchnorm = 0
         self._num_blocks_paral_conv = 0
+        self._num_skip_connections = 0
 
         # Network options
         self._batch_size = 1
@@ -167,14 +170,19 @@ class DPPModel(ABC):
 
         # Multi-threading and GPU
         self._num_threads = 1
-        self._use_gpus = False
         self._num_gpus = 1
+        self._max_gpus = 1  # Set this properly below
         self._subbatch_size = self._batch_size
 
         # Now do actual initialization stuff
         # Add the run level to the tensorboard path
         if self._tb_dir is not None:
             self._tb_dir = "{0}/{1}".format(self._tb_dir, datetime.datetime.now().strftime("%d%B%Y%I:%M%p"))
+
+        # Determine the maximum number of GPUs we can use (using code from https://stackoverflow.com/a/38580201 to find
+        # out how many we can actually reach). If this ends up as 0, then other code knows to construct CPU-only graphs.
+        gpu_list = [x.name for x in device_lib.list_local_devices() if x.device_type == 'GPU']
+        self._max_gpus = len(gpu_list)
 
         if initialize:
             self._log('TensorFlow loaded...')
@@ -211,33 +219,25 @@ class DPPModel(ABC):
 
         self._num_threads = num_threads
 
-    def set_use_gpus(self, use_gpus):
-        """Set whether to use GPUs for graph evaluation or use only the CPU"""
-        if not isinstance(use_gpus, bool):
-            raise TypeError("use_gpus must be a bool")
-        if use_gpus and not tf.test.is_gpu_available():
-            raise RuntimeError("No GPUs are available for use. Make sure there are available GPUs and that your "
-                               "Tensorflow package supports them (i.e. install tensorflow-gpu).")
-
-        self._use_gpus = use_gpus
-        if not use_gpus:
-            self._num_gpus = 1
-
     def set_number_of_gpus(self, num_gpus):
-        """Set the number of GPUs to use for graph evaluation"""
+        """Set the number of GPUs to use for graph evaluation. Setting this higher than the number of available GPUs
+        has the same effect as setting this to exactly that amount (i.e. setting this to 4 with 2 GPUs available will
+        still only use 2 GPUs)."""
         if not isinstance(num_gpus, int):
             raise TypeError("num_gpus must be an int")
         if num_gpus <= 0:
             raise ValueError("num_gpus must be positive")
-        if not self._use_gpus:
-            raise RuntimeError("GPUs must be in use before setting the number to use. Use set_use_gpus() first.")
 
-        self._num_gpus = num_gpus
-        if self._batch_size % num_gpus == 0:
-            self._subbatch_size = self._batch_size // num_gpus
+        if self._max_gpus != 0:
+            self._num_gpus = num_gpus if (num_gpus <= self._max_gpus) else self._max_gpus
+        else:
+            self._num_gpus = 1  # So batch-setting code doesn't gobble a goose
+
+        if self._batch_size % self._num_gpus == 0:
+            self._subbatch_size = self._batch_size // self._num_gpus
         else:
             raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
-                               .format(num_gpus, self._batch_size))
+                               .format(self._num_gpus, self._batch_size))
 
     def set_batch_size(self, size):
         """Set the batch size"""
@@ -494,7 +494,7 @@ class DPPModel(ABC):
 
     def _get_device_list(self):
         """Returns the list of CPU and/or GPU devices to construct and evaluate graphs for"""
-        if not self._use_gpus:
+        if not tf.test.is_gpu_available():
             return ['/device:cpu:0']
         else:
             return ['/device:gpu:' + str(x) for x in range(self._num_gpus)]
@@ -506,10 +506,10 @@ class DPPModel(ABC):
         # Adding layers to the graph mostly involves setting up the required variables. Those variables should be on
         # the CPU if we are using multiple GPUs and need to share them across multiple graph towers. Otherwise, they
         # can go on whatever device Tensorflow deems sensible.
-        if self._use_gpus and self._num_gpus > 1:
+        if tf.test.is_gpu_available() and self._num_gpus > 1:
             d = '/device:cpu:0'
         else:
-            d = None
+            d = None  # Effectively /device:cpu:0 for CPU-only or /device:gpu:0 for 1 GPU
 
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
@@ -1014,9 +1014,19 @@ class DPPModel(ABC):
         :param moderation_features: ???
         :return: output tensor where the first dimension is batch
         """
+        residual = None
+
         with self._graph.as_default():
             for layer in self._layers:
-                if isinstance(layer, layers.moderationLayer) and moderation_features is not None:
+                if isinstance(layer, layers.skipConnection):
+                    # The first skip only sends its residual value down to later layers. Further skips have to receive
+                    # that, possibly downsample it, and add it to the latest output before setting the next residual.
+                    if residual is None:
+                        residual = x
+                    else:
+                        x = x + layer.forward_pass(residual, False)
+                        residual = x
+                elif isinstance(layer, layers.moderationLayer) and moderation_features is not None:
                     x = layer.forward_pass(x, deterministic, moderation_features)
                 else:
                     x = layer.forward_pass(x, deterministic)
@@ -1391,6 +1401,36 @@ class DPPModel(ABC):
 
         self._layers.append(block)
 
+    def add_skip_connection(self, downsampled=False):
+        """Adds a residual connection between this point and the last residual connection"""
+        if len(self._layers) < 1:
+            raise RuntimeError("A skip connection cannot be the first layer added to the model.")
+
+        self._num_skip_connections += 1
+        layer_name = 'skip%d' % self._num_skip_connections
+        self._log('Adding skip connection...')
+
+        layer = layers.skipConnection(layer_name, self._last_layer().output_size, downsampled)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
+
+    def add_global_average_pooling_layer(self):
+        """Adds a global average pooling layer"""
+        if len(self._layers) < 1:
+            raise RuntimeError("A GAP layer cannot be the first layer added to the model.")
+
+        self._num_skip_connections += 1
+        layer_name = 'GAP'
+        self._log('Adding global average pooling layer...')
+
+        layer = layers.globalAveragePoolingLayer(layer_name, self._last_layer().output_size)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
+
     @abstractmethod
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         """
@@ -1471,6 +1511,47 @@ class DPPModel(ABC):
 
             self.add_output_layer()
 
+        if model_name == 'resnet-18':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[7, 7, self._image_depth, 64], stride_length=2, activation_function='relu', batch_norm=True)
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=2, activation_function='relu', batch_norm=True)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=2, activation_function='relu', batch_norm=True)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=2, activation_function='relu', batch_norm=True)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=2, activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+
+            self.add_global_average_pooling_layer()
+
+            self.add_fully_connected_layer(output_size=1000, activation_function='relu')
+
+            self.add_output_layer()
+
         if model_name == 'xsmall':
             self.add_input_layer()
 
@@ -1492,19 +1573,16 @@ class DPPModel(ABC):
             self.add_input_layer()
 
             self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64],
-                                         stride_length=1, activation_function='relu')
+                                         stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
             self.add_fully_connected_layer(output_size=64, activation_function='relu')
 
@@ -1514,32 +1592,27 @@ class DPPModel(ABC):
             self.add_input_layer()
 
             self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64],
-                                         stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
+                                         stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
             self.add_fully_connected_layer(output_size=256, activation_function='relu')
 
@@ -1549,32 +1622,27 @@ class DPPModel(ABC):
             self.add_input_layer()
 
             self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64],
-                                         stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
+                                         stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
             self.add_fully_connected_layer(output_size=512, activation_function='relu')
             self.add_fully_connected_layer(output_size=384, activation_function='relu')
