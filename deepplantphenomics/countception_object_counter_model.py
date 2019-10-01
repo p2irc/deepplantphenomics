@@ -48,13 +48,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 if self._validation:
                     val_iter = self._batch_and_iterate(self._val_dataset)
 
-                # # Reshape input to the expected image dimensions
-                # x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                #
-                # # Split the current training batch into sub-batches if we are constructing more than 1 training tower
-                # x_sub_batches = tf.split(x, self._num_gpus, axis=0)
-                # y_sub_batches = tf.split(y, self._num_gpus, axis=0)
-
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
 
@@ -108,10 +101,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             self._graph_ops['accuracy'] = tf.reduce_sum(device_accuracies) / self._batch_size
 
             # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
-            # if self._testing:
-            #     x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            # if self._validation:
-            #     x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
             if self._testing:
                 x_test, self._graph_ops['y_test'] = test_iter.get_next()
 

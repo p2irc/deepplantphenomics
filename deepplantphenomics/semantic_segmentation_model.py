@@ -60,10 +60,6 @@ class SemanticSegmentationModel(DPPModel):
                     if self._validation:
                         val_mod_iter = self._batch_and_iterate(self._val_moderation_features)
 
-                # # Reshape input and labels to the expected image dimensions
-                # x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                # y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
-                #
                 # # If we are using patching, we extract a random patch from the image here
                 # if self._with_patching:
                 #     x, offsets = self._graph_extract_patch(x)
@@ -121,14 +117,6 @@ class SemanticSegmentationModel(DPPModel):
             self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
 
             # Calculate test  and validation accuracy (on a single device at Tensorflow's discretion)
-            # if self._testing:
-            #     x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            #     self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
-            #                                            shape=[-1, self._image_height, self._image_width, 1])
-            # if self._validation:
-            #     x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            #     self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
-            #                                           shape=[-1, self._image_height, self._image_width, 1])
             # # If using patching, we need to properly pull similar patches from the test and validation images (and
             # # labels)
             # if self._with_patching:
