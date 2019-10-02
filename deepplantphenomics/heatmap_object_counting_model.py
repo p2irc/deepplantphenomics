@@ -195,26 +195,26 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         else:
             return super()._parse_apply_preprocessing(images, labels)
 
-    def _parse_resize_images(self, images, labels):
+    def _parse_resize_images(self, images, labels, height, width):
         # See _parse_apply_preprocessing for an explanation of whats going on here
         if not self.__label_from_image_file:
             # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_resize_images(images, labels)
+            return super(SemanticSegmentationModel, self)._parse_resize_images(images, labels, height, width)
         else:
-            return super()._parse_resize_images(images, labels)
+            return super()._parse_resize_images(images, labels, height, width)
 
-    def _parse_crop_or_pad(self, images, labels):
+    def _parse_crop_or_pad(self, images, labels, height, width):
         # See _parse_apply_preprocessing for an explanation of whats going on here
         if not self.__label_from_image_file:
             # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_crop_or_pad(images, labels)
+            return super(SemanticSegmentationModel, self)._parse_crop_or_pad(images, labels, height, width)
         else:
-            return super()._parse_crop_or_pad(images, labels)
+            return super()._parse_crop_or_pad(images, labels, height, width)
 
-    def _parse_force_set_shape(self, images, labels):
+    def _parse_force_set_shape(self, images, labels, height, width, depth):
         # See _parse_apply_preprocessing for an explanation of whats going on here
         if not self.__label_from_image_file:
             # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_force_set_shape(images, labels)
+            return super(SemanticSegmentationModel, self)._parse_force_set_shape(images, labels, height, width, depth)
         else:
-            return super()._parse_force_set_shape(images, labels)
+            return super()._parse_force_set_shape(images, labels, height, width, depth)

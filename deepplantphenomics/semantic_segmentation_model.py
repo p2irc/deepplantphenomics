@@ -347,17 +347,17 @@ class SemanticSegmentationModel(DPPModel):
         labels = self._parse_read_images(labels, channels=1)
         return images, labels
 
-    def _parse_resize_images(self, images, labels):
-        images = tf.image.resize_images(images, [self._image_height, self._image_width])
-        labels = tf.image.resize_images(labels, [self._image_height, self._image_width])
+    def _parse_resize_images(self, images, labels, height, width):
+        images = tf.image.resize_images(images, [height, width])
+        labels = tf.image.resize_images(labels, [height, width])
         return images, labels
 
-    def _parse_crop_or_pad(self, images, labels):
-        images = tf.image.resize_image_with_crop_or_pad(images, self._image_height, self._image_width)
-        labels = tf.image.resize_image_with_crop_or_pad(labels, self._image_height, self._image_width)
+    def _parse_crop_or_pad(self, images, labels, height, width):
+        images = tf.image.resize_image_with_crop_or_pad(images, height, width)
+        labels = tf.image.resize_image_with_crop_or_pad(labels, height, width)
         return images, labels
 
-    def _parse_force_set_shape(self, images, labels):
-        images.set_shape([self._image_height, self._image_width, self._image_depth])
-        labels.set_shape([self._image_height, self._image_width, 1])
+    def _parse_force_set_shape(self, images, labels, height, width, depth):
+        images.set_shape([height, width, depth])
+        labels.set_shape([height, width, 1])
         return images, labels

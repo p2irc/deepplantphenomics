@@ -2187,6 +2187,11 @@ class DPPModel(ABC):
             if self._validation:
                 self._val_dataset = self._make_input_dataset(val_images, val_labels, False)
 
+            # Set the image size to cropped values if crop augmentation was used
+            if self._augmentation_crop:
+                self._image_height = int(self._image_height * self._crop_amount)
+                self._image_width = int(self._image_width * self._crop_amount)
+
     def _make_input_dataset(self, images, labels, train_set):
         """
         Create Tensorflow datasets and construct an input and augmentation pipeline given paired images and labels
@@ -2200,25 +2205,31 @@ class DPPModel(ABC):
             """Takes a function on images only and appends its labels to the output"""
             return lambda im, lab: (fn(im), lab)
 
+        data_height = self._image_height
+        data_width = self._image_width
+
         # Create the dataset and load in the images
         input_dataset = tf.data.Dataset.from_tensor_slices((images, labels))
         input_dataset = input_dataset.map(self._parse_apply_preprocessing, num_parallel_calls=self._num_threads)
         if self._resize_images:
-            input_dataset = input_dataset.map(self._parse_resize_images, num_parallel_calls=self._num_threads)
+            input_dataset = input_dataset.map(lambda x, y: self._parse_resize_images(x, y, data_height, data_width),
+                                              num_parallel_calls=self._num_threads)
 
         # Augmentations that we should do to every dataset (training, testing, and validation)
         if self._augmentation_crop:  # Apply random crops to images
+            data_height = int(data_height * self._crop_amount)
+            data_width = int(data_width * self._crop_amount)
             if train_set:
-                self._image_height = int(self._image_height * self._crop_amount)
-                self._image_width = int(self._image_width * self._crop_amount)
                 input_dataset = input_dataset.map(
-                    _with_labels(lambda x: tf.random_crop(x, [self._image_height, self._image_width, 3])),
+                    _with_labels(lambda x: tf.random_crop(x, [data_height, data_width, self._image_depth])),
                     num_parallel_calls=self._num_threads)
             else:
-                input_dataset = input_dataset.map(self._parse_crop_or_pad, num_parallel_calls=self._num_threads)
+                input_dataset = input_dataset.map(lambda x, y: self._parse_crop_or_pad(x, y, data_height, data_width),
+                                                  num_parallel_calls=self._num_threads)
 
         if self._crop_or_pad_images:  # Apply padding or cropping to deal with images of different sizes
-            input_dataset = input_dataset.map(self._parse_crop_or_pad, num_parallel_calls=self._num_threads)
+            input_dataset = input_dataset.map(lambda x, y: self._parse_crop_or_pad(x, y, data_height, data_width),
+                                              num_parallel_calls=self._num_threads)
 
         if train_set:
             # Augmentations that we should only do to the training dataset
@@ -2242,9 +2253,9 @@ class DPPModel(ABC):
                 input_dataset = input_dataset.map(_with_labels(self._parse_rotate),
                                                   num_parallel_calls=self._num_threads)
                 if self._rotate_crop_borders:
-                    crop_fraction = self._smallest_crop_fraction()
+                    crop_fraction = self._smallest_crop_fraction(data_height, data_width)
                     input_dataset = input_dataset.map(
-                        _with_labels(lambda x: self._parse_rotation_crop(x, crop_fraction)),
+                        _with_labels(lambda x: self._parse_rotation_crop(x, crop_fraction, data_height, data_width)),
                         num_parallel_calls=self._num_threads)
 
         # Mean-center all inputs
@@ -2253,7 +2264,9 @@ class DPPModel(ABC):
                                               num_parallel_calls=self._num_threads)
 
         # Manually set the shape of the image tensors so it matches the shape of the images
-        input_dataset = input_dataset.map(self._parse_force_set_shape, num_parallel_calls=self._num_threads)
+        input_dataset = input_dataset.map(
+            lambda x, y: self._parse_force_set_shape(x, y, data_height, data_width, self._image_depth),
+            num_parallel_calls=self._num_threads)
 
         return input_dataset
 
@@ -2266,9 +2279,9 @@ class DPPModel(ABC):
             input_dataset = tf.data.Dataset.from_tensor_slices(images)
             input_dataset = input_dataset.map(lambda x: self._parse_read_images(x, channels=self._image_depth),
                                               num_parallel_calls=self._num_threads)
-            input_dataset = input_dataset.map(lambda x:
-                                              tf.image.resize_images(x, [self._image_height, self._image_width]),
-                                              num_parallel_calls=self._num_threads)
+            input_dataset = input_dataset.map(
+                lambda x: tf.image.resize_images(x, [self._image_height, self._image_width]),
+                num_parallel_calls=self._num_threads)
 
             if self._augmentation_crop or self._crop_or_pad_images:
                 if self._augmentation_crop:
@@ -2330,7 +2343,7 @@ class DPPModel(ABC):
         """
         Applies input loading and preprocessing to images and labels from a dataset
         :param images: Image names to load and preprocess
-        :param labels: The accompanying labels; passed through unchanged
+        :param labels: The accompanying labels; normally passed through unchanged
         :return: The preprocessed versions of the images and the passed-through labels
         """
         images = self._parse_read_images(images, channels=self._image_depth)
@@ -2352,24 +2365,28 @@ class DPPModel(ABC):
         images = tf.image.convert_image_dtype(images, dtype=tf.float32)
         return images
 
-    def _parse_resize_images(self, images, labels):
+    def _parse_resize_images(self, images, labels, height, width):
         """
         Resize images to a consistent size during dataset parsing
         :param images: The images to resize
-        :param labels: The accompanying labels; passed through unchanged
+        :param labels: The accompanying labels; normally passed through unchanged
+        :param height: The new height for the images
+        :param width: The new width for the images
         :return: The resized images and passed through labels
         """
-        images = tf.image.resize_images(images, [self._image_height, self._image_width])
+        images = tf.image.resize_images(images, [height, width])
         return images, labels
 
-    def _parse_crop_or_pad(self, images, labels):
+    def _parse_crop_or_pad(self, images, labels, height, width):
         """
         Applies a crop/pad resizing to input images to standardize their size during dataset parsing
         :param images: The images to resize with crop/pad
-        :param labels: The accompanying labels; passed through unchanged
+        :param labels: The accompanying labels; normally passed through unchanged
+        :param height: The new height for the images
+        :param width: The new width for the images
         :return: The resized images
         """
-        images = tf.image.resize_image_with_crop_or_pad(images, self._image_height, self._image_width)
+        images = tf.image.resize_image_with_crop_or_pad(images, height, width)
         return images, labels
 
     def _parse_rotate(self, images):
@@ -2382,36 +2399,43 @@ class DPPModel(ABC):
         images = tf.contrib.image.rotate(images, angle, interpolation='BILINEAR')
         return images
 
-    def _parse_rotation_crop(self, images, crop_fraction):
+    def _parse_rotation_crop(self, images, crop_fraction, height, width):
         """
         Applies optional centre cropping for random rotation augmentation
         :param images: Rotated images to centre crop
         :param crop_fraction: The fraction of the image to keep with the crop
+        :param height: The original height to maintain after cropping the images
+        :param width: The original width to maintain after cropping the images
         :return: The centre cropped images
         """
         # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a consistent
         # scale across the images
         images = tf.image.central_crop(images, crop_fraction)
-        images = tf.image.resize_images(images, [self._image_height, self._image_width])
+        images = tf.image.resize_images(images, [height, width])
         return images
 
-    def _parse_force_set_shape(self, images, labels):
+    def _parse_force_set_shape(self, images, labels, height, width, depth):
         """
         Force set the shapes of image tensors, since we know what their sizes should be but Tensorflow can't properly
         infer them (unless image resizing occurs)
         :param images: The images to force-set shapes for
         :param labels: The accompanying labels; passed through unchanged
+        :param height: The height to force for the image tensors
+        :param width: The width to force for the image tensors
+        :param depth: The depth/channels to force for the image tensors
         :return: The shape-defined images and passed through labels
         """
-        images.set_shape([self._image_height, self._image_width, self._image_depth])
+        images.set_shape([height, width, depth])
         return images, labels
 
-    def _smallest_crop_fraction(self):
+    def _smallest_crop_fraction(self, height, width):
         """
         Determine the angle and crop fraction for rotated images that gives the maximum border-less crop area for a
         given angle but the smallest such area among all angles from 0-90 degrees. This is used during rotation
         augmentation to apply a consistent crop and maintain similar scale across all images. Using larger crop
         fractions based on the rotation angle would result in different scales.
+        :param height: The original height of the rotated image
+        :param width: The original width of the rotated image
         :return: The crop fraction that achieves the smallest area among border-less crops for rotated images
         """
         # Regardless of the aspect ratio, the smallest crop fraction always corresponds to the required crop for a 45
@@ -2419,11 +2443,11 @@ class DPPModel(ABC):
         angle = math.pi / 4
 
         # Determine which sides of the original image are the shorter and longer sides
-        width_is_longer = self._image_width >= self._image_height
+        width_is_longer = width >= height
         if width_is_longer:
-            (short_length, long_length) = (self._image_height, self._image_width)
+            (short_length, long_length) = (height, width)
         else:
-            (short_length, long_length) = (self._image_width, self._image_height)
+            (short_length, long_length) = (width, height)
 
         # Get the absolute sin and cos of the angle, since the quadrant doesn't affect us
         sin_a = abs(math.sin(angle))
@@ -2440,4 +2464,4 @@ class DPPModel(ABC):
             (crop_width, crop_height) = (x / cos_a, x / sin_a)
 
         # Use the crop width and height to calculate the required crop ratio
-        return (crop_width * crop_height) / (self._image_width * self._image_height)
+        return (crop_width * crop_height) / (width * height)
