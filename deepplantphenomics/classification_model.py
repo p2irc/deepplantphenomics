@@ -46,35 +46,27 @@ class ClassificationModel(DPPModel):
             self._log('Assembling graph...')
 
             self._log('Graph: Parsing dataset...')
-            # Only do preprocessing on the CPU to limit data transfer between devices
-            with tf.device("/device:cpu:0"):
+            with tf.device("/device:cpu:0"):  # Only do preprocessing on the CPU to limit data transfer between devices
+                # Generate training, testing, and validation datasets
                 self._graph_parse_data()
 
-                # Define batches
+                # Batch the datasets and create iterators for them
+                train_iter = self._batch_and_iterate(self._train_dataset, shuffle=True)
+                if self._testing:
+                    test_iter = self._batch_and_iterate(self._test_dataset)
+                if self._validation:
+                    val_iter = self._batch_and_iterate(self._val_dataset)
+
                 if self._has_moderation:
-                    x, y, mod_w = tf.train.shuffle_batch(
-                        [self._train_images, self._train_labels, self._train_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity,
-                        min_after_dequeue=self._batch_size)
-                else:
-                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                                  batch_size=self._batch_size,
-                                                  num_threads=self._num_threads,
-                                                  capacity=self._queue_capacity,
-                                                  min_after_dequeue=self._batch_size)
+                    train_mod_iter = self._batch_and_iterate(self._train_moderation_features)
+                    if self._testing:
+                        test_mod_iter = self._batch_and_iterate(self._test_moderation_features)
+                    if self._validation:
+                        val_mod_iter = self._batch_and_iterate(self._val_moderation_features)
 
-                # Reshape input to the expected image dimensions
-                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-
-                # If we are using patching, we extract a random patch from the image here
-                if self._with_patching:
-                    x, offsets = self._graph_extract_patch(x)
-
-                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
-                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
-                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+                # # If we are using patching, we extract a random patch from the image here
+                # if self._with_patching:
+                #     x, offsets = self._graph_extract_patch(x)
 
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
@@ -90,11 +82,14 @@ class ClassificationModel(DPPModel):
             device_variables = []
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    x, y = train_iter.get_next()
+
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
+                        mod_w = train_mod_iter.get_next()
+                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
+                        xx = self.forward_pass(x, deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -107,7 +102,7 @@ class ClassificationModel(DPPModel):
 
                     # Define the cost function, then get the cost for this device's sub-batch and any parts of the cost
                     # needed to later get the overall batch's cost
-                    yy = tf.argmax(y_sub_batches[n], 1)
+                    yy = tf.argmax(y, 1)
 
                     if self._loss_fn == 'softmax cross entropy':
                         sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=yy)
@@ -136,70 +131,40 @@ class ClassificationModel(DPPModel):
             self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
             self._graph_ops['accuracy'] = tf.reduce_sum(device_accuracies) / self._batch_size
 
-            # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
-            if self._has_moderation:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
-                        [self._test_images, self._test_labels, self._test_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
-                        [self._val_images, self._val_labels, self._val_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-            else:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
-                                                                       batch_size=self._batch_size,
-                                                                       num_threads=self._num_threads,
-                                                                       capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
-                                                                     batch_size=self._batch_size,
-                                                                     num_threads=self._num_threads,
-                                                                     capacity=self._queue_capacity)
+            # # If using patching, we need to properly pull similar patches from the test and validation images
+            # if self._with_patching:
+            #     if self._testing:
+            #         x_test, _ = self._graph_extract_patch(x_test, offsets)
+            #     if self._validation:
+            #         x_val, _ = self._graph_extract_patch(x_val, offsets)
+
             if self._testing:
-                x_test = tf.reshape(x_test,
-                                    shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                x_val = tf.reshape(x_val,
-                                   shape=[-1, self._image_height, self._image_width, self._image_depth])
+                x_test, self._graph_ops['y_test'] = test_iter.get_next()
 
-            # If using patching, we need to properly pull similar patches from the test and validation images
-            if self._with_patching:
-                if self._testing:
-                    x_test, _ = self._graph_extract_patch(x_test, offsets)
-                if self._validation:
-                    x_val, _ = self._graph_extract_patch(x_val, offsets)
-
-            # Run the testing and validation, whose graph should only be on 1 device
-            if self._has_moderation:
-                if self._testing:
+                if self._has_moderation:
+                    mod_w_test = test_mod_iter.get_next()
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
                                                                             moderation_features=mod_w_test)
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
-                                                                           moderation_features=mod_w_val)
-            else:
-                if self._testing:
+                else:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-            # Compute the loss and accuracy for testing and validation
-            if self._testing:
                 test_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_test_predicted']), 1)
-                test_correct_predictions = tf.equal(test_class_predictions,
-                                                    tf.argmax(self._graph_ops['y_test'], 1))
+                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self._graph_ops['y_test'], 1))
                 self._graph_ops['test_losses'] = test_correct_predictions
                 self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+
             if self._validation:
+                x_val, self._graph_ops['y_val'] = val_iter.get_next()
+
+                if self._has_moderation:
+                    mod_w_val = val_mod_iter.get_next()
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                           moderation_features=mod_w_val)
+                else:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
                 self.__val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
-                val_correct_predictions = tf.equal(self.__val_class_predictions,
-                                                   tf.argmax(self._graph_ops['y_val'], 1))
+                val_correct_predictions = tf.equal(self.__val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
                 self._graph_ops['val_losses'] = val_correct_predictions
                 self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
 
@@ -269,42 +234,29 @@ class ClassificationModel(DPPModel):
             self._log('Average test accuracy: {:.5f}'.format(mean))
             return 1.0 - mean.astype(np.float32)
 
-    def forward_pass_with_file_inputs(self, x):
+    def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
-            total_outputs = np.empty([1, self._last_layer().output_size])
-
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
-
-            if remainder != 0:
+            num_batches = len(images) // self._batch_size
+            if len(images) % self._batch_size != 0:
                 num_batches += 1
-                remainder = self._batch_size - remainder
 
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = x
             self._parse_images(images)
-
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            im_data = self._all_images.batch(self._batch_size).prefetch(1)
+            x_test = im_data.make_one_shot_iterator().get_next()
 
             if self._load_from_saved:
                 self.load_state()
-            self._initialize_queue_runners()
+
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
+            total_outputs = []
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
-                for img in np.array_split(xx, self._batch_size):
-                    total_outputs = np.append(total_outputs, img, axis=0)
+                for img in np.array_split(xx, xx.shape[0]):
+                    total_outputs.append(img)
 
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
-
-            # delete any outputs which are overruns from the last batch
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
+            total_outputs = np.concatenate(total_outputs, axis=0)
 
         return total_outputs
 

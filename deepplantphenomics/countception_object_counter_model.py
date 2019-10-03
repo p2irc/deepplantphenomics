@@ -7,7 +7,6 @@ import os
 import warnings
 from tqdm import tqdm
 import pickle
-from PIL import Image
 
 
 class CountCeptionModel(deepplantpheno.DPPModel):
@@ -15,6 +14,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
     _loss_fn = 'l1'
     _supported_loss_fns = ['l1']
     _supported_augmentations = []
+    _supports_standardization = False
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -38,22 +38,15 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             self._log('Assembling graph...')
 
             self._log('Graph: Parsing dataset...')
-            # Only do preprocessing on the CPU to limit data transfer between devices
-            with tf.device('/device:cpu:0'):
+            with tf.device('/device:cpu:0'):  # Only do preprocessing on the CPU to limit data transfer between devices
                 self._graph_parse_data()
 
-                x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                              batch_size=self._batch_size,
-                                              num_threads=self._num_threads,
-                                              capacity=self._queue_capacity,
-                                              min_after_dequeue=self._batch_size)
-
-                # Reshape input to the expected image dimensions
-                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-
-                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
-                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
-                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+                # Batch the datasets and create iterators for them
+                train_iter = self._batch_and_iterate(self._train_dataset, shuffle=True)
+                if self._testing:
+                    test_iter = self._batch_and_iterate(self._test_dataset)
+                if self._validation:
+                    val_iter = self._batch_and_iterate(self._val_dataset)
 
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
@@ -69,8 +62,10 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             device_variables = []
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    x, y = train_iter.get_next()
+
                     # Run the network operations
-                    xx = self.forward_pass(x_sub_batches[n], deterministic=False)
+                    xx = self.forward_pass(x, deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -83,7 +78,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
                     # Define cost function
                     if self._loss_fn == 'l1':
-                        val_diff = tf.abs(tf.subtract(xx, y_sub_batches[n]))
+                        val_diff = tf.abs(xx - y)
                         gt = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
                         pr = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
                         acc_diff = tf.abs(gt - pr)
@@ -107,38 +102,27 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
             # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
             if self._testing:
-                x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
-                                                                   batch_size=self._batch_size,
-                                                                   num_threads=self._num_threads,
-                                                                   capacity=self._queue_capacity)
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-            if self._validation:
-                x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
-                                                                 batch_size=self._batch_size,
-                                                                 num_threads=self._num_threads,
-                                                                 capacity=self._queue_capacity)
-                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
+                x_test, self._graph_ops['y_test'] = test_iter.get_next()
 
-            # Run the testing and validation, whose graph should only be on 1 device
-            if self._testing:
                 self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
-            if self._validation:
-                self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-            # Compute the loss and accuracy for testing and validation
-            if self._testing:
                 if self._loss_fn == 'l1':
-                    self._graph_ops['test_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
-                        self._graph_ops['y_test'], self._graph_ops['x_test_predicted'])))
+                    self._graph_ops['test_losses'] = tf.reduce_mean(tf.abs(
+                        self._graph_ops['y_test'] - self._graph_ops['x_test_predicted']))
                     gt_test = tf.reduce_sum(self._graph_ops['y_test'], axis=[1, 2, 3]) / (32 ** 2.0)
                     pr_test = tf.reduce_sum(self._graph_ops['x_test_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
                     self._graph_ops['gt_test'] = gt_test
                     self._graph_ops['pr_test'] = pr_test
                     self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.abs(gt_test - pr_test))
+
             if self._validation:
+                x_val, self._graph_ops['y_val'] = val_iter.get_next()
+
+                self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+
                 if self._loss_fn == 'l1':
-                    self._graph_ops['val_losses'] = tf.reduce_mean(tf.abs(tf.subtract(
-                        self._graph_ops['y_val'], self._graph_ops['x_val_predicted'])))
+                    self._graph_ops['val_losses'] = tf.reduce_mean(tf.abs(
+                        self._graph_ops['y_val'] - self._graph_ops['x_val_predicted']))
                     gt_val = tf.reduce_sum(self._graph_ops['y_val'], axis=[1, 2, 3]) / (32 ** 2.0)
                     pr_val = tf.reduce_sum(self._graph_ops['x_val_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
                     self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
@@ -225,21 +209,14 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
     def forward_pass_with_file_inputs(self, x):
         with self._graph.as_default():
-
             self._parse_images(x)
 
-            dataset_batch = tf.data.Dataset.from_tensor_slices(self._all_images) \
-                .batch(self._batch_size, drop_remainder=True) \
-                .prefetch(self._batch_size * 2)
-
+            dataset_batch = self._all_images.batch(self._batch_size).prefetch(self._batch_size * 2)
             iterator = dataset_batch.make_one_shot_iterator()
             image_data = iterator.get_next()
 
-            if self._load_from_saved is not False:
+            if self._load_from_saved:
                 self.load_state()
-
-            # queue is not used, but this is still called to keep compatible with the shut_down() function
-            self._initialize_queue_runners()
 
             # Run model on them
             x_pred = self.forward_pass(image_data, deterministic=True)
@@ -250,7 +227,6 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                     x_pred_value = self._session.run(x_pred)
                     for pr in x_pred_value:
                         total_outputs.append(np.squeeze(pr))
-
             except tf.errors.OutOfRangeError:
                 pass
 
@@ -265,78 +241,12 @@ class CountCeptionModel(deepplantpheno.DPPModel):
         return interpreted_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
-        # There is no need to do this in the countception model
+        # There is no need to do this in the Countception model
         pass
 
-    def _parse_images(self, images):
-        """
-        Parse and put input images into self._all_images.
-        This is usually called in forward_pass_with_file_inputs(), when a pre-trained network is used for prediction.
-        """
-        image_data_list = []
-        for img in images:
-            image_data_raw = np.array(Image.open(img).getdata())
-            image_data = image_data_raw.reshape((self._image_height, self._image_width, self._image_depth))
-            image_data_list.append(image_data)
-
-        self._all_images = np.asarray(image_data_list).astype(np.float32)
-
-    def _parse_dataset(self, train_images, train_labels, train_mf,
-                       test_images, test_labels, test_mf,
-                       val_images, val_labels, val_mf):
-        # Countception uses arrays from pickle files for its image and label inputs, so enough differences exist to
-        # override this whole function
-        with self._graph.as_default():
-            # Get the number of samples the normal way right off the bat, since other methods of getting the counts
-            # depend on Tensors
-            self._total_training_samples = int(self._total_raw_samples)
-            if self._testing:
-                self._total_testing_samples = int(self._total_raw_samples * self._test_split)
-                self._total_training_samples = self._total_training_samples - self._total_testing_samples
-            if self._validation:
-                self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
-                self._total_training_samples = self._total_training_samples - self._total_validation_samples
-
-            # Logging verbosity
-            self._log('Total training samples is {0}'.format(self._total_training_samples))
-            self._log('Total validation samples is {0}'.format(self._total_validation_samples))
-            self._log('Total testing samples is {0}'.format(self._total_testing_samples))
-
-            # Calculate number of batches to run
-            batches_per_epoch = self._total_training_samples / float(self._batch_size)
-            self._maximum_training_batches = int(self._maximum_training_batches * batches_per_epoch)
-
-            if self._batch_size > self._total_training_samples:
-                self._log('Less than one batch in training set, exiting now')
-                exit()
-            self._log('Batches per epoch: {:f}'.format(batches_per_epoch))
-            self._log('Running to {0} batches'.format(self._maximum_training_batches))
-
-            # Create input queues
-            train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
-            if self._testing:
-                test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
-            if self._validation:
-                val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
-
-            # Apply pre-processing for training and testing images. Images need just a dtype conversion and labels need
-            # nothing whatsoever
-            self._train_images = tf.image.convert_image_dtype(train_input_queue[0], dtype=tf.float32)
-            if self._testing:
-                self._test_images = tf.image.convert_image_dtype(test_input_queue[0], dtype=tf.float32)
-            if self._validation:
-                self._val_images = tf.image.convert_image_dtype(val_input_queue[0], dtype=tf.float32)
-
-            self._train_labels = train_input_queue[1]
-            if self._testing:
-                self._test_labels = test_input_queue[1]
-            if self._validation:
-                self._val_labels = val_input_queue[1]
-
-            # Image standardization doesn't apply, so we skip it
-
-            # Manually set the shape of the image tensors so it matches the shape of the images
-            self._parse_force_set_shape()
+    def _parse_read_images(self, images, channels=1):
+        images = tf.image.convert_image_dtype(images, dtype=tf.float32)
+        return images
 
     def load_countception_dataset_from_pkl_file(self, pkl_file_name):
         """

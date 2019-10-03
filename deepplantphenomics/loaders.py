@@ -77,9 +77,9 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         train_labels, val_labels = tf.dynamic_partition(labels, mask, 2)
         test_images, test_labels = None, None
     else:
-        # must be just training, still need queues for rest of dpp code to load/interact with
-        # dynamic_partition returns a list, which is fine in the above cases but in the following case it returns
-        # a list of length 1, hence we index into it with [0] to get what we want
+        # We are just training, but we still need partitions for rest of the code to interact with.
+        # dynamic_partition returns a list, which is fine, but now it returns a list of length 1, so we index into it
+        # with [0] to get what we want.
         train_images = tf.dynamic_partition(images, mask, 1)[0]
         train_labels = tf.dynamic_partition(labels, mask, 1)[0]
         test_images, test_labels = None, None
@@ -93,14 +93,10 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
     return train_images, train_labels, train_mf, test_images, test_labels, test_mf, val_images, val_labels, val_mf
 
 
-def label_string_to_tensor(x, batch_size, num_outputs=None):
-    sparse = tf.string_split(x, delimiter=' ')
+def label_string_to_tensor(x, batch_size, num_outputs=-1):
+    sparse = tf.string_split(x, sep=' ')
     values = tf.string_to_number(sparse.values)
-    if num_outputs is None:
-        dense = tf.reshape(values, [batch_size, -1])
-    else:
-        dense = tf.reshape(values, (batch_size, num_outputs))
-
+    dense = tf.reshape(values, [batch_size, num_outputs])
     return dense
 
 

@@ -43,36 +43,26 @@ class SemanticSegmentationModel(DPPModel):
             self._log('Assembling graph...')
 
             self._log('Graph: Parsing dataset...')
-            # Only do preprocessing on the CPU to limit data transfer between devices
-            with tf.device('/device:cpu:0'):
+            with tf.device('/device:cpu:0'):  # Only do preprocessing on the CPU to limit data transfer between devices
                 self._graph_parse_data()
 
-                # Define batches
+                # Batch the datasets and create iterators for them
+                train_iter = self._batch_and_iterate(self._train_dataset, shuffle=True)
+                if self._testing:
+                    test_iter = self._batch_and_iterate(self._test_dataset)
+                if self._validation:
+                    val_iter = self._batch_and_iterate(self._val_dataset)
+
                 if self._has_moderation:
-                    x, y, mod_w = tf.train.shuffle_batch(
-                        [self._train_images, self._train_labels, self._train_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity,
-                        min_after_dequeue=self._batch_size)
-                else:
-                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                                  batch_size=self._batch_size,
-                                                  num_threads=self._num_threads,
-                                                  capacity=self._queue_capacity,
-                                                  min_after_dequeue=self._batch_size)
+                    train_mod_iter = self._batch_and_iterate(self._train_moderation_features)
+                    if self._testing:
+                        test_mod_iter = self._batch_and_iterate(self._test_moderation_features)
+                    if self._validation:
+                        val_mod_iter = self._batch_and_iterate(self._val_moderation_features)
 
-                # Reshape input and labels to the expected image dimensions
-                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                y = tf.reshape(y, shape=[-1, self._image_height, self._image_width, 1])
-
-                # If we are using patching, we extract a random patch from the image here
-                if self._with_patching:
-                    x, offsets = self._graph_extract_patch(x)
-
-                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
-                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
-                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+                # # If we are using patching, we extract a random patch from the image here
+                # if self._with_patching:
+                #     x, offsets = self._graph_extract_patch(x)
 
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
@@ -87,11 +77,14 @@ class SemanticSegmentationModel(DPPModel):
             device_variables = []
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    x, y = train_iter.get_next()
+
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
+                        mod_w = train_mod_iter.get_next()
+                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
+                        xx = self.forward_pass(x, deterministic=False)
                     self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
 
                     # Define regularization cost
@@ -105,7 +98,7 @@ class SemanticSegmentationModel(DPPModel):
 
                     # Define cost function  based on which one was selected via set_loss_function
                     if self._loss_fn == 'sigmoid cross entropy':
-                        pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y_sub_batches[n])
+                        pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y)
                     gpu_cost = tf.squeeze(tf.reduce_mean(pixel_loss) + l2_cost)
                     cost_sum = tf.reduce_sum(pixel_loss)
                     device_costs.append(cost_sum)
@@ -124,74 +117,43 @@ class SemanticSegmentationModel(DPPModel):
             self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
 
             # Calculate test  and validation accuracy (on a single device at Tensorflow's discretion)
-            if self._has_moderation:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
-                        [self._test_images, self._test_labels, self._test_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
-                        [self._val_images, self._val_labels, self._val_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-            else:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
-                                                                       batch_size=self._batch_size,
-                                                                       num_threads=self._num_threads,
-                                                                       capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
-                                                                     batch_size=self._batch_size,
-                                                                     num_threads=self._num_threads,
-                                                                     capacity=self._queue_capacity)
+            # # If using patching, we need to properly pull similar patches from the test and validation images (and
+            # # labels)
+            # if self._with_patching:
+            #     if self._testing:
+            #         x_test, _ = self._graph_extract_patch(x_test, offsets)
+            #         self._graph_ops['y_test'], _ = self._graph_extract_patch(self._graph_ops['y_test'], offsets)
+            #     if self._validation:
+            #         x_val, _ = self._graph_extract_patch(x_val, offsets)
+            #         self._graph_ops['y_val'], _ = self._graph_extract_patch(self._graph_ops['y_val'], offsets)
+
             if self._testing:
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
-                                                       shape=[-1, self._image_height, self._image_width, 1])
-            if self._validation:
-                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
-                                                      shape=[-1, self._image_height, self._image_width, 1])
+                x_test, self._graph_ops['y_test'] = test_iter.get_next()
 
-            # If using patching, we need to properly pull similar patches from the test and validation images (and
-            # labels)
-            if self._with_patching:
-                if self._testing:
-                    x_test, _ = self._graph_extract_patch(x_test, offsets)
-                    self._graph_ops['y_test'], _ = self._graph_extract_patch(self._graph_ops['y_test'], offsets)
-                if self._validation:
-                    x_val, _ = self._graph_extract_patch(x_val, offsets)
-                    self._graph_ops['y_val'], _ = self._graph_extract_patch(self._graph_ops['y_val'], offsets)
-
-            # Run the testing and validation, whose graph should only be on 1 device
-            if self._has_moderation:
-                if self._testing:
+                if self._has_moderation:
+                    mod_w_test = test_mod_iter.get_next()
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
                                                                             moderation_features=mod_w_test)
-                if self._validation:
+                else:
+                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
+
+                self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                    logits=self._graph_ops['x_test_predicted'], labels=self._graph_ops['y_test']), axis=[1, 2])
+                self._graph_ops['test_losses'] = tf.squeeze(self._graph_ops['test_losses'], axis=1)
+
+            if self._validation:
+                x_val, self._graph_ops['y_val'] = val_iter.get_next()
+
+                if self._has_moderation:
+                    mod_w_val = val_mod_iter.get_next()
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
                                                                            moderation_features=mod_w_val)
-            else:
-                if self._testing:
-                    self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
-                if self._validation:
+                else:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-            # Compute the loss and accuracy for testing and validation
-            if self._testing:
-                self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self._graph_ops['x_test_predicted'], labels=self._graph_ops['y_test']), axis=2)
-                self._graph_ops['test_losses'] = tf.reshape(tf.reduce_mean(self._graph_ops['test_losses'], axis=1),
-                                                            [self._batch_size])
-            if self._validation:
                 self._graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self._graph_ops['x_val_predicted'], labels=self._graph_ops['y_val']), axis=2)
-                self._graph_ops['val_losses'] = tf.reshape(tf.reduce_mean(self._graph_ops['val_losses'], axis=1),
-                                                           [self._batch_size])
+                    logits=self._graph_ops['x_val_predicted'], labels=self._graph_ops['y_val']), axis=[1, 2])
+                self._graph_ops['val_losses'] = tf.squeeze(self._graph_ops['val_losses'], axis=1)
                 self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
 
             # Epoch summaries for Tensorboard
@@ -209,22 +171,14 @@ class SemanticSegmentationModel(DPPModel):
                 exit()
 
             # Initialize storage for the retrieved test variables
-            all_losses = np.empty(shape=1)
+            all_losses = []
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
                 r_losses = self._session.run(self._graph_ops['test_losses'])
-                all_losses = np.concatenate((all_losses, r_losses), axis=0)
+                all_losses.append(r_losses)
 
-            all_losses = np.delete(all_losses, 0)
-
-            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
-            # we want to get rid of)
-            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
-            if extra != self._batch_size:
-                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
-                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
-                all_losses = all_losses[mask_extra, ...]
+            all_losses = np.concatenate(all_losses, axis=0)
 
             # For semantic segmentation problems we want relative and abs mean, std of L2 norms, plus a histogram of
             # errors
@@ -254,7 +208,7 @@ class SemanticSegmentationModel(DPPModel):
 
             return abs_mean.astype(np.float32)
 
-    def forward_pass_with_file_inputs(self, x):
+    def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
             if self._with_patching:
                 # we want the largest multiple of of patch height/width that is smaller than the original
@@ -267,24 +221,19 @@ class SemanticSegmentationModel(DPPModel):
                 # is equal on all sides of image
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2
-                # pre-allocate output dimensions
-                total_outputs = np.empty([1, final_height, final_width])
-            else:
-                total_outputs = np.empty([1, self._image_height, self._image_width])
 
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
-
-            if remainder != 0:
+            num_batches = len(images) // self._batch_size
+            if len(images) % self._batch_size != 0:
                 num_batches += 1
-                remainder = self._batch_size - remainder
 
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = x
             self._parse_images(images)
+            im_data = self._all_images.batch(self._batch_size).prefetch(1)
+            x_test = im_data.make_one_shot_iterator().get_next()
 
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
+            if self._load_from_saved:
+                self.load_state()
+
+            # Break images up into patches if necessary
             if self._with_patching:
                 x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
                 # Split the images up into the multiple slices of size patch_height x patch_width
@@ -294,58 +243,34 @@ class SemanticSegmentationModel(DPPModel):
                 x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
                 x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
 
-            if self._load_from_saved:
-                self.load_state()
-            self._initialize_queue_runners()
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
+            total_outputs = []
             if self._with_patching:
                 num_patch_rows = final_height // patch_height
                 num_patch_cols = final_width // patch_width
+                n_patches = num_patch_rows * num_patch_cols
                 for i in range(num_batches):
                     xx = self._session.run(x_pred)
 
-                    # generalized image stitching
-                    for img in np.array_split(xx, self._batch_size):  # for each img in current batch
-                        # we are going to build a list of rows of imgs called img_rows, where each element
-                        # of img_rows is a row of img's concatenated together horizontally (axis=1), then we will
-                        # iterate through img_rows concatenating the rows vertically (axis=0) to build
-                        # the full img
+                    for img_patches in np.array_split(xx, xx.shape[0] / n_patches):
+                        # Stitch individual rows together, than stitch the rows into a full image
+                        full_img = []
+                        for col_patches in np.array_split(img_patches, n_patches / num_patch_rows):
+                            row_patches = [col_patches[i] for i in range(num_patch_cols)]
+                            full_img.append(np.concatenate(row_patches, axis=1))
+                        full_img = np.concatenate(full_img, axis=0)
 
-                        img_rows = []
-                        # for each row
-                        for j in range(num_patch_rows):
-                            curr_row = img[j*num_patch_cols]  # start new row with first img
-                            # iterate through the rest of the row, concatenating img's together
-                            for k in range(1, num_patch_cols):
-                                # horizontal cat
-                                curr_row = np.concatenate((curr_row, img[k+(j*num_patch_cols)]), axis=1)
-                            img_rows.append(curr_row)  # add row of img's to the list
-
-                        # start full img with the first full row of imgs
-                        full_img = img_rows[0]
-                        # iterate through rest of rows, concatenating rows together
-                        for row_num in range(1, num_patch_rows):
-                            # vertical cat
-                            full_img = np.concatenate((full_img, img_rows[row_num]), axis=0)
-
-                        # need to match total_outputs dimensions, so we add a dimension to the shape to match
-                        full_img = np.array([full_img])  # shape transformation: (x,y) --> (1,x,y)
-                        total_outputs = np.append(total_outputs, full_img, axis=0)  # add the final img to the list
+                        # Keep the final image, but with an extra dimension to concatenate the images together
+                        total_outputs.append(np.expand_dims(full_img, axis=0))
             else:
-                for i in range(int(num_batches)):
+                for i in range(num_batches):
                     xx = self._session.run(x_pred)
-                    for img in np.array_split(xx, self._batch_size):
-                        total_outputs = np.append(total_outputs, img, axis=0)
+                    for img_patches in np.array_split(xx, xx.shape[0]):
+                        total_outputs.append(img_patches)
 
-            # delete weird first row
-            total_outputs = np.delete(total_outputs, 0, 0)
-
-            # delete any outputs which are overruns from the last batch
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
+            total_outputs = np.concatenate(total_outputs, axis=0)
 
         return total_outputs
 
@@ -414,37 +339,23 @@ class SemanticSegmentationModel(DPPModel):
         self._raw_labels = seg_files
         self._split_labels = False  # Band-aid fix
 
-    def _parse_apply_preprocessing(self, input_queue):
-        # Apply pre-processing to the image labels too (which are images for semantic segmentation), then convert them
-        # back to binary masks if they were resized
-        images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
-        labels = self._parse_preprocess_images(tf.read_file(input_queue[1]), channels=1)
-        if self._resize_images:
-            labels = tf.reduce_mean(labels, axis=2, keepdims=True)
+    def _parse_apply_preprocessing(self, images, labels):
+        # Apply pre-processing to the image labels too (which are images for semantic segmentation)
+        images = self._parse_read_images(images, channels=self._image_depth)
+        labels = self._parse_read_images(labels, channels=1)
         return images, labels
 
-    def _parse_crop_or_pad(self):
-        self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,
-                                                                    self._image_width)
-        self._train_labels = tf.image.resize_image_with_crop_or_pad(self._train_labels, self._image_height,
-                                                                    self._image_width)
-        if self._testing:
-            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                       self._image_width)
-            self._test_labels = tf.image.resize_image_with_crop_or_pad(self._test_labels, self._image_height,
-                                                                       self._image_width)
-        if self._validation:
-            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                      self._image_width)
-            self._val_labels = tf.image.resize_image_with_crop_or_pad(self._val_labels, self._image_height,
-                                                                      self._image_width)
+    def _parse_resize_images(self, images, labels, height, width):
+        images = tf.image.resize_images(images, [height, width])
+        labels = tf.image.resize_images(labels, [height, width])
+        return images, labels
 
-    def _parse_force_set_shape(self):
-        self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
-        self._train_labels.set_shape([self._image_height, self._image_width, 1])
-        if self._testing:
-            self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            self._test_labels.set_shape([self._image_height, self._image_width, 1])
-        if self._validation:
-            self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
-            self._val_labels.set_shape([self._image_height, self._image_width, 1])
+    def _parse_crop_or_pad(self, images, labels, height, width):
+        images = tf.image.resize_image_with_crop_or_pad(images, height, width)
+        labels = tf.image.resize_image_with_crop_or_pad(labels, height, width)
+        return images, labels
+
+    def _parse_force_set_shape(self, images, labels, height, width, depth):
+        images.set_shape([height, width, depth])
+        labels.set_shape([height, width, 1])
+        return images, labels

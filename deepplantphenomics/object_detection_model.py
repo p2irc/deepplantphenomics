@@ -224,36 +224,36 @@ class ObjectDetectionModel(DPPModel):
             self._log('Assembling graph...')
 
             self._log('Graph: Parsing dataset...')
-            # Only do preprocessing on the CPU to limit data transfer between devices
-            with tf.device('device:cpu:0'):
+            with tf.device('device:cpu:0'):  # Only do preprocessing on the CPU to limit data transfer between devices
                 self._graph_parse_data()
 
-                # Define batches
+                # For object detection, we need to also deserialize the labels before batching the datasets
+                def _deserialize_label(im, lab):
+                    lab = tf.cond(tf.equal(tf.rank(lab), 0),
+                                  lambda: tf.reshape(lab, [1]),
+                                  lambda: lab)
+                    sparse_lab = tf.string_split(lab, sep=' ')
+                    lab_values = tf.strings.to_number(sparse_lab.values)
+                    lab = tf.reshape(lab_values, [self._grid_w * self._grid_h, 5 + self._NUM_CLASSES])
+                    return im, lab
+
+                # Batch the datasets and create iterators for them
+                self._train_dataset = self._train_dataset.map(_deserialize_label, num_parallel_calls=self._num_threads)
+                train_iter = self._batch_and_iterate(self._train_dataset, shuffle=True)
+                if self._testing:
+                    self._test_dataset = self._test_dataset.map(_deserialize_label,
+                                                                num_parallel_calls=self._num_threads)
+                    test_iter = self._batch_and_iterate(self._test_dataset)
+                if self._validation:
+                    self._val_dataset = self._val_dataset.map(_deserialize_label, num_parallel_calls=self._num_threads)
+                    val_iter = self._batch_and_iterate(self._val_dataset)
+
                 if self._has_moderation:
-                    x, y, mod_w = tf.train.shuffle_batch(
-                        [self._train_images, self._train_labels, self._train_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity,
-                        min_after_dequeue=self._batch_size)
-                else:
-                    x, y = tf.train.shuffle_batch([self._train_images, self._train_labels],
-                                                  batch_size=self._batch_size,
-                                                  num_threads=self._num_threads,
-                                                  capacity=self._queue_capacity,
-                                                  min_after_dequeue=self._batch_size)
-
-                # Reshape input to the expected image dimensions
-                x = tf.reshape(x, shape=[-1, self._image_height, self._image_width, self._image_depth])
-
-                # Deserialize the label
-                y = loaders.label_string_to_tensor(y, self._batch_size)
-                vec_size = 1 + self._NUM_CLASSES + 4
-                y = tf.reshape(y, [self._batch_size, self._grid_w * self._grid_h, vec_size])
-
-                # Split the current training batch into sub-batches if we are constructing more than 1 training tower
-                x_sub_batches = tf.split(x, self._num_gpus, axis=0)
-                y_sub_batches = tf.split(y, self._num_gpus, axis=0)
+                    train_mod_iter = self._batch_and_iterate(self._train_moderation_features)
+                    if self._testing:
+                        test_mod_iter = self._batch_and_iterate(self._test_moderation_features)
+                    if self._validation:
+                        val_mod_iter = self._batch_and_iterate(self._val_moderation_features)
 
             # Create an optimizer object for all of the devices
             optimizer = self._graph_make_optimizer()
@@ -268,11 +268,14 @@ class ObjectDetectionModel(DPPModel):
             device_variables = []
             for n, d in enumerate(self._get_device_list()):  # Build a graph on either the CPU or all of the GPUs
                 with tf.device(d), tf.name_scope('tower_' + str(n)):
+                    x, y = train_iter.get_next()
+
                     # Run the network operations
                     if self._has_moderation:
-                        xx = self.forward_pass(x_sub_batches[n], deterministic=False, moderation_features=mod_w)
+                        mod_w = train_mod_iter.get_next()
+                        xx = self.forward_pass(x, deterministic=False, moderation_features=mod_w)
                     else:
-                        xx = self.forward_pass(x_sub_batches[n], deterministic=False)
+                        xx = self.forward_pass(x, deterministic=False)
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -287,7 +290,7 @@ class ObjectDetectionModel(DPPModel):
                     if self._loss_fn == 'yolo':
                         xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
                                              self._NUM_BOXES * 5 + self._NUM_CLASSES])
-                        yolo_loss = self._yolo_loss_function(y_sub_batches[n], xx)
+                        yolo_loss = self._yolo_loss_function(y, xx)
                         num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
                     gpu_cost = tf.squeeze(yolo_loss / num_image_loss + l2_cost)
                     device_costs.append(yolo_loss)
@@ -307,86 +310,45 @@ class ObjectDetectionModel(DPPModel):
             self._graph_ops['cost'] = tf.reduce_sum(device_costs) / self._batch_size + l2_cost
 
             # Calculate test and validation accuracy (on a single device at Tensorflow's discretion)
-            if self._has_moderation:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'], mod_w_test = tf.train.batch(
-                        [self._test_images, self._test_labels, self._test_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'], mod_w_val = tf.train.batch(
-                        [self._val_images, self._val_labels, self._val_moderation_features],
-                        batch_size=self._batch_size,
-                        num_threads=self._num_threads,
-                        capacity=self._queue_capacity)
-            else:
-                if self._testing:
-                    x_test, self._graph_ops['y_test'] = tf.train.batch([self._test_images, self._test_labels],
-                                                                       batch_size=self._batch_size,
-                                                                       num_threads=self._num_threads,
-                                                                       capacity=self._queue_capacity)
-                if self._validation:
-                    x_val, self._graph_ops['y_val'] = tf.train.batch([self._val_images, self._val_labels],
-                                                                     batch_size=self._batch_size,
-                                                                     num_threads=self._num_threads,
-                                                                     capacity=self._queue_capacity)
-
-            vec_size = 1 + self._NUM_CLASSES + 4
             if self._testing:
-                x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                self._graph_ops['y_test'] = loaders.label_string_to_tensor(self._graph_ops['y_test'],
-                                                                           self._batch_size)
-                self._graph_ops['y_test'] = tf.reshape(self._graph_ops['y_test'],
-                                                       shape=[self._batch_size,
-                                                              self._grid_w * self._grid_h,
-                                                              vec_size])
-            if self._validation:
-                x_val = tf.reshape(x_val, shape=[-1, self._image_height, self._image_width, self._image_depth])
-                self._graph_ops['y_val'] = loaders.label_string_to_tensor(self._graph_ops['y_val'],
-                                                                          self._batch_size)
-                self._graph_ops['y_val'] = tf.reshape(self._graph_ops['y_val'],
-                                                      shape=[self._batch_size,
-                                                             self._grid_w * self._grid_h,
-                                                             vec_size])
+                x_test, self._graph_ops['y_test'] = test_iter.get_next()
+                n_images = tf.cast(tf.shape(x_test)[0], tf.float32)
 
-            # Run the testing and validation, whose graph should only be on 1 device
-            if self._has_moderation:
-                if self._testing:
+                if self._has_moderation:
+                    mod_w_test = test_mod_iter.get_next()
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True,
                                                                             moderation_features=mod_w_test)
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
-                                                                           moderation_features=mod_w_val)
-            else:
-                if self._testing:
+                else:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
-                if self._validation:
-                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
-
-            # For object detection, the network outputs need to be reshaped to match y_test and y_val
-            if self._testing:
                 self._graph_ops['x_test_predicted'] = tf.reshape(self._graph_ops['x_test_predicted'],
-                                                                 [self._batch_size,
+                                                                 [-1,
                                                                   self._grid_w * self._grid_h,
                                                                   self._NUM_BOXES * 5 + self._NUM_CLASSES])
-            if self._validation:
-                self._graph_ops['x_val_predicted'] = tf.reshape(self._graph_ops['x_val_predicted'],
-                                                                [self._batch_size,
-                                                                 self._grid_w * self._grid_h,
-                                                                 self._NUM_BOXES * 5 + self._NUM_CLASSES])
 
-            # Compute the loss for testing and validation
-            if self._testing:
                 if self._loss_fn == 'yolo':
                     self._graph_ops['test_losses'] = \
                         self._yolo_loss_function(self._graph_ops['y_test'],
-                                                 self._graph_ops['x_test_predicted']) / self._batch_size
+                                                 self._graph_ops['x_test_predicted']) / n_images
+
             if self._validation:
+                x_val, self._graph_ops['y_val'] = val_iter.get_next()
+                n_images = tf.cast(tf.shape(x_test)[0], tf.float32)
+
+                if self._has_moderation:
+                    mod_w_val = val_mod_iter.get_next()
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True,
+                                                                           moderation_features=mod_w_val)
+                else:
+                    self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
+                self._graph_ops['x_val_predicted'] = tf.reshape(self._graph_ops['x_val_predicted'],
+                                                                [-1,
+                                                                 self._grid_w * self._grid_h,
+                                                                 self._NUM_BOXES * 5 + self._NUM_CLASSES])
+
                 if self._loss_fn == 'yolo':
                     self._graph_ops['val_losses'] = \
                         self._yolo_loss_function(self._graph_ops['y_val'],
-                                                 self._graph_ops['x_val_predicted']) / self._batch_size
+                                                 self._graph_ops['x_val_predicted']) / n_images
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
@@ -403,37 +365,19 @@ class ObjectDetectionModel(DPPModel):
                 warnings.warn('Less than a batch of testing data')
                 exit()
 
-            # Initialize storage for the retrieved test variables. Object detection needs some special care given to
-            # its variable's shape
-            all_y = np.empty(shape=(1,
-                                    self._grid_w * self._grid_h,
-                                    1 + self._NUM_CLASSES + 4))
-            all_predictions = np.empty(shape=(1,
-                                              self._grid_w * self._grid_h,
-                                              5 * self._NUM_BOXES + self._NUM_CLASSES))
+            # Initialize storage for the retrieved test variables
+            all_y = []
+            all_predictions = []
 
             # Main test loop
             for _ in tqdm(range(num_batches)):
                 r_y, r_predicted = self._session.run([self._graph_ops['y_test'],
                                                       self._graph_ops['x_test_predicted']])
-                all_y = np.concatenate((all_y, r_y), axis=0)
-                all_predictions = np.concatenate((all_predictions, r_predicted), axis=0)
+                all_y.append(r_y)
+                all_predictions.append(r_predicted)
 
-            # Delete the weird first entries in losses, y values, and predictions (because creating empty arrays
-            # isn't a thing)
-            if self._problem_type == definitions.ProblemType.OBJECT_DETECTION:
-                # These are multi-dimensional for object detection, so first entry = first slice
-                all_y = np.delete(all_y, 0, axis=0)
-                all_predictions = np.delete(all_predictions, 0, axis=0)
-
-            # Delete the extra entries (e.g. batch_size is 4 and 1 sample left, it will loop and have 3 repeats that
-            # we want to get rid of)
-            extra = self._batch_size - (self._total_testing_samples % self._batch_size)
-            if extra != self._batch_size:
-                mask_extra = np.ones(self._batch_size * num_batches, dtype=bool)
-                mask_extra[range(self._batch_size * num_batches - extra, self._batch_size * num_batches)] = False
-                all_y = all_y[mask_extra, ...]
-                all_predictions = all_predictions[mask_extra, ...]
+            all_y = np.concatenate(all_y, axis=0)
+            all_predictions = np.concatenate(all_predictions, axis=0)
 
             # Make the images heterogeneous, storing their separate grids in a list
             test_labels = [all_y[i, ...] for i in range(all_y.shape[0])]
@@ -643,7 +587,7 @@ class ObjectDetectionModel(DPPModel):
 
         return ap
 
-    def forward_pass_with_file_inputs(self, x):
+    def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
             if self._with_patching:
                 # we want the largest multiple of patch height/width that is smaller than the original
@@ -657,26 +601,15 @@ class ObjectDetectionModel(DPPModel):
                 # is equal on all sides of image
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2
-                # pre-allocate output dimensions
-                total_outputs = np.empty([1, num_patches_horiz * num_patches_vert,
-                                          self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES])
-            else:
-                total_outputs = np.empty(
-                    [1, self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES])
 
-            num_batches = len(x) // self._batch_size
-            remainder = len(x) % self._batch_size
-
-            if remainder != 0:
+            num_batches = len(images) // self._batch_size
+            if len(images) % self._batch_size != 0:
                 num_batches += 1
-                remainder = self._batch_size - remainder
 
-            # self.load_images_from_list(x) no longer calls following 2 lines so we needed to force them here
-            images = x
             self._parse_images(images)
+            im_data = self._all_images.batch(self._batch_size).prefetch(1)
+            x_test = im_data.make_one_shot_iterator().get_next()
 
-            x_test = tf.train.batch([self._all_images], batch_size=self._batch_size, num_threads=self._num_threads)
-            x_test = tf.reshape(x_test, shape=[-1, self._image_height, self._image_width, self._image_depth])
             if self._with_patching:
                 x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
                 # Split the images up into the multiple slices of size patch_height x patch_width
@@ -688,7 +621,7 @@ class ObjectDetectionModel(DPPModel):
 
             if self._load_from_saved:
                 self.load_state()
-            self._initialize_queue_runners()
+
             # Run model on them
             x_pred = self.forward_pass(x_test, deterministic=True)
 
@@ -699,17 +632,15 @@ class ObjectDetectionModel(DPPModel):
                 xx_output_size = [self._batch_size,
                                   self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
 
+            total_outputs = []
             for i in range(int(num_batches)):
                 xx = self._session.run(x_pred)
                 xx = np.reshape(xx, xx_output_size)
                 for img in np.array_split(xx, self._batch_size):
-                    total_outputs = np.append(total_outputs, img, axis=0)
+                    total_outputs.append(img)
 
             # Delete the weird first row and any outputs which are overruns from the last batch
-            total_outputs = np.delete(total_outputs, 0, 0)
-            if remainder != 0:
-                for i in range(remainder):
-                    total_outputs = np.delete(total_outputs, -1, 0)
+            total_outputs = np.concatenate(total_outputs, axis=0)
 
         return total_outputs
 
@@ -1334,9 +1265,9 @@ class ObjectDetectionModel(DPPModel):
             vec_size = (1 + self._NUM_CLASSES + 4)
             curr_img_labels[int(grid_loc)*vec_size:(int(grid_loc)+1)*vec_size] = \
                 [1, 1, x_grid_offset, y_grid_offset, w_grid, h_grid]
-            # using extend because I had trouble with converting a list of lists to a tensor using our string
-            # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-            # train shuffle batch has been the current hacky fix
+            # using extend because I had trouble with converting a list of lists to a tensor, so making it one list
+            # of all the numbers and then reshaping later when we pull y off the train shuffle batch has been the
+            # current hacky fix
             labels_with_one_hot.append(curr_img_labels)
 
         self._all_labels = labels_with_one_hot
@@ -1396,9 +1327,9 @@ class ObjectDetectionModel(DPPModel):
 
                 vec_size = (1 + self._NUM_CLASSES + 4)
                 curr_img_labels[int(grid_loc) * vec_size:(int(grid_loc) + 1) * vec_size] = curr_box
-                # using extend because I had trouble with converting a list of lists to a tensor using our string
-                # queues, so making it one list of all the numbers and then reshaping later when we pull y off the
-                # train shuffle batch has been the current hacky fix
+                # using extend because I had trouble with converting a list of lists to a tensor, so making it one list
+                # of all the numbers and then reshaping later when we pull y off the train shuffle batch has been the
+                # current hacky fix
             labels_with_one_hot.append(curr_img_labels)
 
         self._all_labels = labels_with_one_hot
