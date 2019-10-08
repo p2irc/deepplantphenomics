@@ -178,8 +178,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         # The simple way to do this is to place single pixel 1's on a blank image at each point and then apply a
         # gaussian filter to that image. The result is our density map.
         den_map = np.zeros([self._image_height, self._image_width, 1], dtype=np.float32)
-        for p in points:
-            den_map[p[0], p[1], 0] = 1
+        for (x, y) in points:
+            den_map[y, x, 0] = 1
         den_map = gaussian_filter(den_map, self._density_sigma, mode='constant')
 
         return den_map
