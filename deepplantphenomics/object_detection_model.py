@@ -830,16 +830,13 @@ class ObjectDetectionModel(DPPModel):
             self._log('Total raw patch examples is %d' % self._total_raw_samples)
 
     def __object_detection_patching_and_augmentation(self, patch_dir=None):
-        # make the below a function
-        # labels, images = function()
         img_dict = {}
         img_num = 0
         img_name_idx = 1
 
-        if patch_dir:
-            patch_dir = os.path.join(patch_dir, 'tmp_train', '')
-        else:
-            patch_dir = os.path.join(os.path.curdir, 'tmp_train', '')
+        if not patch_dir:
+            patch_dir = os.path.curdir
+        patch_dir = os.path.join(patch_dir, 'tmp_train', '')
         if not os.path.exists(patch_dir):
             os.makedirs(patch_dir)
         else:
