@@ -239,9 +239,9 @@ class SemanticSegmentationModel(DPPModel):
                 offset_height = (self._image_height - final_height) // 2
                 offset_width = (self._image_width - final_width) // 2
                 # pre-allocate output dimensions
-                total_outputs = np.empty([1, final_height, final_width])
+                total_outputs = np.empty([1, final_height, final_width, 1])
             else:
-                total_outputs = np.empty([1, self._image_height, self._image_width])
+                total_outputs = np.empty([1, self._image_height, self._image_width, 1])
 
             num_batches = len(x) // self._batch_size
             remainder = len(x) % self._batch_size

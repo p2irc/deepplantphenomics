@@ -32,6 +32,7 @@ class tools(object):
 
         net = networks.vegetationSegmentationNetwork(batch_size=batch_size)
         predictions = net.forward_pass(x)
+        predictions = np.squeeze(predictions)
         net.shut_down()
 
         # round for binary mask
