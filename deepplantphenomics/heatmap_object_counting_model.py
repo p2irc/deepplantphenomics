@@ -3,8 +3,10 @@ import numpy as np
 import os
 import warnings
 import numbers
-from tqdm import tqdm
+import itertools
+from tqdm import tqdm, trange
 from scipy.ndimage import gaussian_filter
+from PIL import Image
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
@@ -139,8 +141,14 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param dirname: The path to the directory with the image files and label file
         :param label_file: The path to the csv file with heatmap point labels
         """
+        self._raw_image_files = loaders.get_dir_images(dirname)
+
         filename = os.path.join(dirname, label_file)
         labels, ids = loaders.read_csv_multi_labels_and_ids(filename, 0)
+        labels = [list(map(int, x)) for x in labels]
+
+        if self._with_patching:
+            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
 
         # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
         # ground truth heatmap
@@ -151,21 +159,16 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                     # There is an odd number of coordinates, which is problematic
                     raise ValueError("Unpaired coordinate found in points labels from " + label_file)
 
-                coords = [int(x) for x in coords]
                 points = zip(coords[0::2], coords[1::2])
                 heatmaps.append(self.__points_to_density_map(points))
             else:
                 # There are no objects, so the heatmap is blank
-                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0))
+                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32))
 
-        heatmaps = np.stack(heatmaps)
-
-        image_files = sorted([os.path.join(dirname, filename) for filename in os.listdir(dirname)
-                              if os.path.isfile(os.path.join(dirname, filename)) & filename.endswith('.png')])
-        self._total_raw_samples = len(image_files)
+        self._total_raw_samples = len(self._raw_image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
-        self._raw_image_files = image_files
+        heatmaps = np.stack(heatmaps)
         self._raw_labels = heatmaps
         self._split_labels = False  # Band-aid fix
 
@@ -183,6 +186,69 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         den_map = gaussian_filter(den_map, self._density_sigma, mode='constant')
 
         return den_map
+
+    def __autopatch_heatmap_dataset(self, labels, patch_dir=None):
+        """
+        Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
+        set of patches made previously
+        :param labels: A nested list of point labels for the original images
+        :param patch_dir: The directory to place patched images into, or where to read previous patches from
+        :return: The patched dataset as a list of image filenames and a nested list of their corresponding point labels
+        """
+        if not patch_dir:
+            patch_dir = os.path.curdir
+        patch_dir = os.path.join(patch_dir, 'train_patch', '')
+        im_dir = patch_dir
+        point_file = os.path.join(patch_dir, 'patch_point_labels.csv')
+
+        if os.path.exists(patch_dir):
+            # If there already is a patched dataset, just load it
+            image_files = loaders.get_dir_images(im_dir)
+            new_labels, _ = loaders.read_csv_multi_labels_and_ids(point_file, 0)
+            new_labels = [list(map(int, x)) for x in new_labels]
+            return image_files, new_labels
+
+        self._log("Patching dataset: Patches will be in " + patch_dir)
+        os.mkdir(patch_dir)
+
+        # We need to construct patches from the previously loaded dataset. We'll take as many of them as we can fit
+        # from the centre of the image, though at the risk of excluding any points that get cut off at the edges.
+        patch_num = 0
+        n_image = len(self._raw_image_files)
+        image_files = []
+        new_labels = []
+        label_str = []
+        for n, im_file, im_labels in zip(trange(n_image), self._raw_image_files, labels):
+            im = np.array(Image.open(im_file))
+
+            def place_points_in_patches(tl_coord, br_coord, serial_points):
+                # The slow, O(mn) way
+                points = list(zip(serial_points[0::2], serial_points[1::2]))
+                for (py0, px0), (py1, px1) in zip(tl_coord, br_coord):
+                    points_in_patch = [(x - px0, y - py0) for (x, y) in points if py0 <= y < py1 and px0 <= x < px1]
+                    points_in_patch = [c for p in points_in_patch for c in p]  # Convert (x,y) tuples to flat x,y list
+                    new_labels.append(points_in_patch)
+
+            patch_start, patch_end = self._autopatch_get_patch_coords(im)
+            num_patch = len(patch_start)
+            place_points_in_patches(patch_start, patch_end, im_labels)
+
+            for i, (y0, x0), (y1, x1), patch_labels in zip(itertools.count(patch_num),
+                                                           patch_start, patch_end, new_labels):
+                im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
+                im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
+                im_patch.save(im_name)
+                image_files.append(im_name)
+
+                label_str.append('im_{:0>6d},'.format(i) + ','.join([str(x) for x in patch_labels]))
+
+            patch_num += num_patch
+
+        with open(point_file, 'w') as f:
+            for line in label_str:
+                f.write(line + '\n')
+
+        return image_files, new_labels
 
     def _parse_apply_preprocessing(self, images, labels):
         # This is tricky. If we read in the heatmaps as images, then we want to use the version in

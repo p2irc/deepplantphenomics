@@ -341,6 +341,7 @@ class SemanticSegmentationModel(DPPModel):
         Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
         set of patches made previously
         :param patch_dir: The directory to place patched images into, or where to read previous patches from
+        :return The patched dataset as lists of the image and segmentation mask filenames
         """
         if not patch_dir:
             patch_dir = os.path.curdir
@@ -355,7 +356,6 @@ class SemanticSegmentationModel(DPPModel):
             return image_files, seg_files
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
-
         os.mkdir(patch_dir)
         os.mkdir(im_dir)
         os.mkdir(seg_dir)
@@ -370,15 +370,8 @@ class SemanticSegmentationModel(DPPModel):
             im = np.array(Image.open(im_file))
             seg = np.array(Image.open(seg_file))
 
-            im_height, im_width, _ = im.shape
-            num_patch_h = im_height // self._patch_height
-            num_patch_w = im_width // self._patch_width
-            num_patch = num_patch_h * num_patch_w
-            patch_offset_h = (im_height - num_patch_h * self._patch_height) // 2
-            patch_offset_w = (im_width - num_patch_w * self._patch_width) // 2
-            patch_start = [(y * self._patch_height + patch_offset_h, x * self._patch_width + patch_offset_w)
-                           for y in range(num_patch_h) for x in range(num_patch_w)]
-            patch_end = [(y + self._patch_height, x + self._patch_width) for (y, x) in patch_start]
+            patch_start, patch_end = self._autopatch_get_patch_coords(im)
+            num_patch = len(patch_start)
 
             for i, (y0, x0), (y1, x1) in zip(itertools.count(patch_num), patch_start, patch_end):
                 im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
@@ -393,6 +386,25 @@ class SemanticSegmentationModel(DPPModel):
             patch_num += num_patch
 
         return image_files, seg_files
+
+    def _autopatch_get_patch_coords(self, im):
+        """
+        Gets the starting (top-left) and ending (bottom-right) coordinates for splitting an image into patches. Patches
+        are taken from the centre of the image, so edges may be cut off if the patch size doesn't perfectly fit.
+        :param im: A numpy array with an image to split into patches
+        :return: Lists of tuples with the starting (top-left) and ending (bottom-right) coordinates for patches
+        """
+        im_height, im_width, _ = im.shape
+        num_patch_h = im_height // self._patch_height
+        num_patch_w = im_width // self._patch_width
+        patch_offset_h = (im_height - num_patch_h * self._patch_height) // 2
+        patch_offset_w = (im_width - num_patch_w * self._patch_width) // 2
+
+        patch_start = [(y * self._patch_height + patch_offset_h, x * self._patch_width + patch_offset_w)
+                       for y in range(num_patch_h) for x in range(num_patch_w)]
+        patch_end = [(y + self._patch_height, x + self._patch_width) for (y, x) in patch_start]
+
+        return patch_start, patch_end
 
     def _parse_apply_preprocessing(self, images, labels):
         # Apply pre-processing to the image labels too (which are images for semantic segmentation)
