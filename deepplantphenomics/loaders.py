@@ -17,7 +17,7 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
     # check if there is a previously saved mask to load from current directory
     mask = []
     try:
-        prev_mask_file = open("mask_ckpt.txt", "r")
+        prev_mask_file = open("mask_ckpt.txt", "r", encoding='utf-8-sig')
         found_prev_mask_file = True
 
         print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
@@ -59,7 +59,7 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         random.shuffle(mask)
 
         # save the mask file in current directory for future use
-        prev_mask_file = open('mask_ckpt.txt', 'w+')
+        prev_mask_file = open('mask_ckpt.txt', 'w+', encoding='utf-8')
         for entry in mask:
             prev_mask_file.write(str(entry) + '\n')
         prev_mask_file.close()
@@ -105,7 +105,7 @@ def label_string_to_tensor(x, batch_size, num_outputs=None):
 
 
 def read_csv_labels(file_name, column_number=False, character=','):
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     labels = []
 
     for line in f:
@@ -126,7 +126,7 @@ def read_csv_rows(file_name, column_number=False, character=','):
 
     read_csv_labels and its variants read column-wise, this function is needed for row-wise parsing
     """
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     rows = []
 
     for line in f:
@@ -138,7 +138,7 @@ def read_csv_rows(file_name, column_number=False, character=','):
 
 
 def read_csv_labels_and_ids(file_name, column_number, id_column_number, character=','):
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     labels = []
     ids = []
 
@@ -153,7 +153,7 @@ def read_csv_labels_and_ids(file_name, column_number, id_column_number, characte
 
 
 def read_csv_multi_labels_and_ids(file_name, id_column_number, character=','):
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     labels = []
     ids = []
 

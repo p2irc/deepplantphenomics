@@ -1248,7 +1248,7 @@ class ObjectDetectionModel(DPPModel):
             self._log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
 
         # save into json
-        with open(json_dir_out + 'train_patches.json', 'w') as outfile:
+        with open(json_dir_out + 'train_patches.json', 'w', encoding='utf-8') as outfile:
             json.dump(img_dict, outfile)
 
         return new_raw_image_files, new_raw_labels
