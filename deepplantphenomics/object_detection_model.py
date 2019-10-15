@@ -793,62 +793,46 @@ class ObjectDetectionModel(DPPModel):
         patching the images if necessary.
 
         :param data_dir: String, The directory where the labels and images are stored in
-        :param label_file: String, The filename for the JSON file with the labels. Optional if using automatic patching
-        which has been done already
-        :param image_dir: String, The directory with the images. Optional if using automatic patching which has been
-        done already
+        :param label_file: String, The filename for the JSON file with the labels
+        :param image_dir: String, The directory with the images
         """
-        load_patched_data = self._with_patching and 'tmp_train' in os.listdir(data_dir)
+        label_path = os.path.join(data_dir, label_file)
+        image_path = os.path.join(data_dir, image_dir, '')
 
-        # Construct the paths to the labels and images
-        if load_patched_data:
-            label_path = os.path.join(data_dir, 'tmp_train/json/train_patches.json')
-            image_path = os.path.join(data_dir, 'tmp_train/image_patches', '')
-        else:
-            label_path = os.path.join(data_dir, label_file)
-            image_path = os.path.join(data_dir, image_dir, '')
-
-        # Load the labels and images
-        if load_patched_data:
-            # Hack to make the label reader convert the labels to YOLO format when re-reading image patches
-            self._with_patching = False
         self.load_json_labels_from_file(label_path)
-        images_list = [image_path + filename for filename in sorted(os.listdir(image_path))
-                       if filename.endswith('.png')]
+        images_list = loaders.get_dir_images(image_path)
         self.load_images_from_list(images_list)
-        if load_patched_data:
-            # Remove the hack
-            self._with_patching = True
 
         # Perform automatic image patching if necessary
-        if self._with_patching and 'tmp_train' not in os.listdir(data_dir):
+        if self._with_patching:
             self._raw_image_files, self._all_labels = \
                 self.__object_detection_patching_and_augmentation(patch_dir=data_dir)
-            self.__convert_labels_to_yolo_format()
-            self._raw_labels = self._all_labels
             self._total_raw_samples = len(self._raw_image_files)
-            self._log('Total raw patch examples is %d' % self._total_raw_samples)
+            self._log('Total raw patch examples is now %d' % self._total_raw_samples)
+
+        self._all_labels = self.__convert_labels_to_yolo_format()
+        self._raw_labels = self._all_labels
 
     def __object_detection_patching_and_augmentation(self, patch_dir=None):
-        img_dict = {}
-        img_num = 0
-        img_name_idx = 1
-
         if not patch_dir:
             patch_dir = os.path.curdir
         patch_dir = os.path.join(patch_dir, 'tmp_train', '')
-        if not os.path.exists(patch_dir):
-            os.makedirs(patch_dir)
-        else:
-            raise RuntimeError("Patched images already exist in " + patch_dir + ". Either delete them and run again or "
-                               "use them directly (i.e. without patching).")
+        img_dir = os.path.join(patch_dir, 'image_patches', '')
+        json_file = os.path.join(patch_dir, 'train_patches.json')
 
-        img_dir_out = patch_dir + 'image_patches/'
-        if not os.path.exists(img_dir_out):
-            os.makedirs(img_dir_out)
-        json_dir_out = patch_dir + 'json/'
-        if not os.path.exists(json_dir_out):
-            os.makedirs(json_dir_out)
+        if os.path.exists(patch_dir):
+            self._log("Loading preexisting patched data from " + patch_dir)
+            self.load_json_labels_from_file(json_file)
+            img_list = loaders.get_dir_images(img_dir)
+            self.load_images_from_list(img_list)
+            return self._raw_image_files, self._all_labels
+
+        os.makedirs(patch_dir)
+        os.makedirs(img_dir)
+
+        img_dict = {}
+        img_num = 0
+        img_name_idx = 1
         new_raw_image_files = []
         new_raw_labels = []
 
@@ -923,7 +907,7 @@ class ObjectDetectionModel(DPPModel):
                             # save image to disk
                             # print(top_row, bot_row, left_col, right_col)
                             result = Image.fromarray(img_patch.astype(np.uint8))
-                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                            new_img_name = img_dir + "{:0>6d}".format(img_name_idx) + '.png'
                             result.save(new_img_name)
 
                             new_raw_image_files.append(new_img_name)
@@ -1030,7 +1014,7 @@ class ObjectDetectionModel(DPPModel):
                                 raw_rot_boxes.append([rot_x_min, rot_x_max, rot_y_min, rot_y_max])
                             # save image to disk
                             result = Image.fromarray(rot_img_patch.astype(np.uint8))
-                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                            new_img_name = img_dir + "{:0>6d}".format(img_name_idx) + '.png'
                             result.save(new_img_name)
 
                             new_raw_image_files.append(new_img_name)
@@ -1060,7 +1044,7 @@ class ObjectDetectionModel(DPPModel):
 
                             # save image to disk
                             result = Image.fromarray(bright_img_patch.astype(np.uint8))
-                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                            new_img_name = img_dir + "{:0>6d}".format(img_name_idx) + '.png'
                             result.save(new_img_name)
 
                             new_raw_image_files.append(new_img_name)
@@ -1093,7 +1077,7 @@ class ObjectDetectionModel(DPPModel):
                                     raw_flip_boxes.append([x_min, x_max, y_min, y_max])
 
                                 result = Image.fromarray(flip_img_patch.astype(np.uint8))
-                                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                                new_img_name = img_dir + "{:0>6d}".format(img_name_idx) + '.png'
                                 result.save(new_img_name)
 
                                 new_raw_image_files.append(new_img_name)
@@ -1122,7 +1106,7 @@ class ObjectDetectionModel(DPPModel):
                                     raw_flip_boxes.append([x_min, x_max, y_min, y_max])
 
                                 result = Image.fromarray(flip_img_patch.astype(np.uint8))
-                                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                                new_img_name = img_dir + "{:0>6d}".format(img_name_idx) + '.png'
                                 result.save(new_img_name)
 
                                 new_raw_image_files.append(new_img_name)
@@ -1189,7 +1173,7 @@ class ObjectDetectionModel(DPPModel):
 
                 # save image to disk
                 result = Image.fromarray(img_patch.astype(np.uint8))
-                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
+                new_img_name = img_dir + "{:0>6d}".format(img_name_idx) + '.png'
                 result.save(new_img_name)
 
                 new_raw_image_files.append(new_img_name)
@@ -1206,7 +1190,7 @@ class ObjectDetectionModel(DPPModel):
             self._log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
 
         # save into json
-        with open(json_dir_out + 'train_patches.json', 'w') as outfile:
+        with open(json_file, 'w') as outfile:
             json.dump(img_dict, outfile)
 
         return new_raw_image_files, new_raw_labels
@@ -1272,12 +1256,11 @@ class ObjectDetectionModel(DPPModel):
     def load_json_labels_from_file(self, filename):
         super().load_json_labels_from_file(filename)
 
-        if not self._with_patching:
-            self.__convert_labels_to_yolo_format()
-
     def __convert_labels_to_yolo_format(self):
-        """Takes the labels that are in the json format and turns them into formatted arrays
-        that the network and yolo loss function are expecting to work with"""
+        """Takes labels loaded from the custom json format and turns them into formatted arrays that the network and
+        yolo loss function are expecting to work with
+        :return: The converted labels
+        """
 
         # for scaling bbox coords
         # scaling image down to the grid size
@@ -1329,4 +1312,4 @@ class ObjectDetectionModel(DPPModel):
                 # current hacky fix
             labels_with_one_hot.append(curr_img_labels)
 
-        self._all_labels = labels_with_one_hot
+        return labels_with_one_hot

@@ -203,6 +203,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         if os.path.exists(patch_dir):
             # If there already is a patched dataset, just load it
+            self._log("Loading preexisting patched data from " + patch_dir)
             image_files = loaders.get_dir_images(im_dir)
             new_labels, _ = loaders.read_csv_multi_labels_and_ids(point_file, 0)
             new_labels = [list(map(int, x)) for x in new_labels]
