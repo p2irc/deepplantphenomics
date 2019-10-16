@@ -4,7 +4,7 @@ DPP provides two different models for counting objects in images: an implementat
 
 The Countception model uses a fully convolutional network with a small receptive field to run over images and count the number of objects. This results in a redundant count map, which is then processed to get the total number of objects in the image.
 
-DPP provides the Countception model through a model class and a predefined network. The `CountCeptionModel` provides the necessary loaders, graph constructors, and forward pass functions. The network required, meanwhile is provided as as the `countception` option to `set_predefined_model()`. More details are in [the specific tutorial](Tutorial-Object-Counting-with-Countception.md).
+DPP provides the Countception model through a model class and a predefined network. The `CountCeptionModel` provides the necessary loaders, graph constructors, and forward pass functions. The network required, meanwhile is provided as the `countception` option to `set_predefined_model()`. More details are in [the specific tutorial](Tutorial-Object-Counting-with-Countception.md).
 
 ### Heatmap Object Counting
 

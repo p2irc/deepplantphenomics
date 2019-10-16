@@ -13,6 +13,7 @@ pages:
         - Semantic Segmentation: Semantic-Segmentation.md
       - Tools: Tools.md
       - Hyperparameter Optimization: Hyperparameter-Optimization.md
+      - Automatic Image Patching: Automatic-Image-Patching.md
       - Tutorials:
         - Tutorial - Training the Leaf Counter: Tutorial-Training-The-Leaf-Counter.md
         - Tutorial - Deploying your Trained Model: Tutorial-Deployment.md

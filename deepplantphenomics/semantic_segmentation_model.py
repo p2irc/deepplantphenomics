@@ -8,6 +8,7 @@ import itertools
 from tqdm import tqdm, trange
 from PIL import Image
 
+
 class SemanticSegmentationModel(DPPModel):
     _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
     _loss_fn = 'sigmoid cross entropy'

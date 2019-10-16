@@ -792,7 +792,7 @@ class ObjectDetectionModel(DPPModel):
         self._raw_image_files = images
         self._raw_labels = self._all_labels
 
-    def load_yolo_dataset_from_directory(self, data_dir, label_file=None, image_dir=None):
+    def load_yolo_dataset_from_directory(self, data_dir, label_file, image_dir):
         """
         Loads in labels and images for object detection tasks, converting the labels to YOLO format and automatically
         patching the images if necessary.
