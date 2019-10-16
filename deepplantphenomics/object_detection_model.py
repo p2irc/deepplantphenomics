@@ -22,6 +22,10 @@ class ObjectDetectionModel(DPPModel):
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
 
+        # A flag to tell the object detection loaders whether to automatically convert JSON labels to YOLO format. This
+        # exists because the dataset loader `load_yolo_dataset_from_directory` doesn't want that to happen
+        self._json_no_convert = False
+
         # State variables specific to object detection for constructing the graph and passing to Tensorboard
         self._yolo_loss = None
 
@@ -800,9 +804,11 @@ class ObjectDetectionModel(DPPModel):
         label_path = os.path.join(data_dir, label_file)
         image_path = os.path.join(data_dir, image_dir, '')
 
+        self._json_no_convert = True
         self.load_json_labels_from_file(label_path)
         images_list = loaders.get_dir_images(image_path)
         self.load_images_from_list(images_list)
+        self._json_no_convert = False
 
         # Perform automatic image patching if necessary
         if self._with_patching:
@@ -823,9 +829,11 @@ class ObjectDetectionModel(DPPModel):
         if os.path.exists(patch_dir):
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
+            self._json_no_convert = True
             self.load_json_labels_from_file(json_file)
             img_list = loaders.get_dir_images(img_dir)
             self.load_images_from_list(img_list)
+            self._json_no_convert = False
             return self._raw_image_files, self._all_labels
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
@@ -1129,6 +1137,9 @@ class ObjectDetectionModel(DPPModel):
 
     def load_json_labels_from_file(self, filename):
         super().load_json_labels_from_file(filename)
+
+        if not self._json_no_convert:
+            self._all_labels = self.__convert_labels_to_yolo_format()
 
     def __convert_labels_to_yolo_format(self):
         """Takes labels loaded from the custom json format and turns them into formatted arrays that the network and
