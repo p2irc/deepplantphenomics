@@ -1,5 +1,5 @@
 import pytest
-import unittest.mock as mock
+# import unittest.mock as mock
 import numpy as np
 import os.path
 import tensorflow as tf
@@ -58,11 +58,6 @@ def test_set_number_of_gpus(model):
     assert model._subbatch_size == 2
 
 
-def test_set_processed_images_dir(model):
-    with pytest.raises(TypeError):
-        model.set_processed_images_dir(5)
-
-
 def test_set_batch_size(model):
     assert model._batch_size == 1
     assert model._subbatch_size == 1
@@ -81,7 +76,7 @@ def test_set_batch_size(model):
     # Test batch size sets with multiple GPUs and errors
     model._num_gpus = 2
     with pytest.raises(RuntimeError):
-        model.set_batch_size(3)  # Can't split 3 item across 2 GPUs
+        model.set_batch_size(3)  # Can't split 3 items across 2 GPUs
     model.set_batch_size(4)
     assert model._batch_size == 4
     assert model._subbatch_size == 2
@@ -537,21 +532,6 @@ def test_add_output_layer():
     assert isinstance(model2._last_layer(), dpp.layers.convLayer)
     model3.add_output_layer()
     assert isinstance(model3._last_layer(), dpp.layers.inputLayer)
-
-
-# having issue with not being able to create a new model, they all seem to inherit the fixture model
-# used in previous test functions and thus can't properly add a new outputlayer for this test
-# @pytest.fixture
-# def model2():
-#     model2 = dpp.DPPModel()
-#     return model2
-# def test_add_output_layer_2(model2): # semantic_segmentation problem type
-#     model2.set_batch_size(1)
-#     model2.set_image_dimensions(1, 1, 1)
-#     model2.add_input_layer()
-#     model2.set_problem_type('semantic_segmentation')
-#     model2.add_output_layer(2.5)
-#     assert isinstance(model2._DPPModel__last_layer(), layers.convLayer)
 
 
 # more loading data tests!!!!
