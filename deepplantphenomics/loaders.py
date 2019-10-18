@@ -7,30 +7,28 @@ import datetime
 
 
 def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_features=None, augmentation_images=None,
-                   augmentation_labels=None, split_labels=True):
+                   augmentation_labels=None, split_labels=True, force_mask_creation=False):
     """Currently depends on test/validation_ratio being 0 when not using test/validation"""
     # serialize labels if they are lists (e.g. for regression)
     if isinstance(labels, list):
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
 
-    # check if there is a previously saved mask to load from current directory
+    # If there is a previously saved mask and we don't want to force a new one, load it from the current directory
     mask = []
-    try:
-        prev_mask_file = open("mask_ckpt.txt", "r")
-        found_prev_mask_file = True
+    if not force_mask_creation:
+        try:
+            mask_file = open(os.path.join(os.path.curdir, "mask_ckpt.txt"), "r")
+            with mask_file:
+                for line in mask_file:
+                    mask.append(int(line.rstrip()))
+            print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), "Loaded previous partition mask."))
+        except FileNotFoundError:
+            mask = []
 
-        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                "Previous mask found. Loading 'mask_ckpt.txt'"))
-        for line in prev_mask_file:
-            mask.append(int(line.rstrip()))
-        prev_mask_file.close()
-    except Exception:
-        found_prev_mask_file = False
-
-    if not found_prev_mask_file:  # we build the mask
-        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"),
-                                'No previous mask found. Building new mask.'))
+    # If there is no previous mask or we're forcing it, we'll build one
+    if not mask:
+        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), 'Building new partition mask.'))
         total_samples = len(labels)
         mask = [0] * total_samples
         val_mask_num = 1  # this changes depending on whether we are using testing or not
@@ -59,10 +57,9 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         random.shuffle(mask)
 
         # save the mask file in current directory for future use
-        prev_mask_file = open('mask_ckpt.txt', 'w+')
-        for entry in mask:
-            prev_mask_file.write(str(entry) + '\n')
-        prev_mask_file.close()
+        with open('mask_ckpt.txt', 'w+') as mask_file:
+            for entry in mask:
+                mask_file.write(str(entry) + '\n')
 
     # create partitions, we set train/validation to None if they're not being used
     if test_ratio != 0 and validation_ratio != 0:
