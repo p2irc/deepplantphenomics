@@ -68,7 +68,7 @@ Loads multiple per-image bounding boxes from a JSON file with the following form
 }
 ```
 
-With the `ObjectDetectionModel`, this will also convert the labels into a format compatible with the output of the YOLO model so long as automatic patching isn't being used (see [the object detection tutorial](Tutorial-Training-An-Object-Detector.md) for more info on automatic patching).
+With the `ObjectDetectionModel`, this will also convert the labels into a format compatible with the output of the YOLO model.
 
 ```
 load_json_labels_from_file(filename)
@@ -146,7 +146,7 @@ load_cifar10_dataset_from_directory(dirname)
 
 #### Load YOLO Dataset From Directory
 
-Loads a dataset for object detection with a JSON file of labels and a sub-directory of images. When using automatic patching, the label file and image directory parameters are optional if the images are the same as in a previous run and have already been auto-patched (see [the object detection tutorial](Tutorial-Training-An-Object-Detector.md) for more info on automatic patching). **Requires the `ObjectDetectionModel`**.
+Loads a dataset for object detection with a JSON file of labels and a sub-directory of images. Unlike other label and dataset loaders for object detection, this can automatically patch the dataset; see [the object detection tutorial](Tutorial-Training-An-Object-Detector.md) for more info on automatic patching. **Requires the `ObjectDetectionModel`**.
 
 ```
 load_yolo_dataset_from_directory(dirname, label_file, image_dir)
@@ -162,8 +162,9 @@ The pickled dataset is stored in the following format:
 [(image_data, count_map_data), ...]
 ```
 
-For each image, there is a tuple of two matrices: the first matrix contains the image data, while the second matrix contains the count map data.
-For more information about how the count map is generated, please refer to the paper https://arxiv.org/abs/1703.08710.
+Each image is represented by a tuple of two matrices: one with the image data and another that contains the count map data.
+
+For more information about how the count map is generated, please refer to the original paper (https://arxiv.org/abs/1703.08710).
 
 ```
 load_dataset_from_pkl_file(pkl_file_name)

@@ -199,4 +199,8 @@ Load a second set of images with corresponding labels in a csv file to augment t
 set_patch_size(height=128, width=128)
 ```
 
-Train on randomly extracted patches (of size `height`x`width`) of the original images. Testing is then performed by splitting the image into patches of `height`x`width`, passing the patches individually through the network, and then stitching the results back together to form the full image. 
+When loading datasets for semantic segmentation, heatmap counting, or object detection, this enables automatic patching of the input image dataset in order. This facilitates training models on large images that won't fit into memory during training. In this case, the patch size and image size should match.
+
+When running inference on trained models, this splits the inference images into patches, runs a forward pass on the patches, and either stitches the full image back together (for semantic segmentation and heatmap counting) or returns predictions for the patches instead (for object detection).
+
+See [this page](Automatic-Image-Patching.md) for more info about this automatic patching.

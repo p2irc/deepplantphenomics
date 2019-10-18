@@ -5,6 +5,7 @@ import os
 import json
 import warnings
 import copy
+import itertools
 from collections.abc import Sequence
 from scipy.special import expit
 from PIL import Image
@@ -20,6 +21,10 @@ class ObjectDetectionModel(DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+
+        # A flag to tell the object detection loaders whether to automatically convert JSON labels to YOLO format. This
+        # exists because the dataset loader `load_yolo_dataset_from_directory` doesn't want that to happen
+        self._json_no_convert = False
 
         # State variables specific to object detection for constructing the graph and passing to Tensorboard
         self._yolo_loss = None
@@ -787,429 +792,287 @@ class ObjectDetectionModel(DPPModel):
         self._raw_image_files = images
         self._raw_labels = self._all_labels
 
-    def load_yolo_dataset_from_directory(self, data_dir, label_file=None, image_dir=None):
+    def load_yolo_dataset_from_directory(self, data_dir, label_file, image_dir):
         """
         Loads in labels and images for object detection tasks, converting the labels to YOLO format and automatically
         patching the images if necessary.
 
         :param data_dir: String, The directory where the labels and images are stored in
-        :param label_file: String, The filename for the JSON file with the labels. Optional if using automatic patching
-        which has been done already
-        :param image_dir: String, The directory with the images. Optional if using automatic patching which has been
-        done already
+        :param label_file: String, The filename for the JSON file with the labels
+        :param image_dir: String, The directory with the images
         """
-        load_patched_data = self._with_patching and 'tmp_train' in os.listdir(data_dir)
+        label_path = os.path.join(data_dir, label_file)
+        image_path = os.path.join(data_dir, image_dir, '')
 
-        # Construct the paths to the labels and images
-        if load_patched_data:
-            label_path = os.path.join(data_dir, 'tmp_train/json/train_patches.json')
-            image_path = os.path.join(data_dir, 'tmp_train/image_patches', '')
-        else:
-            label_path = os.path.join(data_dir, label_file)
-            image_path = os.path.join(data_dir, image_dir, '')
-
-        # Load the labels and images
-        if load_patched_data:
-            # Hack to make the label reader convert the labels to YOLO format when re-reading image patches
-            self._with_patching = False
+        self._json_no_convert = True
         self.load_json_labels_from_file(label_path)
-        images_list = [image_path + filename for filename in sorted(os.listdir(image_path))
-                       if filename.endswith('.png')]
+        images_list = loaders.get_dir_images(image_path)
         self.load_images_from_list(images_list)
-        if load_patched_data:
-            # Remove the hack
-            self._with_patching = True
+        self._json_no_convert = False
 
         # Perform automatic image patching if necessary
-        if self._with_patching and 'tmp_train' not in os.listdir(data_dir):
-            self._raw_image_files, self._all_labels = \
-                self.__object_detection_patching_and_augmentation(patch_dir=data_dir)
-            self.__convert_labels_to_yolo_format()
-            self._raw_labels = self._all_labels
+        if self._with_patching:
+            self._raw_image_files, self._all_labels = self.__autopatch_object_detection_dataset(patch_dir=data_dir)
             self._total_raw_samples = len(self._raw_image_files)
-            self._log('Total raw patch examples is %d' % self._total_raw_samples)
+            self._log('Total raw patch examples is now %d' % self._total_raw_samples)
 
-    def __object_detection_patching_and_augmentation(self, patch_dir=None):
-        # make the below a function
-        # labels, images = function()
+        self._all_labels = self.__convert_labels_to_yolo_format()
+        self._raw_labels = self._all_labels
+
+    def __autopatch_object_detection_dataset(self, patch_dir=None):
+        if not patch_dir:
+            patch_dir = os.path.curdir
+        patch_dir = os.path.join(patch_dir, 'tmp_train', '')
+        img_dir = os.path.join(patch_dir, 'image_patches', '')
+        json_file = os.path.join(patch_dir, 'train_patches.json')
+
+        if os.path.exists(patch_dir):
+            # If there already is a patched dataset, just load it
+            self._log("Loading preexisting patched data from " + patch_dir)
+            self._json_no_convert = True
+            self.load_json_labels_from_file(json_file)
+            img_list = loaders.get_dir_images(img_dir)
+            self.load_images_from_list(img_list)
+            self._json_no_convert = False
+            return self._raw_image_files, self._all_labels
+
+        self._log("Patching dataset: Patches will be in " + patch_dir)
+        os.makedirs(patch_dir)
+        os.makedirs(img_dir)
+
+        # We need to construct a patched dataset, but we'll be picking them out with various methods
         img_dict = {}
-        img_num = 0
-        img_name_idx = 1
-
-        if patch_dir:
-            patch_dir = os.path.join(patch_dir, 'tmp_train', '')
-        else:
-            patch_dir = os.path.join(os.path.curdir, 'tmp_train', '')
-        if not os.path.exists(patch_dir):
-            os.makedirs(patch_dir)
-        else:
-            raise RuntimeError("Patched images already exist in " + patch_dir + ". Either delete them and run again or "
-                               "use them directly (i.e. without patching).")
-
-        img_dir_out = patch_dir + 'image_patches/'
-        if not os.path.exists(img_dir_out):
-            os.makedirs(img_dir_out)
-        json_dir_out = patch_dir + 'json/'
-        if not os.path.exists(json_dir_out):
-            os.makedirs(json_dir_out)
         new_raw_image_files = []
         new_raw_labels = []
 
-        # first add images such that each grid cell has a plant in it
-        # should add num_images*grid many images (e.g. 27(images)*49(7x7grid))
-        self._log('Beginning creation of training patches. Images and json are being saved in ' + patch_dir)
-        for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
-            img_num += 1
+        def add_patch_to_dataset(patch, file_boxes, raw_boxes, patch_idx):
+            patch_name = os.path.join(img_dir + "{:0>6d}.png".format(patch_idx))
+            patch_img = Image.fromarray(patch.astype(np.uint8))
+            patch_img.save(patch_name)
+
+            img_dict["{:0>6d}".format(patch_idx)] = {"height": self._patch_height,
+                                                     "width": self._patch_width,
+                                                     "file_name": "{:0>6d}.png".format(patch_idx),
+                                                     "plants": file_boxes}
+            new_raw_image_files.append(patch_name)
+            new_raw_labels.append(raw_boxes)
+
+        def xywh_to_tblr_coords(cx, cy, width, height):
+            top = cy - height // 2
+            bottom = top + height
+            left = cx - width // 2
+            right = left + width
+            return [top, bottom, left, right]
+
+        def xyxy_to_xywh_coords(x1, x2, y1, y2):
+            bw = x2 - x1
+            bh = y2 - y1
+            x = x1 + bw // 2
+            y = y1 + bh // 2
+            return [x, y, bw, bh]
+
+        def image_to_patch_xy(xi, yi, xp, yp, p_width, p_height):
+            dx = xi - xp
+            dy = yi - yp
+            cx_shift = p_width // 2 + dx
+            cy_shift = p_height // 2 + dy
+            return cx_shift, cy_shift
+
+        def get_random_patch(orig_img, p_width, p_height):
+            px_centre, py_centre = p_width // 2, p_height // 2
+            min_width, max_width = px_centre, orig_img.shape[1] - px_centre
+            min_height, max_height = py_centre, orig_img.shape[0] - py_centre
+
+            rand_x = np.random.randint(min_width, max_width + 1)
+            rand_y = np.random.randint(min_height, max_height + 1)
+            top, bot, left, right = xywh_to_tblr_coords(rand_x, rand_y, p_width, p_height)
+            patch = orig_img[top:bot, left:right]
+
+            return patch, [top, bot, left, right]
+
+        def get_boxes_in_patch(p_tblr, boxes, p_width, p_height):
+            p_top, p_bot, p_left, p_right = p_tblr
+            patch_boxes = []
+            for orig_box in boxes:
+                orig_x, orig_y, orig_w, orig_h = xyxy_to_xywh_coords(*orig_box)
+                if p_left <= orig_x <= p_right and p_top <= orig_y <= p_bot:
+                    cx, cy = (p_bot - p_top) // 2, (p_right - p_left) // 2
+                    patch_x, patch_y = image_to_patch_xy(orig_x, orig_y, cx, cy, p_width, p_height)
+                    patch_x_min, patch_x_max, patch_y_min, patch_y_max = xywh_to_tblr_coords(patch_x, patch_y,
+                                                                                             orig_w, orig_h)
+                    patch_boxes.append([patch_x_min, patch_x_max, patch_y_min, patch_y_max])
+
+            return patch_boxes
+
+        num_orig_images = len(self._raw_image_files)
+        img_name_idx = 0
+
+        # First set of patches: attempt to get patches such that every YOLO grid cell will see a plant at some point
+        # and learn to recognize them during training. The patches should be a small distance from the edges of the
+        # image, so plants in the patches should be about 1 patch-length away from the edges to allow shifting them
+        # into the appropriate grid cell.
+        for img_num, img_name, img_boxes in zip(range(num_orig_images), self._raw_image_files, self._all_labels):
             img = np.array(Image.open(img_name))
 
-            # take patches that have a plant in each grid cell to ensure come training time that each grid cell learns
-            # to recognize an object
-            for i in range(self._grid_h):
-                for j in range(self._grid_w):
-                    # choose plant randomly (and far enough from edges)
-                    found_one = False
-                    failed = False
-                    find_count = 0
-                    random_indices = list(range(len(img_boxes)))
-                    while found_one is False:
-                        rand_idx = np.random.randint(0, len(random_indices))
-                        rand_plant_idx = random_indices[rand_idx]
-                        box_w = img_boxes[rand_plant_idx][1] - img_boxes[rand_plant_idx][0]
-                        box_h = img_boxes[rand_plant_idx][3] - img_boxes[rand_plant_idx][2]
-                        box_x = img_boxes[rand_plant_idx][0] + box_w / 2
-                        box_y = img_boxes[rand_plant_idx][2] + box_h / 2
-                        if (self._patch_width + 5) < box_x < (img.shape[1] - (self._patch_width + 5)) \
-                                and (self._patch_height + 5) < box_y < (img.shape[0] - (self._patch_height + 5)):
-                            found_one = True
+            for i, j in itertools.product(range(self._grid_h), range(self._grid_w)):
+                found_one = False
+                random_indices = list(range(len(img_boxes)))
+                while random_indices and not found_one:
+                    rand_idx = np.random.randint(0, len(random_indices))
+                    rand_plant_idx = random_indices.pop(rand_idx)
+                    box_x, box_y, box_w, box_h = xyxy_to_xywh_coords(*img_boxes[rand_plant_idx])
+                    if (self._patch_width + 5) < box_x < (img.shape[1] - (self._patch_width + 5)) \
+                            and (self._patch_height + 5) < box_y < (img.shape[0] - (self._patch_height + 5)):
+                        # This plant box meets our criteria, so get the center of the patch that places it in grid cell
+                        # (i, j)
+                        delta_x = j - self._grid_w // 2
+                        delta_y = i - self._grid_h // 2
+                        new_x = int(box_x - (delta_x * (self._patch_width / self._grid_w)))
+                        new_y = int(box_y - (delta_y * (self._patch_height / self._grid_h)))
+                        top_row, bot_row, left_col, right_col = xywh_to_tblr_coords(
+                            new_x, new_y, self._patch_width, self._patch_height)
+                        img_patch = img[top_row:bot_row, left_col:right_col]
 
-                            # adjust center based on target grid location
-                            center_x = self._grid_w // 2
-                            center_y = self._grid_h // 2
-                            delta_x = j - center_x
-                            delta_y = i - center_y
-                            # note we need to invert the direction of delta_x so as to move the center to where we
-                            # want it to be, hence subtraction
-                            new_x = int(box_x - (delta_x * (self._patch_width / self._grid_w)))
-                            new_y = int(box_y - (delta_y * (self._patch_height / self._grid_h)))
+                        new_raw_boxes = get_boxes_in_patch([top_row, bot_row, left_col, right_col], img_boxes,
+                                                           self._patch_width, self._patch_height)
+                        new_boxes = []
+                        for box in new_raw_boxes:
+                            new_boxes.append({"all_points_x": box[0:2], "all_points_y": box[2:4]})
 
-                            top_row = new_y - (self._patch_height // 2)
-                            bot_row = top_row + self._patch_height
-                            left_col = new_x - (self._patch_width // 2)
-                            right_col = left_col + self._patch_width
+                        # Save patch to disk and store labels
+                        add_patch_to_dataset(img_patch, new_raw_boxes, new_boxes, img_name_idx)
+                        img_name_idx += 1
+                        found_one = True
+                if not found_one:
+                    # If this happens, then none of the plants can meet our criteria and no patches like this can be
+                    # made for this image
+                    break
 
-                            img_patch = img[top_row:bot_row, left_col:right_col]
+            self._log(str(img_num + 1) + '/' + str(len(self._all_labels)))
+        self._log('Completed baseline patches. Total images so far: ' + str(img_name_idx))
 
-                            # search for, adjust, and add bbox coords for the json
-                            new_boxes = []
-                            new_raw_boxes = []
-                            for box in img_boxes:
-                                # check if box is inside current patch, if so convert the coords and add it to the json
-                                box_w = box[1] - box[0]
-                                box_h = box[3] - box[2]
-                                box_x = box[0] + box_w / 2
-                                box_y = box[2] + box_h / 2
-                                if (box_x >= left_col) and (box_x <= right_col) and (box_y >= top_row) and (
-                                        box_y <= bot_row):
-                                    delta_x = box_x - new_x
-                                    delta_y = box_y - new_y
-                                    new_x_center = self._patch_width // 2 + delta_x
-                                    new_y_center = self._patch_height // 2 + delta_y
-                                    new_x_min = new_x_center - box_w / 2
-                                    new_x_max = new_x_min + box_w
-                                    new_y_min = new_y_center - box_h / 2
-                                    new_y_max = new_y_min + box_h
-
-                                    new_boxes.append({"all_points_x": [new_x_min, new_x_max],
-                                                      "all_points_y": [new_y_min, new_y_max]})
-                                    new_raw_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
-
-                            # save image to disk
-                            # print(top_row, bot_row, left_col, right_col)
-                            result = Image.fromarray(img_patch.astype(np.uint8))
-                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                            result.save(new_img_name)
-
-                            new_raw_image_files.append(new_img_name)
-                            new_raw_labels.append(new_raw_boxes)
-
-                            img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                        "width": self._patch_width,
-                                                                        "file_name": "{:0>6d}".format(
-                                                                            img_name_idx) + '.png',
-                                                                        "plants": new_boxes}
-                            img_name_idx += 1
-                        else:
-                            del random_indices[rand_idx]
-                        find_count += 1
-                        if find_count == len(img_boxes):
-                            failed = True
-                            break
-                    if failed:
-                        break
-
-            self._log(str(img_num) + '/' + str(len(self._all_labels)))
-        self._log('Completed baseline train patches set. Total images: ' + str(img_name_idx))
-
-        # augmentation images: rotations, brightness, flips
-        self._log('Beginning creating of augmentation patches')
+        # Second set of patches: pick patches at random with some plants in them and randomly augment them with
+        # rotations, flips, and brightness adjustments
+        self._log('Creating augmentation patches...')
         for i in range(self._grid_h * self._grid_w):
             for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
                 img = np.array(Image.open(img_name))
-                # randomly grab a patch, make sure it has at least one plant in it
-                max_width = img.shape[1] - (self._patch_width // 2)
-                min_width = (self._patch_width // 2)
-                max_height = img.shape[0] - (self._patch_height // 2)
-                min_height = (self._patch_height // 2)
-                found_one = False
-                while found_one is False:
-                    rand_x = np.random.randint(min_width, max_width + 1)
-                    rand_y = np.random.randint(min_height, max_height + 1)
-                    # determine patch location and slice into mask and img to create patch
-                    top_row = rand_y - (self._patch_height // 2)
-                    bot_row = top_row + self._patch_height
-                    left_col = rand_x - (self._patch_width // 2)
-                    right_col = left_col + self._patch_width
-                    img_patch = img[top_row:bot_row, left_col:right_col]
-                    # objects and corresponding bboxes
-                    new_boxes = []
-                    for box in img_boxes:
-                        cent_x = box[0] + ((box[1] - box[0]) / 2)
-                        cent_y = box[2] + ((box[3] - box[2]) / 2)
-                        # check if box is inside current patch, if so convert the coords and add it to the json
-                        if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (
-                                cent_y <= bot_row):
-                            box_w = box[1] - box[0]
-                            box_h = box[3] - box[2]
-                            box_x = box[0] + box_w / 2
-                            box_y = box[2] + box_h / 2
-                            delta_x = box_x - rand_x
-                            delta_y = box_y - rand_y
-                            new_x_center = self._patch_width // 2 + delta_x
-                            new_y_center = self._patch_height // 2 + delta_y
-                            new_x_min = new_x_center - box_w / 2
-                            new_x_max = new_x_min + box_w
-                            new_y_min = new_y_center - box_h / 2
-                            new_y_max = new_y_min + box_h
-                            new_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
-                    if len(new_boxes) >= 1:
-                        found_one = True
 
-                        # augmentation is a random choice of 3 options
-                        # 1 == rotation, 2 == brightness, 3 == flip
-                        aug = np.random.randint(1, 4)
-                        if aug == 1:
-                            # rotation
-                            k = np.random.randint(1, 4)
-                            rot_img_patch = np.rot90(img_patch, k)
-                            theta = np.radians(90 * k)
-                            x0 = self._patch_width // 2
-                            y0 = self._patch_height // 2
-                            rot_boxes = []
-                            raw_rot_boxes = []
-                            for box in new_boxes:
-                                # since only rotating by 90 degrees we could probably hard code in 1's, -1's, and 0's
-                                # in the cases instead of using sin and cos
-                                rot_x_min = x0 + (box[0] - x0) * np.cos(theta) + (box[2] - y0) * np.sin(theta)
-                                rot_y_min = y0 - (box[0] - x0) * np.sin(theta) + (box[2] - y0) * np.cos(theta)
-                                w = box[1] - box[0]
-                                h = box[3] - box[2]
-                                if k == 1:
-                                    # w and h flip, x_min y_min become x_min y_max
-                                    w, h = h, w
-                                    rot_y_min -= h
-                                elif k == 2:
-                                    # w and h stay same, x_min y_min become x_max y_max
-                                    rot_x_min -= w
-                                    rot_y_min -= h
-                                else:  # k == 3
-                                    # w and h flip, x_min y_min become x_max y_min
-                                    w, h = h, w
-                                    rot_x_min -= w
-                                rot_x_max = rot_x_min + w
-                                rot_y_max = rot_y_min + h
-
-                                rot_boxes.append({"all_points_x": [rot_x_min, rot_x_max],
-                                                  "all_points_y": [rot_y_min, rot_y_max]})
-                                raw_rot_boxes.append([rot_x_min, rot_x_max, rot_y_min, rot_y_max])
-                            # save image to disk
-                            result = Image.fromarray(rot_img_patch.astype(np.uint8))
-                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                            result.save(new_img_name)
-
-                            new_raw_image_files.append(new_img_name)
-                            new_raw_labels.append(raw_rot_boxes)
-
-                            img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                        "width": self._patch_width,
-                                                                        "file_name": "{:0>6d}".format(img_name_idx) +
-                                                                                     '.png',
-                                                                        "plants": rot_boxes}
-                            img_name_idx += 1
-                        elif aug == 2:
-                            # brightness
-                            value = np.random.randint(40, 76)  # just a 'nice amount' of brightness change
-                            k = np.random.random()
-                            if k < 0.5:  # brighter
-                                bright_img_patch = np.where((255 - img_patch) < value, 255, img_patch + value)
-                            else:  # dimmer
-                                bright_img_patch = np.where(img_patch < value, 0, img_patch - value)
-
-                            bright_boxes = []
-                            raw_bright_boxes = []
-                            for box in new_boxes:
-                                bright_boxes.append({"all_points_x": [box[0], box[1]],
-                                                     "all_points_y": [box[2], box[3]]})
-                                raw_bright_boxes.append([box[0], box[1], box[2], box[3]])
-
-                            # save image to disk
-                            result = Image.fromarray(bright_img_patch.astype(np.uint8))
-                            new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                            result.save(new_img_name)
-
-                            new_raw_image_files.append(new_img_name)
-                            new_raw_labels.append(raw_bright_boxes)
-
-                            img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                        "width": self._patch_width,
-                                                                        "file_name": "{:0>6d}".format(img_name_idx) +
-                                                                                     '.png',
-                                                                        "plants": bright_boxes}
-                            img_name_idx += 1
-
-                        else:  # aug == 3
-                            # flip
-                            k = np.random.random()
-                            if k < 0.5:
-                                flip_img_patch = np.fliplr(img_patch)
-                                flip_boxes = []
-                                raw_flip_boxes = []
-                                for box in new_boxes:
-                                    w = box[1] - box[0]
-                                    # h = box[3] - box[2] for reference
-                                    x_min = self._patch_width - (box[1])
-                                    x_max = x_min + w
-                                    y_min = box[2]
-                                    y_max = box[3]
-
-                                    flip_boxes.append({"all_points_x": [x_min, x_max],
-                                                       "all_points_y": [y_min, y_max]})
-                                    raw_flip_boxes.append([x_min, x_max, y_min, y_max])
-
-                                result = Image.fromarray(flip_img_patch.astype(np.uint8))
-                                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                                result.save(new_img_name)
-
-                                new_raw_image_files.append(new_img_name)
-                                new_raw_labels.append(raw_flip_boxes)
-
-                                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                            "width": self._patch_width,
-                                                                            "file_name": "{:0>6d}".format(
-                                                                                img_name_idx) + '.png',
-                                                                            "plants": flip_boxes}
-                                img_name_idx += 1
-                            else:
-                                flip_img_patch = np.flipud(img_patch)
-                                flip_boxes = []
-                                raw_flip_boxes = []
-                                for box in new_boxes:
-                                    # w = box[1] - box[0] for reference
-                                    h = box[3] - box[2]
-                                    x_min = box[0]
-                                    x_max = box[1]
-                                    y_min = self._patch_height - (box[3])
-                                    y_max = y_min + h
-
-                                    flip_boxes.append({"all_points_x": [x_min, x_max],
-                                                       "all_points_y": [y_min, y_max]})
-                                    raw_flip_boxes.append([x_min, x_max, y_min, y_max])
-
-                                result = Image.fromarray(flip_img_patch.astype(np.uint8))
-                                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                                result.save(new_img_name)
-
-                                new_raw_image_files.append(new_img_name)
-                                new_raw_labels.append(raw_flip_boxes)
-
-                                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                                            "width": self._patch_width,
-                                                                            "file_name": "{:0>6d}".format(
-                                                                                img_name_idx) + '.png',
-                                                                            "plants": flip_boxes}
-                                img_name_idx += 1
-            self._log(str(i + 1) + '/' + str(self._grid_w * self._grid_h))
-        self._log('Completed augmentation set. Total images: ' + str(img_name_idx))
-
-        # rest are just random patches
-        num_patches = img_name_idx // len(self._raw_image_files)
-        self._log('Generating random patches')
-        img_num = 0
-        random_imgs = 0
-        for img_name, img_boxes in zip(self._raw_image_files, self._all_labels):
-            img_num += 1
-            img = np.array(Image.open(img_name))
-            # we will randomly generate centers of the images we are extracting
-            #  with size: patch_size x patch_size
-            max_width = img.shape[1] - (self._patch_width // 2)
-            min_width = (self._patch_width // 2)
-            max_height = img.shape[0] - (self._patch_height // 2)
-            min_height = (self._patch_height // 2)
-            rand_x = np.random.randint(min_width, max_width + 1, num_patches)
-            rand_y = np.random.randint(min_height, max_height + 1, num_patches)
-
-            for idx, center in enumerate(zip(rand_x, rand_y)):
-                # determine patch location and slice into mask and img to create patch
-                top_row = center[1] - (self._patch_height // 2)
-                bot_row = top_row + self._patch_height
-                left_col = center[0] - (self._patch_width // 2)
-                right_col = left_col + self._patch_width
-                img_patch = img[top_row:bot_row, left_col:right_col]
-
-                # objects and corresponding bboxes
+                # Randomly grab a patch of the image and make sure it has at least one plant in it
+                img_patch = None
                 new_boxes = []
-                raw_new_boxes = []
-                for box in img_boxes:
-                    cent_x = box[0] + ((box[1] - box[0]) / 2)
-                    cent_y = box[2] + ((box[3] - box[2]) / 2)
-                    # check if box is inside current patch, if so convert the coords and add it to the json
-                    if (cent_x >= left_col) and (cent_x <= right_col) and (cent_y >= top_row) and (cent_y <= bot_row):
-                        box_w = box[1] - box[0]
-                        box_h = box[3] - box[2]
-                        box_x = box[0] + box_w / 2
-                        box_y = box[2] + box_h / 2
-                        delta_x = box_x - center[0]
-                        delta_y = box_y - center[1]
-                        new_x_center = self._patch_width // 2 + delta_x
-                        new_y_center = self._patch_height // 2 + delta_y
-                        new_x_min = new_x_center - box_w / 2
-                        new_x_max = new_x_min + box_w
-                        new_y_min = new_y_center - box_h / 2
-                        new_y_max = new_y_min + box_h
+                while not new_boxes:
+                    img_patch, img_tblr = get_random_patch(img, self._patch_width, self._patch_height)
+                    new_boxes = get_boxes_in_patch(img_tblr, img_boxes, self._patch_width, self._patch_height)
 
-                        new_boxes.append({"all_points_x": [new_x_min, new_x_max],
-                                          "all_points_y": [new_y_min, new_y_max]})
-                        raw_new_boxes.append([new_x_min, new_x_max, new_y_min, new_y_max])
+                # Randomly choose one of three augmentations to apply
+                aug = np.random.randint(1, 4)  # 1 == rotation, 2 == brightness, 3 == flip
+                if aug == 1:  # rotation
+                    k = np.random.randint(1, 4)
+                    rot_img_patch = np.rot90(img_patch, k)
+                    theta = np.radians(90 * k)
+                    x0 = self._patch_width // 2
+                    y0 = self._patch_height // 2
+                    rot_boxes = []
+                    raw_rot_boxes = []
+                    for box in new_boxes:
+                        rot_x_min = x0 + (box[0] - x0) * np.cos(theta) + (box[2] - y0) * np.sin(theta)
+                        rot_y_min = y0 - (box[0] - x0) * np.sin(theta) + (box[2] - y0) * np.cos(theta)
+                        w = box[1] - box[0]
+                        h = box[3] - box[2]
+                        if k == 1:  # w and h flip, x_min y_min become x_min y_max
+                            w, h = h, w
+                            rot_y_min -= h
+                        elif k == 2:  # w and h stay same, x_min y_min become x_max y_max
+                            rot_x_min -= w
+                            rot_y_min -= h
+                        else:  # w and h flip, x_min y_min become x_max y_min
+                            w, h = h, w
+                            rot_x_min -= w
+                        rot_x_max = rot_x_min + w
+                        rot_y_max = rot_y_min + h
 
-                # save image to disk
-                result = Image.fromarray(img_patch.astype(np.uint8))
-                new_img_name = img_dir_out + "{:0>6d}".format(img_name_idx) + '.png'
-                result.save(new_img_name)
+                        rot_boxes.append({"all_points_x": [rot_x_min, rot_x_max],
+                                          "all_points_y": [rot_y_min, rot_y_max]})
+                        raw_rot_boxes.append([rot_x_min, rot_x_max, rot_y_min, rot_y_max])
 
-                new_raw_image_files.append(new_img_name)
-                new_raw_labels.append(raw_new_boxes)
+                    # Save patch to disk and store labels
+                    add_patch_to_dataset(rot_img_patch, rot_boxes, raw_rot_boxes, img_name_idx)
+                    img_name_idx += 1
+                elif aug == 2:  # brightness
+                    value = np.random.randint(40, 76)  # just a 'nice amount' of brightness change
+                    k = np.random.random()
+                    if k < 0.5:  # brighter
+                        bright_img_patch = np.where((255 - img_patch) < value, 255, img_patch + value)
+                    else:  # dimmer
+                        bright_img_patch = np.where(img_patch < value, 0, img_patch - value)
 
-                img_dict["{:0>6d}".format(img_name_idx)] = {"height": self._patch_height,
-                                                            "width": self._patch_width,
-                                                            "file_name": "{:0>6d}".format(img_name_idx) + '.png',
-                                                            "plants": new_boxes}
+                    bright_boxes = []
+                    raw_bright_boxes = []
+                    for box in new_boxes:
+                        bright_boxes.append({"all_points_x": [box[0], box[1]],
+                                             "all_points_y": [box[2], box[3]]})
+                        raw_bright_boxes.append([box[0], box[1], box[2], box[3]])
+
+                    # Save patch to disk and store labels
+                    add_patch_to_dataset(bright_img_patch, bright_boxes, raw_bright_boxes, img_name_idx)
+                    img_name_idx += 1
+                else:  # flip (k == 3)
+                    flip_boxes = []
+                    raw_flip_boxes = []
+                    k = np.random.random()
+                    if k < 0.5:
+                        flip_img_patch = np.fliplr(img_patch)
+                        for box in new_boxes:
+                            w = box[1] - box[0]
+                            x_min = self._patch_width - box[1]
+                            x_max = x_min + w
+                            y_min = box[2]
+                            y_max = box[3]
+
+                            flip_boxes.append({"all_points_x": [x_min, x_max],
+                                               "all_points_y": [y_min, y_max]})
+                            raw_flip_boxes.append([x_min, x_max, y_min, y_max])
+                    else:
+                        flip_img_patch = np.flipud(img_patch)
+                        for box in new_boxes:
+                            h = box[3] - box[2]
+                            x_min = box[0]
+                            x_max = box[1]
+                            y_min = self._patch_height - box[3]
+                            y_max = y_min + h
+
+                            flip_boxes.append({"all_points_x": [x_min, x_max],
+                                               "all_points_y": [y_min, y_max]})
+                            raw_flip_boxes.append([x_min, x_max, y_min, y_max])
+
+                    # Save patch to disk and store labels
+                    add_patch_to_dataset(flip_img_patch, flip_boxes, raw_flip_boxes, img_name_idx)
+                    img_name_idx += 1
+            self._log(str(i + 1) + '/' + str(self._grid_w * self._grid_h))
+        self._log('Completed augmentation patches. Total images so far: ' + str(img_name_idx))
+
+        # Third set of patches: pick patches completely at random so as to double the number of patches in our dataset
+        self._log('Generating random patches...')
+        rand_patches_per_img = img_name_idx // len(self._raw_image_files)
+        for img_num, img_name, img_boxes in zip(range(num_orig_images), self._raw_image_files, self._all_labels):
+            img = np.array(Image.open(img_name))
+
+            for _ in range(rand_patches_per_img):
+                img_patch, img_tblr = get_random_patch(img, self._patch_width, self._patch_height)
+                raw_new_boxes = get_boxes_in_patch(img_tblr, img_boxes, self._patch_width, self._patch_height)
+                new_boxes = []
+                for box in raw_new_boxes:
+                    new_boxes.append({"all_points_x": box[0:2], "all_points_y": box[2:4]})
+
+                # Save patch to disk and store labels
+                add_patch_to_dataset(img_patch, new_boxes, raw_new_boxes, img_name_idx)
                 img_name_idx += 1
 
-            # verbose
-            random_imgs += 1
-            self._log(str(random_imgs) + '/' + str(len(self._raw_image_files)))
+            self._log(str(img_num + 1) + '/' + str(num_orig_images))
 
-        # save into json
-        with open(json_dir_out + 'train_patches.json', 'w') as outfile:
+        # Save all of the patch labels as a JSON file before returning the patch filenames and labels
+        with open(json_file, 'w') as outfile:
             json.dump(img_dict, outfile)
 
         return new_raw_image_files, new_raw_labels
@@ -1275,13 +1138,14 @@ class ObjectDetectionModel(DPPModel):
     def load_json_labels_from_file(self, filename):
         super().load_json_labels_from_file(filename)
 
-        if not self._with_patching:
-            self.__convert_labels_to_yolo_format()
+        if not self._json_no_convert:
+            self._all_labels = self.__convert_labels_to_yolo_format()
 
     def __convert_labels_to_yolo_format(self):
-        """Takes the labels that are in the json format and turns them into formatted arrays
-        that the network and yolo loss function are expecting to work with"""
-
+        """Takes labels loaded from the custom json format and turns them into formatted arrays that the network and
+        yolo loss function are expecting to work with
+        :return: The converted labels
+        """
         # for scaling bbox coords
         # scaling image down to the grid size
         scale_ratio_w = self._grid_w / self._image_width
@@ -1332,4 +1196,4 @@ class ObjectDetectionModel(DPPModel):
                 # current hacky fix
             labels_with_one_hot.append(curr_img_labels)
 
-        self._all_labels = labels_with_one_hot
+        return labels_with_one_hot

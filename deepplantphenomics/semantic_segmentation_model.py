@@ -1,10 +1,12 @@
-from . import layers, definitions, DPPModel
+from . import loaders, layers, definitions, DPPModel
 import numpy as np
 import tensorflow as tf
 import os
 import warnings
 import copy
-from tqdm import tqdm
+import itertools
+from tqdm import tqdm, trange
+from PIL import Image
 
 
 class SemanticSegmentationModel(DPPModel):
@@ -325,19 +327,86 @@ class SemanticSegmentationModel(DPPModel):
         :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
         """
 
-        image_files = [os.path.join(dirname, name) for name in os.listdir(dirname) if
-                       os.path.isfile(os.path.join(dirname, name)) & name.endswith('.png')]
+        self._raw_image_files = loaders.get_dir_images(dirname)
+        self._raw_labels = loaders.get_dir_images(seg_dirname)
+        if self._with_patching:
+            self._raw_image_files, self._raw_labels = self.__autopatch_segmentation_dataset()
 
-        seg_files = [os.path.join(seg_dirname, name) for name in os.listdir(seg_dirname) if
-                     os.path.isfile(os.path.join(seg_dirname, name)) & name.endswith('.png')]
-
-        self._total_raw_samples = len(image_files)
-
+        self._total_raw_samples = len(self._raw_image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
-        self._raw_image_files = image_files
-        self._raw_labels = seg_files
         self._split_labels = False  # Band-aid fix
+
+    def __autopatch_segmentation_dataset(self, patch_dir=None):
+        """
+        Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
+        set of patches made previously
+        :param patch_dir: The directory to place patched images into, or where to read previous patches from
+        :return The patched dataset as lists of the image and segmentation mask filenames
+        """
+        if not patch_dir:
+            patch_dir = os.path.curdir
+        patch_dir = os.path.join(patch_dir, 'train_patch', '')
+        im_dir = os.path.join(patch_dir, 'im_patch', '')
+        seg_dir = os.path.join(patch_dir, 'mask_patch', '')
+
+        if os.path.exists(patch_dir):
+            # If there already is a patched dataset, just load it
+            self._log("Loading preexisting patched data from " + patch_dir)
+            image_files = loaders.get_dir_images(im_dir)
+            seg_files = loaders.get_dir_images(seg_dir)
+            return image_files, seg_files
+
+        self._log("Patching dataset: Patches will be in " + patch_dir)
+        os.mkdir(patch_dir)
+        os.mkdir(im_dir)
+        os.mkdir(seg_dir)
+
+        # We need to construct patches from the previously loaded dataset. We'll take as many of them as we can fit
+        # from the centre of the image.
+        patch_num = 0
+        n_image = len(self._raw_image_files)
+        image_files = []
+        seg_files = []
+        for n, im_file, seg_file in zip(trange(n_image), self._raw_image_files, self._raw_labels):
+            im = np.array(Image.open(im_file))
+            seg = np.array(Image.open(seg_file))
+
+            patch_start, patch_end = self._autopatch_get_patch_coords(im)
+            num_patch = len(patch_start)
+
+            for i, (y0, x0), (y1, x1) in zip(itertools.count(patch_num), patch_start, patch_end):
+                im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
+                seg_patch = Image.fromarray(seg[y0:y1, x0:x1].astype(np.uint8))
+                im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
+                seg_name = os.path.join(seg_dir, 'seg_{:0>6d}.png'.format(i))
+                im_patch.save(im_name)
+                seg_patch.save(seg_name)
+                image_files.append(im_name)
+                seg_files.append(seg_name)
+
+            patch_num += num_patch
+
+        return image_files, seg_files
+
+    def _autopatch_get_patch_coords(self, im):
+        """
+        Gets the starting (top-left) and ending (bottom-right) coordinates for splitting an image into patches. Patches
+        are taken from the centre of the image, so edges may be cut off if the patch size doesn't perfectly fit.
+        :param im: A numpy array with an image to split into patches
+        :return: Lists of tuples with the starting (top-left) and ending (bottom-right) coordinates for patches
+        """
+        im_height, im_width, _ = im.shape
+        num_patch_h = im_height // self._patch_height
+        num_patch_w = im_width // self._patch_width
+        patch_offset_h = (im_height - num_patch_h * self._patch_height) // 2
+        patch_offset_w = (im_width - num_patch_w * self._patch_width) // 2
+
+        patch_start = [(y * self._patch_height + patch_offset_h, x * self._patch_width + patch_offset_w)
+                       for y in range(num_patch_h) for x in range(num_patch_w)]
+        patch_end = [(y + self._patch_height, x + self._patch_width) for (y, x) in patch_start]
+
+        return patch_start, patch_end
 
     def _parse_apply_preprocessing(self, images, labels):
         # Apply pre-processing to the image labels too (which are images for semantic segmentation)
