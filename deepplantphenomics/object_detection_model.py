@@ -893,15 +893,16 @@ class ObjectDetectionModel(DPPModel):
 
             return patch, [top, bot, left, right]
 
-        def get_boxes_in_patch(p_tblr, boxes, p_width, p_height):
+        def get_boxes_in_patch(p_tblr, boxes):
             p_top, p_bot, p_left, p_right = p_tblr
+            p_width, p_height = (p_right - p_left), (p_bot - p_top)
             patch_boxes = []
             for orig_box in boxes:
                 orig_x, orig_y, orig_w, orig_h = xyxy_to_xywh_coords(*orig_box)
                 if p_left <= orig_x <= p_right and p_top <= orig_y <= p_bot:
-                    cx, cy = (p_bot - p_top) // 2, (p_right - p_left) // 2
+                    cx, cy = p_left + p_width // 2, p_top + p_height // 2
                     patch_x, patch_y = image_to_patch_xy(orig_x, orig_y, cx, cy, p_width, p_height)
-                    patch_x_min, patch_x_max, patch_y_min, patch_y_max = xywh_to_tblr_coords(patch_x, patch_y,
+                    patch_y_min, patch_y_max, patch_x_min, patch_x_max = xywh_to_tblr_coords(patch_x, patch_y,
                                                                                              orig_w, orig_h)
                     patch_boxes.append([patch_x_min, patch_x_max, patch_y_min, patch_y_max])
 
@@ -936,8 +937,7 @@ class ObjectDetectionModel(DPPModel):
                             new_x, new_y, self._patch_width, self._patch_height)
                         img_patch = img[top_row:bot_row, left_col:right_col]
 
-                        new_raw_boxes = get_boxes_in_patch([top_row, bot_row, left_col, right_col], img_boxes,
-                                                           self._patch_width, self._patch_height)
+                        new_raw_boxes = get_boxes_in_patch([top_row, bot_row, left_col, right_col], img_boxes)
                         new_boxes = []
                         for box in new_raw_boxes:
                             new_boxes.append({"all_points_x": box[0:2], "all_points_y": box[2:4]})
@@ -966,7 +966,7 @@ class ObjectDetectionModel(DPPModel):
                 new_boxes = []
                 while not new_boxes:
                     img_patch, img_tblr = get_random_patch(img, self._patch_width, self._patch_height)
-                    new_boxes = get_boxes_in_patch(img_tblr, img_boxes, self._patch_width, self._patch_height)
+                    new_boxes = get_boxes_in_patch(img_tblr, img_boxes)
 
                 # Randomly choose one of three augmentations to apply
                 aug = np.random.randint(1, 4)  # 1 == rotation, 2 == brightness, 3 == flip
@@ -1063,7 +1063,7 @@ class ObjectDetectionModel(DPPModel):
 
             for _ in range(rand_patches_per_img):
                 img_patch, img_tblr = get_random_patch(img, self._patch_width, self._patch_height)
-                raw_new_boxes = get_boxes_in_patch(img_tblr, img_boxes, self._patch_width, self._patch_height)
+                raw_new_boxes = get_boxes_in_patch(img_tblr, img_boxes)
                 new_boxes = []
                 for box in raw_new_boxes:
                     new_boxes.append({"all_points_x": box[0:2], "all_points_y": box[2:4]})
