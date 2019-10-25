@@ -14,52 +14,14 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         if split_labels:
             labels = [' '.join(map(str, label)) for label in labels]
 
-    # If there is a previously saved mask and we don't want to force a new one, load it from the current directory
-    mask = []
-    if not force_mask_creation:
-        try:
-            mask_file = open(os.path.join(os.path.curdir, "mask_ckpt.txt"), "r")
-            with mask_file:
-                for line in mask_file:
-                    mask.append(int(line.rstrip()))
-            print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), "Loaded previous partition mask."))
-        except FileNotFoundError:
-            mask = []
+    # Get the mask that generates the train/test/val split of the dataset
+    n_aug = len(augmentation_labels) if augmentation_images is not None and augmentation_labels is not None else 0
+    mask = _get_split_mask(test_ratio, validation_ratio, len(labels), n_aug, force_mask_creation)
 
-    # If there is no previous mask or we're forcing it, we'll build one
-    if not mask:
-        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), 'Building new partition mask.'))
-        total_samples = len(labels)
-        mask = [0] * total_samples
-        val_mask_num = 1  # this changes depending on whether we are using testing or not
-        val_start_idx = 0  # if no testing then we idx from beginning, else we change this if there is testing
-
-        if test_ratio != 0:
-            # creating a mask [1,1,1,...,0,0,0]
-            num_test = int(total_samples * test_ratio)
-            mask[:num_test] = [1] * num_test
-            val_mask_num = 2
-            val_start_idx = num_test
-
-        if validation_ratio != 0:
-            # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
-            # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
-            num_val = int(total_samples * validation_ratio)
-            mask[val_start_idx: val_start_idx + num_val] = [val_mask_num] * num_val
-
-        # If we're using a training augmentation set, add them to the training portion
-        if augmentation_images is not None and augmentation_labels is not None:
-            images = images + augmentation_images
-            labels = labels + augmentation_labels
-            mask = mask + ([0] * len(augmentation_labels))
-
-        # make the split random <-- ESSENTIAL
-        random.shuffle(mask)
-
-        # save the mask file in current directory for future use
-        with open('mask_ckpt.txt', 'w+') as mask_file:
-            for entry in mask:
-                mask_file.write(str(entry) + '\n')
+    # If we're using a training augmentation set, add them to the rest of the dataset
+    if augmentation_images is not None and augmentation_labels is not None:
+        images = images + augmentation_images
+        labels = labels + augmentation_labels
 
     # create partitions, we set train/validation to None if they're not being used
     if test_ratio != 0 and validation_ratio != 0:
@@ -88,6 +50,58 @@ def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_
         train_mf, test_mf, val_mf = tf.dynamic_partition(moderation_features, mask, 2)
 
     return train_images, train_labels, train_mf, test_images, test_labels, test_mf, val_images, val_labels, val_mf
+
+
+def _get_split_mask(test_ratio, validation_ratio, n_label, n_augmentation=0, force_mask_creation=False, mask_dir=None):
+    if not mask_dir:
+        mask_dir = os.path.curdir
+    mask_name = os.path.join(mask_dir, "mask_ckpt.txt")
+
+    # If there is a previously saved mask and we don't want to force a new one, load it from the current directory
+    mask = []
+    if not force_mask_creation:
+        try:
+            mask_file = open(mask_name, "r")
+            with mask_file:
+                for line in mask_file:
+                    mask.append(int(line.rstrip()))
+            print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), "Loaded previous partition mask."))
+        except FileNotFoundError:
+            mask = []
+
+    # If there is no previous mask or we're forcing it, we'll build one
+    if not mask:
+        print('{0}: {1}'.format(datetime.datetime.now().strftime("%I:%M%p"), 'Building new partition mask.'))
+        mask = [0] * n_label
+        val_mask_num = 1  # this changes depending on whether we are using testing or not
+        val_start_idx = 0  # if no testing then we idx from beginning, else we change this if there is testing
+
+        if test_ratio != 0:
+            # creating a mask [1,1,1,...,0,0,0]
+            num_test = int(n_label * test_ratio)
+            mask[:num_test] = [1] * num_test
+            val_mask_num = 2
+            val_start_idx = num_test
+
+        if validation_ratio != 0:
+            # if test_ratio != 0 then val_num_mask = 2 and we will create a mask as [1,1,1,...,2,2,2,...,0,0,0,...]
+            # otherwise we will only have train and validation thus creating a mask as [1,1,1,...,0,0,0]
+            num_val = int(n_label * validation_ratio)
+            mask[val_start_idx: val_start_idx + num_val] = [val_mask_num] * num_val
+
+        # If we're using a training augmentation set, add them to the training portion
+        if n_augmentation != 0:
+            mask = mask + ([0] * n_augmentation)
+
+        # make the split random <-- ESSENTIAL
+        random.shuffle(mask)
+
+        # save the mask file in current directory for future use
+        with open(mask_name, 'w+') as mask_file:
+            for entry in mask:
+                mask_file.write(str(entry) + '\n')
+
+    return mask
 
 
 def label_string_to_tensor(x, batch_size, num_outputs=-1):
