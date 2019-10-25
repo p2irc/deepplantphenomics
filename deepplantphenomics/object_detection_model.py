@@ -631,10 +631,10 @@ class ObjectDetectionModel(DPPModel):
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             if self._with_patching:
-                xx_output_size = [self._batch_size, num_patches_vert * num_patches_horiz,
+                xx_output_size = [-1, num_patches_vert * num_patches_horiz,
                                   self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
             else:
-                xx_output_size = [self._batch_size,
+                xx_output_size = [-1,
                                   self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
 
             total_outputs = []
