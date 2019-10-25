@@ -515,6 +515,9 @@ class ObjectDetectionModel(DPPModel):
             non_overlap = pair_iou[cur_grid, conf_order] < self._THRESH_OVERLAP
             if np.any(non_overlap):
                 conf_order = conf_order[non_overlap]
+                # Make sure that the most confidant box itself isn't still in the list (usually by having a self-IOU of
+                # 0.999999... when the overlap threshold is 1)
+                conf_order = conf_order[conf_order != cur_grid]
             else:
                 break
 
