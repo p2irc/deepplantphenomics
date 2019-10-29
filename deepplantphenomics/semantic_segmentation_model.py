@@ -259,8 +259,8 @@ class SemanticSegmentationModel(DPPModel):
                     for img_patches in np.array_split(xx, xx.shape[0] / n_patches):
                         # Stitch individual rows together, than stitch the rows into a full image
                         full_img = []
-                        for col_patches in np.array_split(img_patches, n_patches / num_patch_rows):
-                            row_patches = [col_patches[i] for i in range(num_patch_cols)]
+                        for row_of_patches in np.array_split(img_patches, num_patch_rows):
+                            row_patches = [row_of_patches[i] for i in range(num_patch_cols)]
                             full_img.append(np.concatenate(row_patches, axis=1))
                         full_img = np.concatenate(full_img, axis=0)
 
