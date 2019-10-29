@@ -50,9 +50,9 @@ We will train until 500 epochs - i.e. until we have seen all of the examples in 
 
 #### Repeatable Train/Test/Validation Splits
 
-We may want to ensure that the images are split the same way into training, testing, and validation sets. This will help us when tweaking the model or the hyperparameters for better performance by giving us similar inputs to the model's training loop, making for better comparisons in speed and predictive performance.
+We want to ensure that the images are split the same way into training, testing, and validation sets between each successive run. This is important because we want to isolate the test data while we perform model selection on the trianing and validation data. If the data was re-shuffled, this would leak test data into our training and validation sets, and vice versa.
 
-By default, DPP will save the train/test/val split it generated the first time we train with a given dataset (in `mask_ckpt.txt`); it will then load that same split when reusing that dataset. This effect can be overridden so that a new split is generated every time a dataset is loaded and trained on. We do this by extending the hyperparameters above with the following:
+By default, DPP will save the train/test/validation split it generated the first time we train with a given dataset (in `mask_ckpt.txt`); it will then load that same split when reusing that dataset. This effect can be overridden so that a new split is generated every time a dataset is loaded and trained on. We do this by extending the model options above with the following:
 
 ```python
 model.force_split_shuffle(True)
@@ -179,4 +179,3 @@ There are a few things you can try to encourage convergence.
 1. Lower the learning rate by an order of magnitude.
 2. Tune DropOut rates, or remove DropOut layers.
 3. Try a larger model. It may not have enough representational capacity for the problem.
-4. Get more data!
