@@ -6,6 +6,7 @@ import tensorflow as tf
 import deepplantphenomics as dpp
 from deepplantphenomics.tests.mock_dpp_model import MockDPPModel
 
+
 # public setters and adders, mostly testing for type and value errors
 @pytest.fixture(scope="module")
 def test_data_dir():
@@ -80,6 +81,83 @@ def test_set_batch_size(model):
     model.set_batch_size(4)
     assert model._batch_size == 4
     assert model._subbatch_size == 2
+
+
+def test_set_test_split(model):
+    assert model._test_split == 0.10
+    assert model._validation_split == 0.10
+
+    with pytest.raises(TypeError):
+        model.set_test_split('0.2')
+    with pytest.raises(ValueError):
+        model.set_test_split(-0.1)
+    with pytest.raises(ValueError):
+        model.set_test_split(1.1)
+
+    # No testing
+    model.set_test_split(0)
+    assert not model._testing
+    assert model._test_split == 0
+    assert model._validation_split == 0.10
+
+    # Regular testing and validation splits
+    model.set_test_split(0.25)
+    assert model._testing
+    assert model._test_split == 0.25
+    assert model._validation_split == 0.10
+
+    # Exactly half of the data is for training; warning shouldn't trigger
+    model.set_test_split(0.40)
+    assert model._testing
+    assert model._test_split == 0.40
+    assert model._validation_split == 0.10
+
+    # Less than half of the data is for testing; warning should trigger
+    with pytest.warns(Warning):
+        model.set_test_split(0.50)
+        assert model._testing
+        assert model._test_split == 0.50
+        assert model._validation_split == 0.10
+
+
+def test_set_validation_split(model):
+    assert model._test_split == 0.10
+    assert model._validation_split == 0.10
+
+    # No testing
+    model.set_validation_split(0)
+    assert not model._validation
+    assert model._validation_split == 0
+    assert model._test_split == 0.10
+
+    # Regular testing and validation splits
+    model.set_validation_split(0.25)
+    assert model._validation
+    assert model._validation_split == 0.25
+    assert model._test_split == 0.10
+
+    # Exactly half of the data is for training; warning shouldn't trigger
+    model.set_validation_split(0.40)
+    assert model._validation
+    assert model._validation_split == 0.40
+    assert model._test_split == 0.10
+
+    # Less than half of the data is for testing; warning should trigger
+    with pytest.warns(Warning):
+        model.set_validation_split(0.50)
+        assert model._validation
+        assert model._validation_split == 0.50
+        assert model._test_split == 0.10
+
+
+def test_force_split_shuffle(model):
+    assert not model._force_split_partition
+
+    with pytest.raises(TypeError):
+        model.force_split_shuffle('True')
+
+    model.force_split_shuffle(True)
+    assert model._force_split_partition
 
 
 def test_set_num_regression_outputs():

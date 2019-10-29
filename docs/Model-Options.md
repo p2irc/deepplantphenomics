@@ -78,6 +78,12 @@ set_validation_split()
 Set the ratio of the total number of samples to use as a validation set during training. Defaults to 0.10 (i.e. 10% of the samples).
 
 ```
+force_split_shuffle()
+```
+
+Sets whether to force shuffling of a loaded dataset into train, test, and validation partitions. These partitions are shuffled and saved the first time a dataset is used for training. By default, this is turned off and subsequent training runs load and reuse this partitioning, to avoid leaking data from the initially selected training and validation sets into the test set, and vice versa.
+
+```
 set_loss_function()
 ```
 

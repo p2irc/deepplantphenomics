@@ -152,6 +152,7 @@ class DPPModel(ABC):
         self._batch_size = 1
         self._test_split = 0.10
         self._validation_split = 0.10
+        self._force_split_partition = False
         self._maximum_training_batches = None
         self._reg_coeff = None
         self._optimizer = 'adam'
@@ -289,6 +290,18 @@ class DPPModel(ABC):
             warnings.warn('WARNING: Less than 50% of data is being used for training. ' +
                           '({test}% testing and {val}% validation)'.format(test=int(self._test_split * 100),
                                                                            val=int(self._validation_split * 100)))
+
+    def force_split_shuffle(self, force_split):
+        """
+        Sets whether to force shuffling of a loaded dataset into train, test, and validation partitions. By default,
+        this is turned off; these partitions are shuffled and saved the first time a dataset is used for training, and
+        subsequent training runs load and reuse this partitioning, making training more reproducible.
+        :param force_split: A boolean flag for whether to force
+        """
+        if not isinstance(force_split, bool):
+            raise TypeError("force_split must be a bool")
+
+        self._force_split_partition = force_split
 
     def set_maximum_training_epochs(self, epochs):
         """Set the max number of training epochs"""
@@ -532,13 +545,12 @@ class DPPModel(ABC):
             # Split the data into training, validation, and testing sets. If there is no validation set or no
             # moderation features being used they will be returned as 0 (for validation) or None (for moderation
             # features)
-            train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
+            train_images, train_labels, train_mf, test_images, test_labels, test_mf, val_images, val_labels, val_mf = \
+                loaders.split_raw_data(self._raw_image_files, self._raw_labels,
+                                       self._test_split, self._validation_split, self._all_moderation_features,
+                                       self._training_augmentation_images, self._training_augmentation_labels,
+                                       self._split_labels,
+                                       force_mask_creation=self._force_split_partition)
             # Parse the images and set the appropriate environment variables
             self._parse_dataset(train_images, train_labels, train_mf,
                                 test_images, test_labels, test_mf,

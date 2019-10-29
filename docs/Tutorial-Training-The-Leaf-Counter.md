@@ -48,6 +48,16 @@ We are going to use 20% of the examples for testing and none of them for validat
 
 We will train until 500 epochs - i.e. until we have seen all of the examples in the training set 500 times.
 
+#### Repeatable Train/Test/Validation Splits
+
+We want to ensure that the images are split the same way into training, testing, and validation sets between each successive run. This is important because we want to isolate the test data while we perform model selection on the trianing and validation data. If the data was re-shuffled, this would leak test data into our training and validation sets, and vice versa.
+
+By default, DPP will save the train/test/validation split it generated the first time we train with a given dataset (in `mask_ckpt.txt`); it will then load that same split when reusing that dataset. This effect can be overridden so that a new split is generated every time a dataset is loaded and trained on. We do this by extending the model options above with the following:
+
+```python
+model.force_split_shuffle(True)
+``` 
+
 ## Specifying Augmentation Options
 
 Since the size of the dataset is extremely small (165 images), it is necessary to use data augmentation. This means that we are going to artificially expand the size of the dataset by applying random distortions to some of the training images. The augmentations we are going to use are: randomly skewing the brightness and/or contrast, randomly flipping the images horizontally and/or vertically, and applying a random crop to the images.
@@ -156,7 +166,7 @@ For regression problems, the loss value is **the L2 norm of the ground truth lab
 
 Also, for one-dimensional output, notice that the L2 norm is reported as the "absolute" loss, while the relative difference is also reported. This is useful in cases (such as leaf counting) where we are interested in over- and under-prediction. For multi-dimensional outputs, the mean/std and absolute mean/std will be identical, since the L2 norm is never negative.
 
-An error histogram is output as a vector of frequencies for 100 bins. Note that the min and max loss are also reported. The first bin corresponds to the interval (-inf, min] and the last bin corresponds to the inerval [max, inf). The area between these bins is divided into 98 bins of equal size.
+An error histogram is output as a vector of frequencies for 100 bins. Note that the min and max loss are also reported. The first bin corresponds to the interval (-inf, min] and the last bin corresponds to the interval [max, inf). The area between these bins is divided into 98 bins of equal size.
 
 MSE (mean squared error) and R squared are also provided. For smaller test sets, the whole set of ground truth and predicted values are provided so that you can calculate whatever other statistics you need.
 
@@ -169,4 +179,3 @@ There are a few things you can try to encourage convergence.
 1. Lower the learning rate by an order of magnitude.
 2. Tune DropOut rates, or remove DropOut layers.
 3. Try a larger model. It may not have enough representational capacity for the problem.
-4. Get more data!
