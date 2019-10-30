@@ -8,8 +8,6 @@ from tqdm import tqdm
 
 
 class RegressionModel(DPPModel):
-    _problem_type = definitions.ProblemType.REGRESSION
-    _loss_fn = 'l2'
     _supported_loss_fns = ['l2', 'l1', 'smooth l1', 'log loss']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
@@ -17,14 +15,14 @@ class RegressionModel(DPPModel):
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
 
-    # State variables specific to regression for constructing the graph and passing to Tensorboard
-    _regression_loss = None
-
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
-
+        self._loss_fn = 'l2'
         self._num_regression_outputs = 1
+
+        # State variables specific to regression for constructing the graph and passing to Tensorboard
+        self._regression_loss = None
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""

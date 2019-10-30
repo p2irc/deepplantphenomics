@@ -10,8 +10,6 @@ import pickle
 
 
 class CountCeptionModel(deepplantpheno.DPPModel):
-    _problem_type = definitions.ProblemType.OBJECT_COUNTING
-    _loss_fn = 'l1'
     _supported_loss_fns = ['l1']
     _supported_augmentations = []
     _supports_standardization = False
@@ -19,6 +17,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'l1'
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)

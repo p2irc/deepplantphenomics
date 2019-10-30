@@ -10,8 +10,6 @@ from tqdm import tqdm
 
 
 class ClassificationModel(DPPModel):
-    _problem_type = definitions.ProblemType.CLASSIFICATION
-    _loss_fn = 'softmax cross entropy'
     _supported_loss_fns = ['softmax cross entropy']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
@@ -22,6 +20,7 @@ class ClassificationModel(DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'softmax cross entropy'
 
         # State variables specific to classification for constructing the graph and passing to Tensorboard
         self.__class_predictions = None

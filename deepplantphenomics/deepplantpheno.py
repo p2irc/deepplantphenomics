@@ -19,12 +19,8 @@ class DPPModel(ABC):
     provides common functionality and parameters for models of all problem types. Subclasses of DPPModel implement any
     changes and extra methods required to support that particular problem.
     """
-    # Class variables to be shared by instances or overridden by subclasses
-    # Operation settings
-    _problem_type = definitions.ProblemType.CLASSIFICATION
-    _loss_fn = 'softmax cross entropy'
-
-    # Supported implementations for various network components
+    # Class variables with the supported implementations for various network components; subclasses should override
+    # these
     _supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
     _supported_weight_initializers = ['normal', 'xavier']
     _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
@@ -157,6 +153,7 @@ class DPPModel(ABC):
         self._reg_coeff = None
         self._optimizer = 'adam'
         self._weight_initializer = 'xavier'
+        self._loss_fn = None
 
         self._learning_rate = 0.001
         self._lr_decay_factor = None

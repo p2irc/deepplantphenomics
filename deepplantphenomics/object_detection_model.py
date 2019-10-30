@@ -13,14 +13,13 @@ from tqdm import tqdm
 
 
 class ObjectDetectionModel(DPPModel):
-    _problem_type = definitions.ProblemType.OBJECT_DETECTION
-    _loss_fn = 'yolo'
     _supported_loss_fns = ['yolo']
     _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'yolo'
 
         # A flag to tell the object detection loaders whether to automatically convert JSON labels to YOLO format. This
         # exists because the dataset loader `load_yolo_dataset_from_directory` doesn't want that to happen
@@ -717,13 +716,12 @@ class ObjectDetectionModel(DPPModel):
                             (5 * self._NUM_BOXES + self._NUM_CLASSES)]
 
         with self._graph.as_default():
-            if self._problem_type is definitions.ProblemType.OBJECT_DETECTION:
-                layer = layers.convLayer('output',
-                                         copy.deepcopy(self._last_layer().output_size),
-                                         filter_dimension,
-                                         1,
-                                         None,
-                                         self._weight_initializer)
+            layer = layers.convLayer('output',
+                                     copy.deepcopy(self._last_layer().output_size),
+                                     filter_dimension,
+                                     1,
+                                     None,
+                                     self._weight_initializer)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)
