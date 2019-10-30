@@ -648,6 +648,18 @@ class DPPModel(ABC):
         else:
             return 0.0
 
+    @abstractmethod
+    def _graph_problem_loss(self, pred, lab):
+        """
+        Calculates the loss function for each item in a batch with a given pairing of predictions and labels. This is
+        specific to each problem type.
+        :param pred: A Tensor with Model predictions. The shape depends on the model and problem.
+        :param lab: A Tensor Labels to compare the predictions to. Most problems expect this to be the same shape as
+        pred, but exceptions exist.
+        :return: Loss values for each item in a batch
+        """
+        pass
+
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
         Adds graph components common to every problem type related to outputting losses and other summary variables to

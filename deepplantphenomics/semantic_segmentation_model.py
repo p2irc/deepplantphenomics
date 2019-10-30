@@ -94,10 +94,9 @@ class SemanticSegmentationModel(DPPModel):
                     l2_cost = self._graph_layer_loss()
 
                     # Define cost function  based on which one was selected via set_loss_function
-                    if self._loss_fn == 'sigmoid cross entropy':
-                        pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y)
-                    gpu_cost = tf.squeeze(tf.reduce_mean(pixel_loss) + l2_cost)
-                    cost_sum = tf.reduce_sum(pixel_loss)
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.squeeze(tf.reduce_mean(pred_loss) + l2_cost)
+                    cost_sum = tf.reduce_sum(pred_loss)
                     device_costs.append(cost_sum)
 
                     # Set the optimizer and get the gradients from it
@@ -156,6 +155,12 @@ class SemanticSegmentationModel(DPPModel):
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'sigmoid cross entropy':
+            return tf.nn.sigmoid_cross_entropy_with_logits(logits=pred, labels=lab)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

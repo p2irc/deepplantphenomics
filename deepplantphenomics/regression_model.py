@@ -117,17 +117,10 @@ class RegressionModel(DPPModel):
                     l2_cost = self._graph_layer_loss()
 
                     # Define the cost function
-                    val_diffs = tf.subtract(xx, y)
-                    if self._loss_fn == 'l2':
-                        diff_loss = self.__l2_norm(val_diffs)
-                    elif self._loss_fn == 'l1':
-                        diff_loss = self.__l1_norm(val_diffs)
-                    elif self._loss_fn == 'smooth l1':
-                        diff_loss = self.__smooth_l1_norm(val_diffs)
-                    elif self._loss_fn == 'log loss':
-                        diff_loss = self.__log_norm(val_diffs)
-                    gpu_cost = tf.reduce_mean(diff_loss) + l2_cost
-                    device_costs.append(tf.reduce_sum(diff_loss))
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
+                    cost_sum = tf.reduce_sum(pred_loss)
+                    device_costs.append(cost_sum)
 
                     # Set the optimizer and get the gradients from it
                     gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
@@ -190,6 +183,19 @@ class RegressionModel(DPPModel):
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        val_diffs = tf.subtract(pred, lab)
+        if self._loss_fn == 'l2':
+            return self.__l2_norm(val_diffs)
+        elif self._loss_fn == 'l1':
+            return self.__l1_norm(val_diffs)
+        elif self._loss_fn == 'smooth l1':
+            return self.__smooth_l1_norm(val_diffs)
+        elif self._loss_fn == 'log loss':
+            return self.__log_norm(val_diffs)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

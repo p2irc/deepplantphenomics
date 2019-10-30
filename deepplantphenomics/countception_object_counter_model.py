@@ -72,13 +72,15 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                     l2_cost = self._graph_layer_loss()
 
                     # Define cost function
-                    if self._loss_fn == 'l1':
-                        val_diff = tf.abs(xx - y)
-                        gt = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
-                        pr = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
-                        acc_diff = tf.abs(gt - pr)
-                    gpu_cost = tf.squeeze(tf.reduce_mean(val_diff) + l2_cost)
-                    device_costs.append(tf.reduce_sum(val_diff))
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.squeeze(tf.reduce_mean(pred_loss) + l2_cost)
+                    cost_sum = tf.reduce_sum(pred_loss)
+                    device_costs.append(cost_sum)
+
+                    # Get the accuracy of the predictions as well
+                    real_gnd_truth = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
+                    real_pred = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
+                    acc_diff = tf.abs(real_pred - real_gnd_truth)
                     device_accuracies.append(tf.reduce_sum(acc_diff))
 
                     # Set the optimizer and get the gradients from it
@@ -125,6 +127,12 @@ class CountCeptionModel(deepplantpheno.DPPModel):
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'l1':
+            return tf.abs(pred - lab)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time

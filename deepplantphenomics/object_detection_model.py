@@ -287,13 +287,13 @@ class ObjectDetectionModel(DPPModel):
                     l2_cost = self._graph_layer_loss()
 
                     # Define the cost function
-                    if self._loss_fn == 'yolo':
-                        xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
-                                             self._NUM_BOXES * 5 + self._NUM_CLASSES])
-                        yolo_loss = self._yolo_loss_function(y, xx)
-                        num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
-                    gpu_cost = tf.squeeze(yolo_loss / num_image_loss + l2_cost)
-                    device_costs.append(yolo_loss)
+                    xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
+                                         self._NUM_BOXES * 5 + self._NUM_CLASSES])
+                    num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
+
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.squeeze(pred_loss / num_image_loss + l2_cost)
+                    device_costs.append(pred_loss)
 
                     # Set the optimizer and get the gradients from it
                     gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
@@ -353,6 +353,12 @@ class ObjectDetectionModel(DPPModel):
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'yolo':
+            return self._yolo_loss_function(lab, pred)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

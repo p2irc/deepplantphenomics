@@ -99,10 +99,9 @@ class ClassificationModel(DPPModel):
                     # needed to later get the overall batch's cost
                     yy = tf.argmax(y, 1)
 
-                    if self._loss_fn == 'softmax cross entropy':
-                        sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=yy)
-                    gpu_cost = tf.reduce_mean(tf.concat([sf_logits], axis=0)) + l2_cost
-                    cost_sum = tf.reduce_sum(tf.concat([sf_logits], axis=0))
+                    pred_loss = self._graph_problem_loss(xx, yy)
+                    gpu_cost = tf.reduce_mean(tf.concat([pred_loss], axis=0)) + l2_cost
+                    cost_sum = tf.reduce_sum(tf.concat([pred_loss], axis=0))
                     device_costs.append(cost_sum)
 
                     # For classification problems, we will compute the training accuracy as well; this is also used
@@ -166,6 +165,12 @@ class ClassificationModel(DPPModel):
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, average_gradients, opt_variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'softmax cross entropy':
+            return tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred, labels=lab)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time
