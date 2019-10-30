@@ -638,6 +638,16 @@ class DPPModel(ABC):
         """
         return optimizer.apply_gradients(zip(gradients, variables))
 
+    def _graph_layer_loss(self):
+        """Calculates and returns the total L2 loss from the weights of fully connected layers. This is 0 if a
+        regularization coefficient isn't specified."""
+        if self._reg_coeff is not None:
+            return tf.squeeze(tf.reduce_sum(
+                [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                 if isinstance(layer, layers.fullyConnectedLayer)]))
+        else:
+            return 0.0
+
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
         Adds graph components common to every problem type related to outputting losses and other summary variables to
