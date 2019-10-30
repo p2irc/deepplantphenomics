@@ -132,9 +132,8 @@ class SemanticSegmentationModel(DPPModel):
                 else:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
-                self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self._graph_ops['x_test_predicted'], labels=self._graph_ops['y_test']), axis=[1, 2])
-                self._graph_ops['test_losses'] = tf.squeeze(self._graph_ops['test_losses'], axis=1)
+                test_loss = self._graph_problem_loss(self._graph_ops['x_test_predicted'], self._graph_ops['y_test'])
+                self._graph_ops['test_losses'] = tf.squeeze(tf.reduce_mean(test_loss, axis=[1, 2]), axis=1)
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
@@ -146,10 +145,8 @@ class SemanticSegmentationModel(DPPModel):
                 else:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-                self._graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self._graph_ops['x_val_predicted'], labels=self._graph_ops['y_val']), axis=[1, 2])
-                self._graph_ops['val_losses'] = tf.squeeze(self._graph_ops['val_losses'], axis=1)
-                self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
+                val_loss = self._graph_problem_loss(self._graph_ops['x_val_predicted'], self._graph_ops['y_val'])
+                self._graph_ops['val_losses'] = tf.squeeze(tf.reduce_mean(val_loss, axis=[1, 2]), axis=1)
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:

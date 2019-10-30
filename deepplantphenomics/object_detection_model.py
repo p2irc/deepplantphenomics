@@ -324,14 +324,12 @@ class ObjectDetectionModel(DPPModel):
                                                                   self._grid_w * self._grid_h,
                                                                   self._NUM_BOXES * 5 + self._NUM_CLASSES])
 
-                if self._loss_fn == 'yolo':
-                    self._graph_ops['test_losses'] = \
-                        self._yolo_loss_function(self._graph_ops['y_test'],
-                                                 self._graph_ops['x_test_predicted']) / n_images
+                self._graph_ops['test_losses'] = self._graph_problem_loss(self._graph_ops['x_test_predicted'],
+                                                                          self._graph_ops['y_test']) / n_images
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
-                n_images = tf.cast(tf.shape(x_test)[0], tf.float32)
+                n_images = tf.cast(tf.shape(x_val)[0], tf.float32)
 
                 if self._has_moderation:
                     mod_w_val = val_mod_iter.get_next()
@@ -344,10 +342,8 @@ class ObjectDetectionModel(DPPModel):
                                                                  self._grid_w * self._grid_h,
                                                                  self._NUM_BOXES * 5 + self._NUM_CLASSES])
 
-                if self._loss_fn == 'yolo':
-                    self._graph_ops['val_losses'] = \
-                        self._yolo_loss_function(self._graph_ops['y_val'],
-                                                 self._graph_ops['x_val_predicted']) / n_images
+                self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
+                                                                         self._graph_ops['y_val']) / n_images
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:

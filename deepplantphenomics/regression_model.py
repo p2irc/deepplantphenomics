@@ -152,13 +152,12 @@ class RegressionModel(DPPModel):
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
                 if self._num_regression_outputs == 1:
-                    # self._graph_ops['test_losses'] = tf.squeeze(tf.stack(
-                    #     self._graph_ops['x_test_predicted'] - self._graph_ops['y_test']))
-                    t1 = self._graph_ops['x_test_predicted'] - self._graph_ops['y_test']
-                    self._graph_ops['test_losses'] = tf.squeeze(t1, axis=1)
+                    # For 1 output, taking a norm does nothing, so skip it; the loss is just the difference
+                    self._graph_ops['test_losses'] = tf.squeeze(
+                        self._graph_ops['x_test_predicted'] - self._graph_ops['y_test'], axis=1)
                 else:
-                    self._graph_ops['test_losses'] = self.__l2_norm(
-                        self._graph_ops['x_test_predicted'] - self._graph_ops['y_test'])
+                    self._graph_ops['test_losses'] = self._graph_problem_loss(self._graph_ops['x_test_predicted'],
+                                                                              self._graph_ops['y_test'])
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
@@ -171,11 +170,12 @@ class RegressionModel(DPPModel):
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
                 if self._num_regression_outputs == 1:
+                    # For 1 output, taking a norm does nothing, so skip it; the loss is just the difference
                     self._graph_ops['val_losses'] = tf.squeeze(
                         self._graph_ops['x_val_predicted'] - self._graph_ops['y_val'], axis=1)
                 else:
-                    self._graph_ops['val_losses'] = self.__l2_norm(
-                        self._graph_ops['x_val_predicted'] - self._graph_ops['y_val'])
+                    self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
+                                                                             self._graph_ops['y_val'])
                 self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
 
             # Epoch summaries for Tensorboard
