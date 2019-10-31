@@ -183,7 +183,7 @@ class RegressionModel(DPPModel):
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
 
     def _graph_problem_loss(self, pred, lab):
-        val_diffs = tf.subtract(pred, lab)
+        val_diffs = pred - lab
         if self._loss_fn == 'l2':
             return self.__l2_norm(val_diffs)
         elif self._loss_fn == 'l1':
@@ -194,6 +194,50 @@ class RegressionModel(DPPModel):
             return self.__log_norm(val_diffs)
 
         raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def __l2_norm(self, x):
+        """
+        Calculates the L2 norm of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L2 norm for each item
+        """
+        y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
+        return y
+
+    def __l1_norm(self, x):
+        """
+        Calculates the L1 norm of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L1 norm for each item
+        """
+        y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+        return y
+
+    def __smooth_l1_norm(self, x, huber_delta=1):
+        """
+        Calculates the smooth-L1 norm of prediction difference Tensors for each item in a batch. This amounts to
+        evaluating the Huber loss of each individual value and taking the mean.
+        :param x: A Tensor with prediction differences for each item in a batch
+        :param huber_delta: A parameter for calculating the Huber loss; roughly corresponds to the value where the Huber
+        loss transitions from quadratic growth to linear growth
+        :return: A Tensor with the scalar smooth-L1 norm for each item
+        """
+        x = tf.abs(x)
+        y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
+                                          0.5 * ex ** 2,
+                                          huber_delta * (ex - 0.5 * huber_delta)), x)
+        y = tf.reduce_mean(y, axis=1)
+        return y
+
+    def __log_norm(self, x):
+        """
+        Calculates the log norm of prediction difference Tensors for each item in a batch. ...
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar log norm for each item
+        """
+        y = tf.map_fn(lambda ex: -tf.log(1 - tf.clip_by_value(tf.abs(ex), 0, 0.9999999)), x)
+        y = tf.reduce_mean(y, axis=1)
+        return y
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
@@ -295,34 +339,6 @@ class RegressionModel(DPPModel):
         # Nothing special required for regression
         interpreted_outputs = self.forward_pass_with_file_inputs(x)
         return interpreted_outputs
-
-    def __l2_norm(self, x):
-        """Returns the L2 norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
-        return y
-
-    def __l1_norm(self, x):
-        """Returns the L1 norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
-        return y
-
-    def __smooth_l1_norm(self, x):
-        """Returns the smooth L1 norm of a tensor"""
-        huber_delta = 1  # may want to make this a tunable hyper parameter in future
-        with self._graph.as_default():
-            x = tf.abs(x)
-            y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
-                                              0.5*ex**2,
-                                              huber_delta*(ex-0.5*huber_delta)), x)
-        return y
-
-    def __log_norm(self, x):
-        """Returns the log norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: -tf.log(1 - tf.clip_by_value(tf.abs(ex), 0, 0.9999999)), x)
-        return y
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         if len(self._layers) < 1:
