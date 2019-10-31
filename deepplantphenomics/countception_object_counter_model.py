@@ -72,7 +72,7 @@ class CountCeptionModel(DPPModel):
 
                     # Define cost function
                     pred_loss = self._graph_problem_loss(xx, y)
-                    gpu_cost = tf.squeeze(tf.reduce_mean(pred_loss) + l2_cost)
+                    gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
                     cost_sum = tf.reduce_sum(pred_loss)
                     device_costs.append(cost_sum)
 
@@ -125,9 +125,18 @@ class CountCeptionModel(DPPModel):
 
     def _graph_problem_loss(self, pred, lab):
         if self._loss_fn == 'l1':
-            return tf.abs(pred - lab)
+            return self.__l1_norm(pred - lab)
 
         raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def __l1_norm(self, x):
+        """
+        Calculates the L1 norm of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L1 norm for each item
+        """
+        y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+        return y
 
     def _graph_count_accuracy(self, pred, lab):
         """
