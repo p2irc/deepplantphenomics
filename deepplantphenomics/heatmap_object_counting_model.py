@@ -1,4 +1,5 @@
-from deepplantphenomics import definitions, loaders, SemanticSegmentationModel
+from deepplantphenomics import loaders, SemanticSegmentationModel
+import tensorflow as tf
 import numpy as np
 import os
 import warnings
@@ -10,11 +11,12 @@ from PIL import Image
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
-    _problem_type = definitions.ProblemType.HEATMAP_COUNTING
+    _supported_loss_fns = ['l2', 'l1']
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'l2'
 
         # This is needed for reading in heatmap labels expressed as object locations, since we want to convert points
         # to gaussians when reading them in and constructing ground truth heatmaps
@@ -34,6 +36,33 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             raise TypeError("sigma must be a real number")
 
         self._density_sigma = sigma
+
+    def _graph_problem_loss(self, pred, lab):
+        heatmap_diffs = pred - lab
+        if self._loss_fn == 'l2':
+            return self.__l2_norm(heatmap_diffs)
+        elif self._loss_fn == 'l1':
+            return self.__l1_norm(heatmap_diffs)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def __l2_norm(self, x):
+        """
+        Calculates the L2 norm of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L2 norm for each item
+        """
+        y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
+        return y
+
+    def __l1_norm(self, x):
+        """
+        Calculates the L1 norm of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L1 norm for each item
+        """
+        y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+        return y
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

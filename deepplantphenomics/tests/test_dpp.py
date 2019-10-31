@@ -395,7 +395,7 @@ def test_set_patch_size(model):
                           (dpp.SemanticSegmentationModel(), 'l2', 'sigmoid cross entropy'),
                           (dpp.ObjectDetectionModel(), 'l2', 'yolo'),
                           (dpp.CountCeptionModel(), 'l2', 'l1'),
-                          (dpp.HeatmapObjectCountingModel(), 'l1', 'sigmoid cross entropy')])
+                          (dpp.HeatmapObjectCountingModel(), 'sigmoid cross entropy', 'l2')])
 def test_set_loss_function(model, bad_loss, good_loss):
     with pytest.raises(TypeError):
         model.set_loss_function(0)
