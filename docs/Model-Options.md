@@ -94,7 +94,7 @@ Sets the loss function to be used by the model during training and testing. The 
 - `SemanticSegmentationModel`: `sigmoid cross entropy` only
 - `ObjectDetectionModel`: `yolo` only
 - `CountCeptionModel`: `l1` only
-- `HeatmapObjectCountingModel`: `sigmoid cross entropy` only
+- `HeatmapObjectCountingModel`: `l2` and `l1`
 
 #### Regression Models Only
 
