@@ -25,7 +25,7 @@ class DPPModel(ABC):
     _supported_weight_initializers = ['normal', 'xavier']
     _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
     _supported_pooling_types = ['max', 'avg']
-    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
+    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'sigmoid cross entropy',
                            'yolo']
     _supported_predefined_models = ['vgg-16', 'alexnet', 'resnet-18', 'yolov2', 'xsmall', 'small', 'medium', 'large',
                                     "countception"]

@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 
 class RegressionModel(DPPModel):
-    _supported_loss_fns = ['l2', 'l1', 'smooth l1', 'log loss']
+    _supported_loss_fns = ['l2', 'l1', 'smooth l1']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
@@ -185,57 +185,45 @@ class RegressionModel(DPPModel):
     def _graph_problem_loss(self, pred, lab):
         val_diffs = pred - lab
         if self._loss_fn == 'l2':
-            return self.__l2_norm(val_diffs)
+            return self.__l2_loss(val_diffs)
         elif self._loss_fn == 'l1':
-            return self.__l1_norm(val_diffs)
+            return self.__l1_loss(val_diffs)
         elif self._loss_fn == 'smooth l1':
-            return self.__smooth_l1_norm(val_diffs)
-        elif self._loss_fn == 'log loss':
-            return self.__log_norm(val_diffs)
+            return self.__smooth_l1_loss(val_diffs)
 
         raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
-    def __l2_norm(self, x):
+    def __l2_loss(self, x):
         """
-        Calculates the L2 norm of prediction difference Tensors for each item in a batch
+        Calculates the L2 loss of prediction difference Tensors for each item in a batch
         :param x: A Tensor with prediction differences for each item in a batch
-        :return: A Tensor with the scalar L2 norm for each item
+        :return: A Tensor with the scalar L2 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
+        y = tf.map_fn(lambda ex: tf.reduce_mean(ex ** 2), x)
         return y
 
-    def __l1_norm(self, x):
+    def __l1_loss(self, x):
         """
-        Calculates the L1 norm of prediction difference Tensors for each item in a batch
+        Calculates the L1 loss of prediction difference Tensors for each item in a batch
         :param x: A Tensor with prediction differences for each item in a batch
-        :return: A Tensor with the scalar L1 norm for each item
+        :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+        y = tf.map_fn(lambda ex: tf.reduce_mean(tf.abs(ex)), x)
         return y
 
-    def __smooth_l1_norm(self, x, huber_delta=1):
+    def __smooth_l1_loss(self, x, huber_delta=1):
         """
-        Calculates the smooth-L1 norm of prediction difference Tensors for each item in a batch. This amounts to
-        evaluating the Huber loss of each individual value and taking the mean.
+        Calculates the smooth-L1 loss of prediction difference Tensors for each item in a batch. This amounts to
+        evaluating the Huber loss of each individual value and taking the sum.
         :param x: A Tensor with prediction differences for each item in a batch
         :param huber_delta: A parameter for calculating the Huber loss; roughly corresponds to the value where the Huber
         loss transitions from quadratic growth to linear growth
-        :return: A Tensor with the scalar smooth-L1 norm for each item
+        :return: A Tensor with the scalar smooth-L1 loss for each item
         """
         x = tf.abs(x)
         y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
                                           0.5 * ex ** 2,
                                           huber_delta * (ex - 0.5 * huber_delta)), x)
-        y = tf.reduce_mean(y, axis=1)
-        return y
-
-    def __log_norm(self, x):
-        """
-        Calculates the log norm of prediction difference Tensors for each item in a batch. ...
-        :param x: A Tensor with prediction differences for each item in a batch
-        :return: A Tensor with the scalar log norm for each item
-        """
-        y = tf.map_fn(lambda ex: -tf.log(1 - tf.clip_by_value(tf.abs(ex), 0, 0.9999999)), x)
         y = tf.reduce_mean(y, axis=1)
         return y
 

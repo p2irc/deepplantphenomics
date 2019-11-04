@@ -90,7 +90,7 @@ set_loss_function()
 Sets the loss function to be used by the model during training and testing. The supported loss functions vary with the specific problem type/`Model`:
 
 - `ClassificationModel`: `softmax cross entropy` only
-- `RegressionModel`: `l2`, `l1`, `smooth l1`, and `log loss`
+- `RegressionModel`: `l2`, `l1`, and `smooth l1`
 - `SemanticSegmentationModel`: `sigmoid cross entropy` only
 - `ObjectDetectionModel`: `yolo` only
 - `CountCeptionModel`: `l1` only

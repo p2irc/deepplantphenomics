@@ -125,17 +125,17 @@ class CountCeptionModel(DPPModel):
 
     def _graph_problem_loss(self, pred, lab):
         if self._loss_fn == 'l1':
-            return self.__l1_norm(pred - lab)
+            return self.__l1_loss(pred - lab)
 
         raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
-    def __l1_norm(self, x):
+    def __l1_loss(self, x):
         """
-        Calculates the L1 norm of prediction difference Tensors for each item in a batch
+        Calculates the L1 loss of prediction difference Tensors for each item in a batch
         :param x: A Tensor with prediction differences for each item in a batch
-        :return: A Tensor with the scalar L1 norm for each item
+        :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+        y = tf.map_fn(lambda ex: tf.reduce_mean(tf.abs(ex)), x)
         return y
 
     def _graph_count_accuracy(self, pred, lab):

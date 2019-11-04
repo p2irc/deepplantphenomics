@@ -40,28 +40,28 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
     def _graph_problem_loss(self, pred, lab):
         heatmap_diffs = pred - lab
         if self._loss_fn == 'l2':
-            return self.__l2_norm(heatmap_diffs)
+            return self.__l2_loss(heatmap_diffs)
         elif self._loss_fn == 'l1':
-            return self.__l1_norm(heatmap_diffs)
+            return self.__l1_loss(heatmap_diffs)
 
         raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
-    def __l2_norm(self, x):
+    def __l2_loss(self, x):
         """
-        Calculates the L2 norm of prediction difference Tensors for each item in a batch
+        Calculates the L2 loss of prediction difference Tensors for each item in a batch
         :param x: A Tensor with prediction differences for each item in a batch
-        :return: A Tensor with the scalar L2 norm for each item
+        :return: A Tensor with the scalar L2 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
+        y = tf.map_fn(lambda ex: tf.reduce_mean(ex ** 2), x)
         return y
 
-    def __l1_norm(self, x):
+    def __l1_loss(self, x):
         """
-        Calculates the L1 norm of prediction difference Tensors for each item in a batch
+        Calculates the L1 loss of prediction difference Tensors for each item in a batch
         :param x: A Tensor with prediction differences for each item in a batch
-        :return: A Tensor with the scalar L1 norm for each item
+        :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
+        y = tf.map_fn(lambda ex: tf.reduce_mean(tf.abs(ex)), x)
         return y
 
     def compute_full_test_accuracy(self):
