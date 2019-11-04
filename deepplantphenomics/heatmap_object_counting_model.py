@@ -52,7 +52,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L2 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_mean(ex ** 2), x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
         return y
 
     def __l1_loss(self, x):
@@ -61,7 +61,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_mean(tf.abs(ex)), x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
         return y
 
     def compute_full_test_accuracy(self):

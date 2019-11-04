@@ -199,7 +199,7 @@ class RegressionModel(DPPModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L2 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_mean(ex ** 2), x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
         return y
 
     def __l1_loss(self, x):
@@ -208,7 +208,7 @@ class RegressionModel(DPPModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_mean(tf.abs(ex)), x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
         return y
 
     def __smooth_l1_loss(self, x, huber_delta=1):
@@ -224,7 +224,7 @@ class RegressionModel(DPPModel):
         y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
                                           0.5 * ex ** 2,
                                           huber_delta * (ex - 0.5 * huber_delta)), x)
-        y = tf.reduce_mean(y, axis=1)
+        y = tf.reduce_sum(y, axis=1)
         return y
 
     def compute_full_test_accuracy(self):

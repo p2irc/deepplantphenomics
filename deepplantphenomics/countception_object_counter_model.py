@@ -135,7 +135,7 @@ class CountCeptionModel(DPPModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_mean(tf.abs(ex)), x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
         return y
 
     def _graph_count_accuracy(self, pred, lab):
