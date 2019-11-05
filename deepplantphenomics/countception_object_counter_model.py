@@ -1,4 +1,4 @@
-from . import layers, definitions, deepplantpheno
+from . import DPPModel
 import numpy as np
 import tensorflow as tf
 import datetime
@@ -9,9 +9,7 @@ from tqdm import tqdm
 import pickle
 
 
-class CountCeptionModel(deepplantpheno.DPPModel):
-    _problem_type = definitions.ProblemType.OBJECT_COUNTING
-    _loss_fn = 'l1'
+class CountCeptionModel(DPPModel):
     _supported_loss_fns = ['l1']
     _supported_augmentations = []
     _supports_standardization = False
@@ -19,6 +17,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'l1'
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
@@ -69,21 +68,16 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
-                    if self._reg_coeff is not None:
-                        l2_cost = tf.squeeze(tf.reduce_sum(
-                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                             if isinstance(layer, layers.fullyConnectedLayer)]))
-                    else:
-                        l2_cost = 0.0
+                    l2_cost = self._graph_layer_loss()
 
                     # Define cost function
-                    if self._loss_fn == 'l1':
-                        val_diff = tf.abs(xx - y)
-                        gt = tf.reduce_sum(y, axis=[1, 2, 3]) / (32 ** 2.0)
-                        pr = tf.reduce_sum(xx, axis=[1, 2, 3]) / (32 ** 2.0)
-                        acc_diff = tf.abs(gt - pr)
-                    gpu_cost = tf.squeeze(tf.reduce_mean(val_diff) + l2_cost)
-                    device_costs.append(tf.reduce_sum(val_diff))
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
+                    cost_sum = tf.reduce_sum(pred_loss)
+                    device_costs.append(cost_sum)
+
+                    # Get the accuracy of the predictions as well
+                    _, _, acc_diff = self._graph_count_accuracy(xx, y)
                     device_accuracies.append(tf.reduce_sum(acc_diff))
 
                     # Set the optimizer and get the gradients from it
@@ -106,30 +100,55 @@ class CountCeptionModel(deepplantpheno.DPPModel):
 
                 self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
-                if self._loss_fn == 'l1':
-                    self._graph_ops['test_losses'] = tf.reduce_mean(tf.abs(
-                        self._graph_ops['y_test'] - self._graph_ops['x_test_predicted']))
-                    gt_test = tf.reduce_sum(self._graph_ops['y_test'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    pr_test = tf.reduce_sum(self._graph_ops['x_test_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    self._graph_ops['gt_test'] = gt_test
-                    self._graph_ops['pr_test'] = pr_test
-                    self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.abs(gt_test - pr_test))
+                test_loss = self._graph_problem_loss(self._graph_ops['x_test_predicted'], self._graph_ops['y_test'])
+                self._graph_ops['test_losses'] = tf.reduce_mean(test_loss)
+
+                self._graph_ops['pr_test'], self._graph_ops['gt_test'], test_diff = self._graph_count_accuracy(
+                    self._graph_ops['x_test_predicted'], self._graph_ops['y_test'])
+                self._graph_ops['test_accuracy'] = tf.reduce_mean(test_diff)
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
 
                 self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-                if self._loss_fn == 'l1':
-                    self._graph_ops['val_losses'] = tf.reduce_mean(tf.abs(
-                        self._graph_ops['y_val'] - self._graph_ops['x_val_predicted']))
-                    gt_val = tf.reduce_sum(self._graph_ops['y_val'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    pr_val = tf.reduce_sum(self._graph_ops['x_val_predicted'], axis=[1, 2, 3]) / (32 ** 2.0)
-                    self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.abs(gt_val - pr_val))
+                val_loss = self._graph_problem_loss(self._graph_ops['x_val_predicted'], self._graph_ops['y_val'])
+                self._graph_ops['val_losses'] = tf.reduce_mean(val_loss)
+
+                _, _, val_diff = self._graph_count_accuracy(self._graph_ops['x_val_predicted'],
+                                                            self._graph_ops['y_val'])
+                self._graph_ops['val_accuracy'] = tf.reduce_mean(val_diff)
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'l1':
+            return self.__l1_loss(pred - lab)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def __l1_loss(self, x):
+        """
+        Calculates the L1 loss of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L1 loss for each item
+        """
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
+        return y
+
+    def _graph_count_accuracy(self, pred, lab):
+        """
+        Calculates the total count from the predictions and labels for each item in a batch
+        :param pred: Model predictions for the count heatmap
+        :param lab: Labels for the correct heatmaps and counts, with the same size as pred
+        :return: The total count for the predictions and labels and their absolute difference
+        """
+        pred_count = tf.reduce_sum(pred, axis=[1, 2, 3]) / (32 ** 2.0)
+        true_count = tf.reduce_sum(lab, axis=[1, 2, 3]) / (32 ** 2.0)
+        count_diff = tf.abs(pred_count - true_count)
+        return pred_count, true_count, count_diff
 
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time
@@ -193,8 +212,7 @@ class CountCeptionModel(deepplantpheno.DPPModel):
                 abs_diff_sum = abs_diff_sum + batch_abs_diff
 
                 # Print prediction results for each image as we go
-                for idx, gt in enumerate(batch_gt):
-                    pr = batch_pr[idx]
+                for idx, (gt, pr) in enumerate(zip(batch_gt, batch_pr)):
                     abs_diff = abs(pr - gt)
                     rel_diff = abs_diff / gt
                     self._log("idx={}, real_count={}, prediction={:.3f}, abs_diff={:.3f}, relative_diff={:.3f}"

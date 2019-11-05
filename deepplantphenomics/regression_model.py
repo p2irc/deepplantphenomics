@@ -8,23 +8,21 @@ from tqdm import tqdm
 
 
 class RegressionModel(DPPModel):
-    _problem_type = definitions.ProblemType.REGRESSION
-    _loss_fn = 'l2'
-    _supported_loss_fns = ['l2', 'l1', 'smooth l1', 'log loss']
+    _supported_loss_fns = ['l2', 'l1', 'smooth l1']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
 
-    # State variables specific to regression for constructing the graph and passing to Tensorboard
-    _regression_loss = None
-
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
-
+        self._loss_fn = 'l2'
         self._num_regression_outputs = 1
+
+        # State variables specific to regression for constructing the graph and passing to Tensorboard
+        self._regression_loss = None
 
     def set_num_regression_outputs(self, num):
         """Set the number of regression response variables"""
@@ -114,25 +112,13 @@ class RegressionModel(DPPModel):
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
-                    if self._reg_coeff is not None:
-                        l2_cost = tf.squeeze(tf.reduce_sum(
-                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                             if isinstance(layer, layers.fullyConnectedLayer)]))
-                    else:
-                        l2_cost = 0.0
+                    l2_cost = self._graph_layer_loss()
 
                     # Define the cost function
-                    val_diffs = tf.subtract(xx, y)
-                    if self._loss_fn == 'l2':
-                        diff_loss = self.__l2_norm(val_diffs)
-                    elif self._loss_fn == 'l1':
-                        diff_loss = self.__l1_norm(val_diffs)
-                    elif self._loss_fn == 'smooth l1':
-                        diff_loss = self.__smooth_l1_norm(val_diffs)
-                    elif self._loss_fn == 'log loss':
-                        diff_loss = self.__log_norm(val_diffs)
-                    gpu_cost = tf.reduce_mean(diff_loss) + l2_cost
-                    device_costs.append(tf.reduce_sum(diff_loss))
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
+                    cost_sum = tf.reduce_sum(pred_loss)
+                    device_costs.append(cost_sum)
 
                     # Set the optimizer and get the gradients from it
                     gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
@@ -166,13 +152,12 @@ class RegressionModel(DPPModel):
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
                 if self._num_regression_outputs == 1:
-                    # self._graph_ops['test_losses'] = tf.squeeze(tf.stack(
-                    #     self._graph_ops['x_test_predicted'] - self._graph_ops['y_test']))
-                    t1 = self._graph_ops['x_test_predicted'] - self._graph_ops['y_test']
-                    self._graph_ops['test_losses'] = tf.squeeze(t1, axis=1)
+                    # For 1 output, taking a norm does nothing, so skip it; the loss is just the difference
+                    self._graph_ops['test_losses'] = tf.squeeze(
+                        self._graph_ops['x_test_predicted'] - self._graph_ops['y_test'], axis=1)
                 else:
-                    self._graph_ops['test_losses'] = self.__l2_norm(
-                        self._graph_ops['x_test_predicted'] - self._graph_ops['y_test'])
+                    self._graph_ops['test_losses'] = self._graph_problem_loss(self._graph_ops['x_test_predicted'],
+                                                                              self._graph_ops['y_test'])
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
@@ -185,16 +170,61 @@ class RegressionModel(DPPModel):
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
                 if self._num_regression_outputs == 1:
+                    # For 1 output, taking a norm does nothing, so skip it; the loss is just the difference
                     self._graph_ops['val_losses'] = tf.squeeze(
                         self._graph_ops['x_val_predicted'] - self._graph_ops['y_val'], axis=1)
                 else:
-                    self._graph_ops['val_losses'] = self.__l2_norm(
-                        self._graph_ops['x_val_predicted'] - self._graph_ops['y_val'])
+                    self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
+                                                                             self._graph_ops['y_val'])
                 self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        val_diffs = pred - lab
+        if self._loss_fn == 'l2':
+            return self.__l2_loss(val_diffs)
+        elif self._loss_fn == 'l1':
+            return self.__l1_loss(val_diffs)
+        elif self._loss_fn == 'smooth l1':
+            return self.__smooth_l1_loss(val_diffs)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def __l2_loss(self, x):
+        """
+        Calculates the L2 loss of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L2 loss for each item
+        """
+        y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
+        return y
+
+    def __l1_loss(self, x):
+        """
+        Calculates the L1 loss of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L1 loss for each item
+        """
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
+        return y
+
+    def __smooth_l1_loss(self, x, huber_delta=1):
+        """
+        Calculates the smooth-L1 loss of prediction difference Tensors for each item in a batch. This amounts to
+        evaluating the Huber loss of each individual value and taking the sum.
+        :param x: A Tensor with prediction differences for each item in a batch
+        :param huber_delta: A parameter for calculating the Huber loss; roughly corresponds to the value where the Huber
+        loss transitions from quadratic growth to linear growth
+        :return: A Tensor with the scalar smooth-L1 loss for each item
+        """
+        x = tf.abs(x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.where(ex < huber_delta,
+                                                        0.5 * ex ** 2,
+                                                        huber_delta * (ex - 0.5 * huber_delta))), x)
+        return y
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
@@ -296,34 +326,6 @@ class RegressionModel(DPPModel):
         # Nothing special required for regression
         interpreted_outputs = self.forward_pass_with_file_inputs(x)
         return interpreted_outputs
-
-    def __l2_norm(self, x):
-        """Returns the L2 norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: tf.norm(ex, ord=2), x)
-        return y
-
-    def __l1_norm(self, x):
-        """Returns the L1 norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: tf.norm(ex, ord=1), x)
-        return y
-
-    def __smooth_l1_norm(self, x):
-        """Returns the smooth L1 norm of a tensor"""
-        huber_delta = 1  # may want to make this a tunable hyper parameter in future
-        with self._graph.as_default():
-            x = tf.abs(x)
-            y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
-                                              0.5*ex**2,
-                                              huber_delta*(ex-0.5*huber_delta)), x)
-        return y
-
-    def __log_norm(self, x):
-        """Returns the log norm of a tensor"""
-        with self._graph.as_default():
-            y = tf.map_fn(lambda ex: -tf.log(1 - tf.clip_by_value(tf.abs(ex), 0, 0.9999999)), x)
-        return y
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         if len(self._layers) < 1:

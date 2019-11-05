@@ -13,14 +13,13 @@ from tqdm import tqdm
 
 
 class ObjectDetectionModel(DPPModel):
-    _problem_type = definitions.ProblemType.OBJECT_DETECTION
-    _loss_fn = 'yolo'
     _supported_loss_fns = ['yolo']
     _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'yolo'
 
         # A flag to tell the object detection loaders whether to automatically convert JSON labels to YOLO format. This
         # exists because the dataset loader `load_yolo_dataset_from_directory` doesn't want that to happen
@@ -284,21 +283,16 @@ class ObjectDetectionModel(DPPModel):
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
-                    if self._reg_coeff is not None:
-                        l2_cost = tf.squeeze(tf.reduce_sum(
-                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                             if isinstance(layer, layers.fullyConnectedLayer)]))
-                    else:
-                        l2_cost = 0.0
+                    l2_cost = self._graph_layer_loss()
 
                     # Define the cost function
-                    if self._loss_fn == 'yolo':
-                        xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
-                                             self._NUM_BOXES * 5 + self._NUM_CLASSES])
-                        yolo_loss = self._yolo_loss_function(y, xx)
-                        num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
-                    gpu_cost = tf.squeeze(yolo_loss / num_image_loss + l2_cost)
-                    device_costs.append(yolo_loss)
+                    xx = tf.reshape(xx, [-1, self._grid_w * self._grid_h,
+                                         self._NUM_BOXES * 5 + self._NUM_CLASSES])
+                    num_image_loss = tf.cast(tf.shape(xx)[0], tf.float32)
+
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.squeeze(pred_loss / num_image_loss + l2_cost)
+                    device_costs.append(pred_loss)
 
                     # Set the optimizer and get the gradients from it
                     gradients, variables, global_grad_norm = self._graph_get_gradients(gpu_cost, optimizer)
@@ -330,14 +324,12 @@ class ObjectDetectionModel(DPPModel):
                                                                   self._grid_w * self._grid_h,
                                                                   self._NUM_BOXES * 5 + self._NUM_CLASSES])
 
-                if self._loss_fn == 'yolo':
-                    self._graph_ops['test_losses'] = \
-                        self._yolo_loss_function(self._graph_ops['y_test'],
-                                                 self._graph_ops['x_test_predicted']) / n_images
+                self._graph_ops['test_losses'] = self._graph_problem_loss(self._graph_ops['x_test_predicted'],
+                                                                          self._graph_ops['y_test']) / n_images
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
-                n_images = tf.cast(tf.shape(x_test)[0], tf.float32)
+                n_images = tf.cast(tf.shape(x_val)[0], tf.float32)
 
                 if self._has_moderation:
                     mod_w_val = val_mod_iter.get_next()
@@ -350,14 +342,18 @@ class ObjectDetectionModel(DPPModel):
                                                                  self._grid_w * self._grid_h,
                                                                  self._NUM_BOXES * 5 + self._NUM_CLASSES])
 
-                if self._loss_fn == 'yolo':
-                    self._graph_ops['val_losses'] = \
-                        self._yolo_loss_function(self._graph_ops['y_val'],
-                                                 self._graph_ops['x_val_predicted']) / n_images
+                self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
+                                                                         self._graph_ops['y_val']) / n_images
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'yolo':
+            return self._yolo_loss_function(lab, pred)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
@@ -716,13 +712,12 @@ class ObjectDetectionModel(DPPModel):
                             (5 * self._NUM_BOXES + self._NUM_CLASSES)]
 
         with self._graph.as_default():
-            if self._problem_type is definitions.ProblemType.OBJECT_DETECTION:
-                layer = layers.convLayer('output',
-                                         copy.deepcopy(self._last_layer().output_size),
-                                         filter_dimension,
-                                         1,
-                                         None,
-                                         self._weight_initializer)
+            layer = layers.convLayer('output',
+                                     copy.deepcopy(self._last_layer().output_size),
+                                     filter_dimension,
+                                     1,
+                                     None,
+                                     self._weight_initializer)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)

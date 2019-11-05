@@ -2,6 +2,9 @@ from deepplantphenomics.deepplantpheno import DPPModel
 
 
 class MockDPPModel(DPPModel):
+    def _graph_problem_loss(self, pred, lab):
+        pass
+
     def _assemble_graph(self):
         pass
 

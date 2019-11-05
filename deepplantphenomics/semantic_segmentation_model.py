@@ -10,14 +10,13 @@ from PIL import Image
 
 
 class SemanticSegmentationModel(DPPModel):
-    _problem_type = definitions.ProblemType.SEMANTIC_SEGMETNATION
-    _loss_fn = 'sigmoid cross entropy'
     _supported_loss_fns = ['sigmoid cross entropy']
     _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'sigmoid cross entropy'
 
         # State variables specific to semantic segmentation for constructing the graph and passing to Tensorboard
         self._graph_forward_pass = None
@@ -91,18 +90,12 @@ class SemanticSegmentationModel(DPPModel):
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
-                    if self._reg_coeff is not None:
-                        l2_cost = tf.squeeze(tf.reduce_sum(
-                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                             if isinstance(layer, layers.fullyConnectedLayer)]))
-                    else:
-                        l2_cost = 0.0
+                    l2_cost = self._graph_layer_loss()
 
                     # Define cost function  based on which one was selected via set_loss_function
-                    if self._loss_fn == 'sigmoid cross entropy':
-                        pixel_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=xx, labels=y)
-                    gpu_cost = tf.squeeze(tf.reduce_mean(pixel_loss) + l2_cost)
-                    cost_sum = tf.reduce_sum(pixel_loss)
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
+                    cost_sum = tf.reduce_sum(pred_loss)
                     device_costs.append(cost_sum)
 
                     # Set the optimizer and get the gradients from it
@@ -139,9 +132,8 @@ class SemanticSegmentationModel(DPPModel):
                 else:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
-                self._graph_ops['test_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self._graph_ops['x_test_predicted'], labels=self._graph_ops['y_test']), axis=[1, 2])
-                self._graph_ops['test_losses'] = tf.squeeze(self._graph_ops['test_losses'], axis=1)
+                self._graph_ops['test_losses'] = self._graph_problem_loss(self._graph_ops['x_test_predicted'],
+                                                                          self._graph_ops['y_test'])
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
@@ -153,14 +145,19 @@ class SemanticSegmentationModel(DPPModel):
                 else:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-                self._graph_ops['val_losses'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self._graph_ops['x_val_predicted'], labels=self._graph_ops['y_val']), axis=[1, 2])
-                self._graph_ops['val_losses'] = tf.squeeze(self._graph_ops['val_losses'], axis=1)
-                self._graph_ops['val_cost'] = tf.reduce_mean(self._graph_ops['val_losses'])
+                self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
+                                                                         self._graph_ops['y_val'])
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'sigmoid cross entropy':
+            sigmoid_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=pred, labels=lab)
+            return tf.squeeze(tf.reduce_mean(sigmoid_loss, axis=[1, 2]), axis=1)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')

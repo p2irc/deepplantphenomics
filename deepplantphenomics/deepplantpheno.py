@@ -19,17 +19,13 @@ class DPPModel(ABC):
     provides common functionality and parameters for models of all problem types. Subclasses of DPPModel implement any
     changes and extra methods required to support that particular problem.
     """
-    # Class variables to be shared by instances or overridden by subclasses
-    # Operation settings
-    _problem_type = definitions.ProblemType.CLASSIFICATION
-    _loss_fn = 'softmax cross entropy'
-
-    # Supported implementations for various network components
+    # Class variables with the supported implementations for various network components; subclasses should override
+    # these
     _supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
     _supported_weight_initializers = ['normal', 'xavier']
     _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
     _supported_pooling_types = ['max', 'avg']
-    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
+    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'sigmoid cross entropy',
                            'yolo']
     _supported_predefined_models = ['vgg-16', 'alexnet', 'resnet-18', 'yolov2', 'xsmall', 'small', 'medium', 'large',
                                     "countception"]
@@ -157,6 +153,7 @@ class DPPModel(ABC):
         self._reg_coeff = None
         self._optimizer = 'adam'
         self._weight_initializer = 'xavier'
+        self._loss_fn = None
 
         self._learning_rate = 0.001
         self._lr_decay_factor = None
@@ -637,6 +634,28 @@ class DPPModel(ABC):
         :return: An operation for applying gradients to the graph variables
         """
         return optimizer.apply_gradients(zip(gradients, variables))
+
+    def _graph_layer_loss(self):
+        """Calculates and returns the total L2 loss from the weights of fully connected layers. This is 0 if a
+        regularization coefficient isn't specified."""
+        if self._reg_coeff is not None:
+            return tf.squeeze(tf.reduce_sum(
+                [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                 if isinstance(layer, layers.fullyConnectedLayer)]))
+        else:
+            return 0.0
+
+    @abstractmethod
+    def _graph_problem_loss(self, pred, lab):
+        """
+        Calculates the loss function for each item in a batch with a given pairing of predictions and labels. This is
+        specific to each problem type.
+        :param pred: A Tensor with Model predictions. The shape depends on the model and problem.
+        :param lab: A Tensor Labels to compare the predictions to. Most problems expect this to be the same shape as
+        pred, but exceptions exist.
+        :return: Loss values for each item in a batch
+        """
+        pass
 
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """

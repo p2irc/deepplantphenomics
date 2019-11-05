@@ -10,8 +10,6 @@ from tqdm import tqdm
 
 
 class ClassificationModel(DPPModel):
-    _problem_type = definitions.ProblemType.CLASSIFICATION
-    _loss_fn = 'softmax cross entropy'
     _supported_loss_fns = ['softmax cross entropy']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
@@ -22,6 +20,7 @@ class ClassificationModel(DPPModel):
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'softmax cross entropy'
 
         # State variables specific to classification for constructing the graph and passing to Tensorboard
         self.__class_predictions = None
@@ -93,27 +92,17 @@ class ClassificationModel(DPPModel):
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
-                    if self._reg_coeff is not None:
-                        l2_cost = tf.squeeze(tf.reduce_sum(
-                            [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
-                             if isinstance(layer, layers.fullyConnectedLayer)]))
-                    else:
-                        l2_cost = 0.0
+                    l2_cost = self._graph_layer_loss()
 
                     # Define the cost function, then get the cost for this device's sub-batch and any parts of the cost
-                    # needed to later get the overall batch's cost
-                    yy = tf.argmax(y, 1)
-
-                    if self._loss_fn == 'softmax cross entropy':
-                        sf_logits = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=xx, labels=yy)
-                    gpu_cost = tf.reduce_mean(tf.concat([sf_logits], axis=0)) + l2_cost
-                    cost_sum = tf.reduce_sum(tf.concat([sf_logits], axis=0))
+                    # needed to get the overall batch's cost later
+                    pred_loss = self._graph_problem_loss(xx, y)
+                    gpu_cost = tf.reduce_mean(tf.concat([pred_loss], axis=0)) + l2_cost
+                    cost_sum = tf.reduce_sum(tf.concat([pred_loss], axis=0))
                     device_costs.append(cost_sum)
 
-                    # For classification problems, we will compute the training accuracy as well; this is also used
-                    # for Tensorboard
-                    self.__class_predictions = tf.argmax(tf.nn.softmax(xx), 1)
-                    correct_predictions = tf.equal(self.__class_predictions, yy)
+                    # For classification, we need the training accuracy as well so we can report it in Tensorboard
+                    self.__class_predictions, correct_predictions = self._graph_compare_predictions(xx, y)
                     accuracy_sum = tf.reduce_sum(tf.cast(correct_predictions, tf.float32))
                     device_accuracies.append(accuracy_sum)
 
@@ -148,10 +137,9 @@ class ClassificationModel(DPPModel):
                 else:
                     self._graph_ops['x_test_predicted'] = self.forward_pass(x_test, deterministic=True)
 
-                test_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_test_predicted']), 1)
-                test_correct_predictions = tf.equal(test_class_predictions, tf.argmax(self._graph_ops['y_test'], 1))
-                self._graph_ops['test_losses'] = test_correct_predictions
-                self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(test_correct_predictions, tf.float32))
+                _, self._graph_ops['test_losses'] = self._graph_compare_predictions(self._graph_ops['x_test_predicted'],
+                                                                                    self._graph_ops['y_test'])
+                self._graph_ops['test_accuracy'] = tf.reduce_mean(tf.cast(self._graph_ops['test_losses'], tf.float32))
 
             if self._validation:
                 x_val, self._graph_ops['y_val'] = val_iter.get_next()
@@ -163,14 +151,33 @@ class ClassificationModel(DPPModel):
                 else:
                     self._graph_ops['x_val_predicted'] = self.forward_pass(x_val, deterministic=True)
 
-                self.__val_class_predictions = tf.argmax(tf.nn.softmax(self._graph_ops['x_val_predicted']), 1)
-                val_correct_predictions = tf.equal(self.__val_class_predictions, tf.argmax(self._graph_ops['y_val'], 1))
-                self._graph_ops['val_losses'] = val_correct_predictions
-                self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(val_correct_predictions, tf.float32))
+                _, self._graph_ops['val_losses'] = self._graph_compare_predictions(self._graph_ops['x_val_predicted'],
+                                                                                   self._graph_ops['y_val'])
+                self._graph_ops['val_accuracy'] = tf.reduce_mean(tf.cast(self._graph_ops['val_losses'], tf.float32))
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, average_gradients, opt_variables, global_grad_norm)
+
+    def _graph_problem_loss(self, pred, lab):
+        if self._loss_fn == 'softmax cross entropy':
+            lab_idx = tf.argmax(lab, axis=1)
+            return tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred, labels=lab_idx)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def _graph_compare_predictions(self, pred, lab):
+        """
+        Compares the prediction and label classification for each item in a batch, returning
+        :param pred: Model class predictions for the batch; no softmax should be applied to it yet
+        :param lab: Labels for the correct class, with the same shape as pred
+        :return: 2 Tensors: one with the simplified class predictions (i.e. as a single number), and one with integer
+        flags (i.e. 1's and 0's) for whether predictions are correct
+        """
+        pred_idx = tf.argmax(tf.nn.softmax(pred), axis=1)
+        lab_idx = tf.argmax(lab, axis=1)
+        is_correct = tf.equal(pred_idx, lab_idx)
+        return pred_idx, is_correct
 
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         elapsed = time.time() - start_time

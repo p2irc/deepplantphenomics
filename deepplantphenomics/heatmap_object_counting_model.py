@@ -1,4 +1,5 @@
-from deepplantphenomics import definitions, loaders, SemanticSegmentationModel
+from deepplantphenomics import loaders, SemanticSegmentationModel
+import tensorflow as tf
 import numpy as np
 import os
 import warnings
@@ -10,11 +11,12 @@ from PIL import Image
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
-    _problem_type = definitions.ProblemType.HEATMAP_COUNTING
+    _supported_loss_fns = ['l2', 'l1', 'smooth l1']
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
+        self._loss_fn = 'l2'
 
         # This is needed for reading in heatmap labels expressed as object locations, since we want to convert points
         # to gaussians when reading them in and constructing ground truth heatmaps
@@ -34,6 +36,50 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             raise TypeError("sigma must be a real number")
 
         self._density_sigma = sigma
+
+    def _graph_problem_loss(self, pred, lab):
+        heatmap_diffs = pred - lab
+        if self._loss_fn == 'l2':
+            return self.__l2_loss(heatmap_diffs)
+        elif self._loss_fn == 'l1':
+            return self.__l1_loss(heatmap_diffs)
+        elif self._loss_fn == 'smooth l1':
+            return self.__smooth_l1_loss(heatmap_diffs)
+
+        raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
+
+    def __l2_loss(self, x):
+        """
+        Calculates the L2 loss of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L2 loss for each item
+        """
+        y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
+        return y
+
+    def __l1_loss(self, x):
+        """
+        Calculates the L1 loss of prediction difference Tensors for each item in a batch
+        :param x: A Tensor with prediction differences for each item in a batch
+        :return: A Tensor with the scalar L1 loss for each item
+        """
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
+        return y
+
+    def __smooth_l1_loss(self, x, huber_delta=1):
+        """
+        Calculates the smooth-L1 loss of prediction difference Tensors for each item in a batch. This amounts to
+        evaluating the Huber loss of each individual value and taking the sum.
+        :param x: A Tensor with prediction differences for each item in a batch
+        :param huber_delta: A parameter for calculating the Huber loss; roughly corresponds to the value where the Huber
+        loss transitions from quadratic growth to linear growth
+        :return: A Tensor with the scalar smooth-L1 loss for each item
+        """
+        x = tf.abs(x)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.where(ex < huber_delta,
+                                                        0.5 * ex ** 2,
+                                                        huber_delta * (ex - 0.5 * huber_delta))), x)
+        return y
 
     def compute_full_test_accuracy(self):
         self._log('Computing total test accuracy/regression loss...')
