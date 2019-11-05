@@ -221,10 +221,9 @@ class RegressionModel(DPPModel):
         :return: A Tensor with the scalar smooth-L1 loss for each item
         """
         x = tf.abs(x)
-        y = tf.map_fn(lambda ex: tf.where(ex < huber_delta,
-                                          0.5 * ex ** 2,
-                                          huber_delta * (ex - 0.5 * huber_delta)), x)
-        y = tf.reduce_sum(y, axis=1)
+        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.where(ex < huber_delta,
+                                                        0.5 * ex ** 2,
+                                                        huber_delta * (ex - 0.5 * huber_delta))), x)
         return y
 
     def compute_full_test_accuracy(self):
