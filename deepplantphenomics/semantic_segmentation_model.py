@@ -17,9 +17,22 @@ class SemanticSegmentationModel(DPPModel):
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
         self._loss_fn = 'sigmoid cross entropy'
+        self._num_seg_class = 1
 
         # State variables specific to semantic segmentation for constructing the graph and passing to Tensorboard
         self._graph_forward_pass = None
+
+    def set_num_segmentation_classes(self, num_class):
+        """
+        Sets the number of classes to segment images into
+        :param num_class: The number of segmentation classes
+        """
+        if not isinstance(num_class, int):
+            raise TypeError("num must be an int")
+        if num_class <= 0:
+            raise ValueError("num must be positive")
+
+        self._num_seg_class = num_class
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
@@ -31,8 +44,7 @@ class SemanticSegmentationModel(DPPModel):
             tf.transpose(self._graph_forward_pass, (1, 2, 3, 0)), self._layers[-1].output_size)
         tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
         if self._validation:
-            tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
-                              collections=['custom_summaries'])
+            tf.summary.scalar('validation/loss', self._graph_ops['val_cost'], collections=['custom_summaries'])
             val_images_summary = self._get_weights_as_image(
                 tf.transpose(self._graph_ops['x_val_predicted'], (1, 2, 3, 0)), self._layers[-1].output_size)
             tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
@@ -92,7 +104,7 @@ class SemanticSegmentationModel(DPPModel):
                     self._log('Graph: Calculating loss and gradients...')
                     l2_cost = self._graph_layer_loss()
 
-                    # Define cost function  based on which one was selected via set_loss_function
+                    # Define cost function based on which one was selected via set_loss_function
                     pred_loss = self._graph_problem_loss(xx, y)
                     gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
                     cost_sum = tf.reduce_sum(pred_loss)
@@ -323,7 +335,6 @@ class SemanticSegmentationModel(DPPModel):
         :param dirname: the path of the directory containing the images
         :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
         """
-
         self._raw_image_files = loaders.get_dir_images(dirname)
         self._raw_labels = loaders.get_dir_images(seg_dirname)
         if self._with_patching:
@@ -408,7 +419,7 @@ class SemanticSegmentationModel(DPPModel):
     def _parse_apply_preprocessing(self, images, labels):
         # Apply pre-processing to the image labels too (which are images for semantic segmentation)
         images = self._parse_read_images(images, channels=self._image_depth)
-        labels = self._parse_read_images(labels, channels=1)
+        labels = self._parse_read_images(labels, channels=self._num_seg_class, image_type=tf.uint8)
         return images, labels
 
     def _parse_resize_images(self, images, labels, height, width):
@@ -423,5 +434,5 @@ class SemanticSegmentationModel(DPPModel):
 
     def _parse_force_set_shape(self, images, labels, height, width, depth):
         images.set_shape([height, width, depth])
-        labels.set_shape([height, width, 1])
+        labels.set_shape([height, width, self._num_seg_class])
         return images, labels

@@ -2380,12 +2380,14 @@ class DPPModel(ABC):
         images = self._parse_read_images(images, channels=self._image_depth)
         return images, labels
 
-    def _parse_read_images(self, images, channels=1):
+    def _parse_read_images(self, images, channels=1, image_type=tf.float32):
         """
         Read in input images during dataset parsing. This involves reading from disk, decoding the images, and
         converting them to 0-1 float images.
         :param images: Strings with the names of the images to preprocess
         :param channels: The number of channels in the image. Defaults to 1
+        :param image_type: The desired Tensorflow type for the image after reading it in. Defaults to tf.float32
+        (32-bit float images).
         :return: The preprocessed versions of the images
         """
         # decode_png and decode_jpeg apparently both accept JPEG and PNG. We're using one of them because decode_image
@@ -2393,7 +2395,7 @@ class DPPModel(ABC):
         # Github issue for Tensorflow: https://github.com/tensorflow/tensorflow/issues/9356
         images = tf.io.read_file(images)
         images = tf.io.decode_png(images, channels=channels)
-        images = tf.image.convert_image_dtype(images, dtype=tf.float32)
+        images = tf.image.convert_image_dtype(images, dtype=image_type)
         return images
 
     def _parse_resize_images(self, images, labels, height, width):
