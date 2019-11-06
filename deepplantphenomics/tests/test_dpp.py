@@ -404,6 +404,19 @@ def test_set_loss_function(model, bad_loss, good_loss):
     model.set_loss_function(good_loss)
 
 
+def test_set_num_segmentation_classes():
+    model = dpp.SemanticSegmentationModel()
+    assert model._num_seg_class == 1
+
+    with pytest.raises(TypeError):
+        model.set_num_segmentation_classes('2')
+    with pytest.raises(ValueError):
+        model.set_num_segmentation_classes(0)
+
+    model.set_num_segmentation_classes(2)
+    assert model._num_seg_class == 2
+
+
 def test_set_yolo_parameters():
     model = dpp.ObjectDetectionModel()
     with pytest.raises(RuntimeError):
