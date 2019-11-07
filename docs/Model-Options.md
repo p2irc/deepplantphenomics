@@ -91,10 +91,10 @@ Sets the loss function to be used by the model during training and testing. The 
 
 - `ClassificationModel`: `softmax cross entropy` only
 - `RegressionModel`: `l2`, `l1`, and `smooth l1`
-- `SemanticSegmentationModel`: `sigmoid cross entropy` only
+- `SemanticSegmentationModel`: `sigmoid cross entropy` and `softmax cross entropy`
 - `ObjectDetectionModel`: `yolo` only
 - `CountCeptionModel`: `l1` only
-- `HeatmapObjectCountingModel`: `l2` and `l1`
+- `HeatmapObjectCountingModel`: `l2`, `l1`, and `smooth l1`
 
 #### Regression Models Only
 
@@ -103,6 +103,15 @@ set_num_regression_outputs()
 ```
 
 Sets the number of response variables for the regression model.
+
+#### Semantic Segmentation Models Only
+
+```
+set_num_segmentation_classes()
+```
+
+Sets the number of per-pixel classes to segment images into. This defaults to 2 (for binary segmentation) and should be at least 2.
+
 
 #### Object Detection Models Only
 
