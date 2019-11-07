@@ -17,7 +17,7 @@ class SemanticSegmentationModel(DPPModel):
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
         self._loss_fn = 'sigmoid cross entropy'
-        self._num_seg_class = 1
+        self._num_seg_class = 2
 
         # State variables specific to semantic segmentation for constructing the graph and passing to Tensorboard
         self._graph_forward_pass = None
@@ -29,8 +29,8 @@ class SemanticSegmentationModel(DPPModel):
         """
         if not isinstance(num_class, int):
             raise TypeError("num must be an int")
-        if num_class <= 0:
-            raise ValueError("num must be positive")
+        if num_class < 2:
+            raise ValueError("Semantic segmentation requires at least 2 different classes")
 
         self._num_seg_class = num_class
 
@@ -166,9 +166,15 @@ class SemanticSegmentationModel(DPPModel):
 
     def _graph_problem_loss(self, pred, lab):
         if self._loss_fn == 'sigmoid cross entropy':
+            if self._num_seg_class != 2:
+                raise RuntimeError("Sigmoid cross entropy only applies to binary semantic segmentation (i.e. with 2 "
+                                   "classes)")
             sigmoid_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=pred, labels=lab)
             return tf.squeeze(tf.reduce_mean(sigmoid_loss, axis=[1, 2]), axis=1)
         elif self._loss_fn == 'softmax cross entropy':
+            if self._num_seg_class <= 2:
+                raise RuntimeError("Softmax cross entropy only applies to multi-class semantic segmentation (i.e. with "
+                                   "3+ classes classes)")
             lab = tf.cast(tf.squeeze(lab, axis=3), tf.int32)
             pixel_softmax_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred, labels=lab)
             return tf.reduce_mean(pixel_softmax_loss, axis=[1, 2])
@@ -292,7 +298,7 @@ class SemanticSegmentationModel(DPPModel):
     def forward_pass_with_interpreted_outputs(self, x):
         total_outputs = self.forward_pass_with_file_inputs(x)
 
-        if self._num_seg_class == 1:
+        if self._num_seg_class == 2:
             # Get a binary mask for each image by normalizing and thresholding them
             interpreted_outputs = np.zeros(total_outputs.shape, dtype=np.uint8)
             for i, img in enumerate(total_outputs):
@@ -321,7 +327,10 @@ class SemanticSegmentationModel(DPPModel):
 
         self._log('Adding output layer...')
 
-        filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), self._num_seg_class]
+        if self._num_seg_class == 2:
+            filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
+        else:
+            filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), self._num_seg_class]
 
         with self._graph.as_default():
             layer = layers.convLayer('output',
@@ -428,7 +437,7 @@ class SemanticSegmentationModel(DPPModel):
         # multiples classes encoded as 0, 1, 2, ..., we want to maintain the read-in uint8 type and do a simple cast
         # to float32 instead of a full image type conversion to prevent value scaling.
         images = self._parse_read_images(images, channels=self._image_depth)
-        if self._num_seg_class > 1:
+        if self._num_seg_class > 2:
             labels = self._parse_read_images(labels, channels=1, image_type=tf.uint8)
             labels = tf.cast(labels, tf.float32)
         else:

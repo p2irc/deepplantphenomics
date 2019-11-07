@@ -337,7 +337,7 @@ class DPPModel(ABC):
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
         if definitions.AugmentationType.FLIP_HOR not in self._supported_augmentations:
-            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
+            raise RuntimeError("Flip augmentations are incompatible with the current model type")
 
         self._augmentation_flip_horizontal = flip
 
@@ -346,7 +346,7 @@ class DPPModel(ABC):
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
         if definitions.AugmentationType.FLIP_VER not in self._supported_augmentations:
-            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
+            raise RuntimeError("Flip augmentations are incompatible with the current model type")
 
         self._augmentation_flip_vertical = flip
 
@@ -359,7 +359,7 @@ class DPPModel(ABC):
         if crop_ratio <= 0 or crop_ratio > 1:
             raise ValueError("crop_ratio must be in (0, 1]")
         if definitions.AugmentationType.CROP not in self._supported_augmentations:
-            raise RuntimeError("Crop augmentations are incompatible with the current problem type")
+            raise RuntimeError("Crop augmentations are incompatible with the current model type")
 
         self._augmentation_crop = resize
         self._crop_amount = crop_ratio
@@ -369,7 +369,7 @@ class DPPModel(ABC):
         if not isinstance(contr, bool):
             raise TypeError("contr must be a bool")
         if definitions.AugmentationType.CONTRAST_BRIGHT not in self._supported_augmentations:
-            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current problem type")
+            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current model type")
 
         self._augmentation_contrast = contr
 
@@ -380,7 +380,7 @@ class DPPModel(ABC):
         if not isinstance(crop_borders, bool):
             raise TypeError("crop_borders must be a bool")
         if definitions.AugmentationType.ROTATE not in self._supported_augmentations:
-            raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
+            raise RuntimeError("Rotation augmentations are incompatible with the current model type")
 
         self._augmentation_rotate = rot
         self._rotate_crop_borders = crop_borders
@@ -427,9 +427,9 @@ class DPPModel(ABC):
         loss_fn = loss_fn.lower()
 
         if loss_fn not in self._supported_loss_fns:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for the " +
-                             "current problem type. Make sure you have the correct problem type set with " +
-                             "DPPModel.set_problem_type() first, or choose one of " +
+            raise ValueError("'" + loss_fn + "' is not a supported loss function for the current model type. Make " +
+                             "sure you're using the correct model class for the problem or selecting one of these " +
+                             "loss functions: " +
                              " ".join("'" + x + "'" for x in self._supported_loss_fns))
 
         self._loss_fn = loss_fn

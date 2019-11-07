@@ -406,15 +406,15 @@ def test_set_loss_function(model, bad_loss, good_loss):
 
 def test_set_num_segmentation_classes():
     model = dpp.SemanticSegmentationModel()
-    assert model._num_seg_class == 1
+    assert model._num_seg_class == 2
 
     with pytest.raises(TypeError):
         model.set_num_segmentation_classes('2')
     with pytest.raises(ValueError):
-        model.set_num_segmentation_classes(0)
+        model.set_num_segmentation_classes(1)
 
-    model.set_num_segmentation_classes(2)
-    assert model._num_seg_class == 2
+    model.set_num_segmentation_classes(5)
+    assert model._num_seg_class == 5
 
 
 def test_set_yolo_parameters():
@@ -737,3 +737,55 @@ def test_forward_pass_residual():
 
     assert out_im.size == expected_im.size
     assert np.all(out_im == expected_im)
+
+
+def test_graph_problem_loss_semantic():
+    model = dpp.SemanticSegmentationModel()
+    assert model._loss_fn == 'sigmoid cross entropy'
+    assert model._num_seg_class == 2
+
+    in_batch_binary = np.array([[[[1.0], [0.9]],
+                                 [[0.1], [0.0]]],
+                                [[[1.0], [0.0]],
+                                 [[0.8], [0.2]]]], np.float32)
+    in_label_binary = np.array([[[[1.0], [0.0]],
+                                 [[0.0], [1.0]]],
+                                [[[1.0], [0.0]],
+                                 [[0.0], [1.0]]]], np.float32)
+    out_loss_binary = np.array([0.7480, 0.6939], np.float32)
+    # Correct outputs are one-hot encoded but as inputs to softmax; -50 should turn into a small probability and 0
+    # should turn into a probability close to 1 (i.e. softmax(0, -50, -50) ~= [1, 0, 0])
+    in_batch_multi = np.array([[[[0.0, -50.0, -50.0], [-50.0, 0.0, -50.0]],
+                                [[-50.0, -50.0, 0.0], [-50.0, 0.0, -50.0]]],
+                               [[[-50.0, 0.0, -50.0], [-50.0, 0.0, -50.0]],
+                                [[-2.0, 0.0, -2.0], [-50.0, -50.0, 0.0]]]], np.float32)
+    in_label_multi = np.array([[[[0], [1]],
+                                [[2], [1]]],
+                               [[[1], [1]],
+                                [[0], [2]]]], np.int32)
+    out_loss_multi = np.array([0.0000, 0.5599], np.float32)
+
+    with pytest.raises(RuntimeError):
+        model._loss_fn = 'sigmoid cross entropy'
+        model._num_seg_class = 3
+        model._graph_problem_loss(in_batch_multi, in_label_multi)
+    with pytest.raises(RuntimeError):
+        model._loss_fn = 'softmax cross entropy'
+        model._num_seg_class = 2
+        model._graph_problem_loss(in_batch_binary, in_label_binary)
+
+    model._loss_fn = 'sigmoid cross entropy'
+    model._num_seg_class = 2
+    with tf.Session() as sess:
+        out_binary_tensor = model._graph_problem_loss(in_batch_binary, in_label_binary)
+        out_binary = sess.run(out_binary_tensor)
+        assert np.all(out_binary.shape == (2,))
+        assert np.allclose(out_binary, out_loss_binary, atol=0.0001)
+
+    model._loss_fn = 'softmax cross entropy'
+    model._num_seg_class = 3
+    with tf.Session() as sess:
+        out_multi_tensor = model._graph_problem_loss(in_batch_multi, in_label_multi)
+        out_multi = sess.run(out_multi_tensor)
+        assert np.all(out_multi.shape == (2,))
+        assert np.allclose(out_multi, out_loss_multi, atol=0.0001)
