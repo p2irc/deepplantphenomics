@@ -1,6 +1,6 @@
 from . import loaders, layers, definitions, DPPModel
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import os
 import warnings
 import copy

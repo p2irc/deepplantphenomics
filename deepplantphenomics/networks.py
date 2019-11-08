@@ -1,5 +1,4 @@
 import os
-import tensorflow as tf
 
 
 class boundingBoxRegressor(object):

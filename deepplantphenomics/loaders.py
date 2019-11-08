@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import xml.etree.ElementTree as Tree
 import numpy as np
 import random

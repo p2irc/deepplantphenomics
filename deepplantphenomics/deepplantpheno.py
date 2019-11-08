@@ -1,6 +1,7 @@
 from . import layers, loaders, definitions
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+import tensorflow.contrib
 from tensorflow.python.client import device_lib
 import os
 import json
@@ -2427,7 +2428,7 @@ class DPPModel(ABC):
         :return: The randomly rotated images
         """
         angle = tf.random_uniform([], maxval=2 * math.pi)
-        images = tf.contrib.image.rotate(images, angle, interpolation='BILINEAR')
+        images = tensorflow.contrib.image.rotate(images, angle, interpolation='BILINEAR')
         return images
 
     def _parse_rotation_crop(self, images, crop_fraction, height, width):
