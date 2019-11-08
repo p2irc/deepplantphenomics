@@ -1,4 +1,5 @@
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+import tensorflow.contrib
 import math
 import copy
 
@@ -35,7 +36,7 @@ class convLayer(object):
         if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.filter_dimension,
-                                           initializer=tf.contrib.layers.xavier_initializer_conv2d())
+                                           initializer=tensorflow.contrib.layers.xavier_initializer_conv2d())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.filter_dimension,
@@ -109,7 +110,7 @@ class upsampleLayer(object):
         if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.weights_shape,
-                                           initializer=tf.contrib.layers.xavier_initializer_conv2d())
+                                           initializer=tensorflow.contrib.layers.xavier_initializer_conv2d())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=self.weights_shape,
@@ -199,7 +200,7 @@ class fullyConnectedLayer(object):
 
         if self.__initializer == 'xavier':
             self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, self.output_size],
-                                           initializer=tf.contrib.layers.xavier_initializer())
+                                           initializer=tensorflow.contrib.layers.xavier_initializer())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
                                            shape=[vec_size, self.output_size],

@@ -1,6 +1,7 @@
 from . import layers, loaders, definitions
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+import tensorflow.contrib
 import os
 import json
 import datetime
@@ -2154,7 +2155,7 @@ class DPPModel(ABC):
     def _parse_rotation_augment(self):
         """Applies random rotation augmentation to input images during dataset parsing"""
         angle = tf.random_uniform([], maxval=2 * math.pi)
-        self._train_images = tf.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
+        self._train_images = tensorflow.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
         if self._rotate_crop_borders:
             # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
             # consistent scale across the images
