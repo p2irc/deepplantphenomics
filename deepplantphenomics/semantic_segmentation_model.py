@@ -10,16 +10,33 @@ from PIL import Image
 
 
 class SemanticSegmentationModel(DPPModel):
-    _supported_loss_fns = ['sigmoid cross entropy']
+    _supported_loss_fns = ['sigmoid cross entropy', 'softmax cross entropy']
     _supported_augmentations = [definitions.AugmentationType.CONTRAST_BRIGHT]
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
         super().__init__(debug, load_from_saved, save_checkpoints, initialize, tensorboard_dir, report_rate, save_dir)
         self._loss_fn = 'sigmoid cross entropy'
+        self._num_seg_class = 2
 
         # State variables specific to semantic segmentation for constructing the graph and passing to Tensorboard
         self._graph_forward_pass = None
+
+    def set_num_segmentation_classes(self, num_class):
+        """
+        Sets the number of classes to segment images into
+        :param num_class: The number of segmentation classes
+        """
+        if not isinstance(num_class, int):
+            raise TypeError("num must be an int")
+        if num_class < 2:
+            raise ValueError("Semantic segmentation requires at least 2 different classes")
+
+        self._num_seg_class = num_class
+        if num_class == 2:
+            self._loss_fn = 'sigmoid cross entropy'
+        else:
+            self._loss_fn = 'softmax cross entropy'
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)
@@ -31,8 +48,7 @@ class SemanticSegmentationModel(DPPModel):
             tf.transpose(self._graph_forward_pass, (1, 2, 3, 0)), self._layers[-1].output_size)
         tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
         if self._validation:
-            tf.summary.scalar('validation/loss', self._graph_ops['val_cost'],
-                              collections=['custom_summaries'])
+            tf.summary.scalar('validation/loss', self._graph_ops['val_cost'], collections=['custom_summaries'])
             val_images_summary = self._get_weights_as_image(
                 tf.transpose(self._graph_ops['x_val_predicted'], (1, 2, 3, 0)), self._layers[-1].output_size)
             tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
@@ -92,7 +108,7 @@ class SemanticSegmentationModel(DPPModel):
                     self._log('Graph: Calculating loss and gradients...')
                     l2_cost = self._graph_layer_loss()
 
-                    # Define cost function  based on which one was selected via set_loss_function
+                    # Define cost function based on which one was selected via set_loss_function
                     pred_loss = self._graph_problem_loss(xx, y)
                     gpu_cost = tf.reduce_mean(pred_loss) + l2_cost
                     cost_sum = tf.reduce_sum(pred_loss)
@@ -154,8 +170,18 @@ class SemanticSegmentationModel(DPPModel):
 
     def _graph_problem_loss(self, pred, lab):
         if self._loss_fn == 'sigmoid cross entropy':
+            if self._num_seg_class != 2:
+                raise RuntimeError("Sigmoid cross entropy only applies to binary semantic segmentation (i.e. with 2 "
+                                   "classes)")
             sigmoid_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=pred, labels=lab)
             return tf.squeeze(tf.reduce_mean(sigmoid_loss, axis=[1, 2]), axis=1)
+        elif self._loss_fn == 'softmax cross entropy':
+            if self._num_seg_class <= 2:
+                raise RuntimeError("Softmax cross entropy only applies to multi-class semantic segmentation (i.e. with "
+                                   "3+ classes classes)")
+            lab = tf.cast(tf.squeeze(lab, axis=3), tf.int32)
+            pixel_softmax_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred, labels=lab)
+            return tf.reduce_mean(pixel_softmax_loss, axis=[1, 2])
 
         raise RuntimeError("Could not calculate problem loss for a loss function of " + self._loss_fn)
 
@@ -276,20 +302,23 @@ class SemanticSegmentationModel(DPPModel):
     def forward_pass_with_interpreted_outputs(self, x):
         total_outputs = self.forward_pass_with_file_inputs(x)
 
-        # normalize and then threshold
-        interpreted_outputs = np.zeros(total_outputs.shape, dtype=np.uint8)
-        for i, img in enumerate(total_outputs):
-            # normalize
-            x_min = np.min(img)
-            x_max = np.max(img)
-            mask = (img - x_min) / (x_max - x_min)
-            # threshold
-            mask[mask >= 0.5] = 255
-            mask[mask < 0.5] = 0
-            # store
-            interpreted_outputs[i, :, :] = mask
+        if self._num_seg_class == 2:
+            # Get a binary mask for each image by normalizing and thresholding them
+            interpreted_outputs = np.zeros(total_outputs.shape, dtype=np.uint8)
+            for i, img in enumerate(total_outputs):
+                x_min = np.min(img)
+                x_max = np.max(img)
+                mask = (img - x_min) / (x_max - x_min)
+                mask[mask >= 0.5] = 255
+                mask[mask < 0.5] = 0
+                interpreted_outputs[i, :, :] = mask
 
-        return interpreted_outputs
+            return interpreted_outputs
+        else:
+            # Apply a softmax to the outputs and find the appropriate per-pixel class from the highest probability
+            total_outputs = np.exp(total_outputs) / np.sum(total_outputs, axis=3, keepdims=True)
+            total_outputs = np.argmax(total_outputs, axis=3)
+            return total_outputs
 
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
         if len(self._layers) < 1:
@@ -302,7 +331,10 @@ class SemanticSegmentationModel(DPPModel):
 
         self._log('Adding output layer...')
 
-        filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
+        if self._num_seg_class == 2:
+            filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
+        else:
+            filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), self._num_seg_class]
 
         with self._graph.as_default():
             layer = layers.convLayer('output',
@@ -323,7 +355,6 @@ class SemanticSegmentationModel(DPPModel):
         :param dirname: the path of the directory containing the images
         :param seg_dirname: the path of the directory containing ground-truth binary segmentation masks
         """
-
         self._raw_image_files = loaders.get_dir_images(dirname)
         self._raw_labels = loaders.get_dir_images(seg_dirname)
         if self._with_patching:
@@ -406,9 +437,15 @@ class SemanticSegmentationModel(DPPModel):
         return patch_start, patch_end
 
     def _parse_apply_preprocessing(self, images, labels):
-        # Apply pre-processing to the image labels too (which are images for semantic segmentation)
+        # Apply pre-processing to the image labels too (which are images for semantic segmentation). If there are
+        # multiples classes encoded as 0, 1, 2, ..., we want to maintain the read-in uint8 type and do a simple cast
+        # to float32 instead of a full image type conversion to prevent value scaling.
         images = self._parse_read_images(images, channels=self._image_depth)
-        labels = self._parse_read_images(labels, channels=1)
+        if self._num_seg_class > 2:
+            labels = self._parse_read_images(labels, channels=1, image_type=tf.uint8)
+            labels = tf.cast(labels, tf.float32)
+        else:
+            labels = self._parse_read_images(labels, channels=1)
         return images, labels
 
     def _parse_resize_images(self, images, labels, height, width):

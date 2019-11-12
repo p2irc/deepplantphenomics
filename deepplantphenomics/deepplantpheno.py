@@ -338,7 +338,7 @@ class DPPModel(ABC):
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
         if definitions.AugmentationType.FLIP_HOR not in self._supported_augmentations:
-            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
+            raise RuntimeError("Flip augmentations are incompatible with the current model type")
 
         self._augmentation_flip_horizontal = flip
 
@@ -347,7 +347,7 @@ class DPPModel(ABC):
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
         if definitions.AugmentationType.FLIP_VER not in self._supported_augmentations:
-            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
+            raise RuntimeError("Flip augmentations are incompatible with the current model type")
 
         self._augmentation_flip_vertical = flip
 
@@ -360,7 +360,7 @@ class DPPModel(ABC):
         if crop_ratio <= 0 or crop_ratio > 1:
             raise ValueError("crop_ratio must be in (0, 1]")
         if definitions.AugmentationType.CROP not in self._supported_augmentations:
-            raise RuntimeError("Crop augmentations are incompatible with the current problem type")
+            raise RuntimeError("Crop augmentations are incompatible with the current model type")
 
         self._augmentation_crop = resize
         self._crop_amount = crop_ratio
@@ -370,7 +370,7 @@ class DPPModel(ABC):
         if not isinstance(contr, bool):
             raise TypeError("contr must be a bool")
         if definitions.AugmentationType.CONTRAST_BRIGHT not in self._supported_augmentations:
-            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current problem type")
+            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current model type")
 
         self._augmentation_contrast = contr
 
@@ -381,7 +381,7 @@ class DPPModel(ABC):
         if not isinstance(crop_borders, bool):
             raise TypeError("crop_borders must be a bool")
         if definitions.AugmentationType.ROTATE not in self._supported_augmentations:
-            raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
+            raise RuntimeError("Rotation augmentations are incompatible with the current model type")
 
         self._augmentation_rotate = rot
         self._rotate_crop_borders = crop_borders
@@ -428,9 +428,9 @@ class DPPModel(ABC):
         loss_fn = loss_fn.lower()
 
         if loss_fn not in self._supported_loss_fns:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for the " +
-                             "current problem type. Make sure you have the correct problem type set with " +
-                             "DPPModel.set_problem_type() first, or choose one of " +
+            raise ValueError("'" + loss_fn + "' is not a supported loss function for the current model type. Make " +
+                             "sure you're using the correct model class for the problem or selecting one of these " +
+                             "loss functions: " +
                              " ".join("'" + x + "'" for x in self._supported_loss_fns))
 
         self._loss_fn = loss_fn
@@ -2381,12 +2381,14 @@ class DPPModel(ABC):
         images = self._parse_read_images(images, channels=self._image_depth)
         return images, labels
 
-    def _parse_read_images(self, images, channels=1):
+    def _parse_read_images(self, images, channels=1, image_type=tf.float32):
         """
         Read in input images during dataset parsing. This involves reading from disk, decoding the images, and
         converting them to 0-1 float images.
         :param images: Strings with the names of the images to preprocess
         :param channels: The number of channels in the image. Defaults to 1
+        :param image_type: The desired Tensorflow type for the image after reading it in. Defaults to tf.float32
+        (32-bit float images).
         :return: The preprocessed versions of the images
         """
         # decode_png and decode_jpeg apparently both accept JPEG and PNG. We're using one of them because decode_image
@@ -2394,7 +2396,7 @@ class DPPModel(ABC):
         # Github issue for Tensorflow: https://github.com/tensorflow/tensorflow/issues/9356
         images = tf.io.read_file(images)
         images = tf.io.decode_png(images, channels=channels)
-        images = tf.image.convert_image_dtype(images, dtype=tf.float32)
+        images = tf.image.convert_image_dtype(images, dtype=image_type)
         return images
 
     def _parse_resize_images(self, images, labels, height, width):
