@@ -110,7 +110,7 @@ Sets the number of response variables for the regression model.
 set_num_segmentation_classes()
 ```
 
-Sets the number of per-pixel classes to segment images into. This defaults to 2 (for binary segmentation) and should be at least 2.
+Sets the number of per-pixel classes to segment images into. This defaults to 2 (for binary segmentation) and should be at least 2. The loss function will also be set automatically based on whether the segmentations will be binary or multi-class.
 
 
 #### Object Detection Models Only

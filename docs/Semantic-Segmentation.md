@@ -58,6 +58,8 @@ The above example can easily be changed to build a model for segmenting images i
 model.set_num_segmentation_classes(3)
 ```
 
+This not only sets the number of classes, but it sets the correct loss function; binary segmentation uses sigmoid cross entropy for its loss, while multi-class segmentation uses softmax cross entropy. Using `set_loss_function` to set the wrong loss function will result in an error during training.
+
 The ground-truth masks are expected to be different as well, although they are loaded the same way. Instead of having pixel values of 0 and 255, they should have integer values mapping to the corresponding class for that pixel; the background and two different objects could be labeled as 0, 1, and 2 respectively.
 
 ## Generating and Applying the Segmentation Mask

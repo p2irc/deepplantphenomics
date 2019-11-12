@@ -33,6 +33,10 @@ class SemanticSegmentationModel(DPPModel):
             raise ValueError("Semantic segmentation requires at least 2 different classes")
 
         self._num_seg_class = num_class
+        if num_class == 2:
+            self._loss_fn = 'sigmoid cross entropy'
+        else:
+            self._loss_fn = 'softmax cross entropy'
 
     def _graph_tensorboard_summary(self, l2_cost, gradients, variables, global_grad_norm):
         super()._graph_tensorboard_common_summary(l2_cost, gradients, variables, global_grad_norm)

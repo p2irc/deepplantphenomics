@@ -407,6 +407,7 @@ def test_set_loss_function(model, bad_loss, good_loss):
 def test_set_num_segmentation_classes():
     model = dpp.SemanticSegmentationModel()
     assert model._num_seg_class == 2
+    assert model._loss_fn == 'sigmoid cross entropy'
 
     with pytest.raises(TypeError):
         model.set_num_segmentation_classes('2')
@@ -415,6 +416,11 @@ def test_set_num_segmentation_classes():
 
     model.set_num_segmentation_classes(5)
     assert model._num_seg_class == 5
+    assert model._loss_fn == 'softmax cross entropy'
+
+    model.set_num_segmentation_classes(2)
+    assert model._num_seg_class == 2
+    assert model._loss_fn == 'sigmoid cross entropy'
 
 
 def test_set_yolo_parameters():
