@@ -5,6 +5,7 @@ import os.path
 import random
 import tensorflow.compat.v1 as tf
 import deepplantphenomics as dpp
+from deepplantphenomics import loaders
 from deepplantphenomics.tests.mock_dpp_model import MockDPPModel
 
 
@@ -167,21 +168,19 @@ def test_set_random_seed(model):
 
     # The only real way to check that we're setting the seed properly is to do some random stuff twice and check for
     # the same values
-    with model._graph.as_default():
-        model.set_random_seed(7)
-        py_seq_1 = [random.random() for _ in range(10)]
-        np_seq_1 = np.random.random_sample((10,))
-        tf_seq_1 = model._session.run(tf.random.uniform([10]))
+    def get_random_sequences():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            py_seq = [random.random() for _ in range(10)]
+            np_seq = np.random.random_sample((10,))
+            tf_seq = model._session.run(tf.random.uniform([10]))
+        return py_seq, np_seq, tf_seq
 
     # We need reproducibility across script runs; making a new graph with new ops is what essentially happens
+    py_seq_1, np_seq_1, tf_seq_1 = get_random_sequences()
     model._reset_graph()
     model._reset_session()
-    with model._graph.as_default():
-        model.set_random_seed(7)
-        py_seq_2 = [random.random() for _ in range(10)]
-        np_seq_2 = np.random.random_sample((10,))
-        tf_seq_2 = model._session.run(tf.random.uniform([10]))
-
+    py_seq_2, np_seq_2, tf_seq_2 = get_random_sequences()
     assert np.all(py_seq_1 == py_seq_2)
     assert np.all(np_seq_1 == np_seq_2)
     assert np.all(tf_seq_1 == tf_seq_2)
@@ -714,7 +713,7 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
     model.set_image_dimensions(128, 128, channels)
     model.set_resize_images(True)
     model.set_num_regression_outputs(1)
-    # model.set_train_test_split(0.8)
+    # model.set_test_split(0.2)
     model.set_weight_initializer('xavier')
     model.set_maximum_training_epochs(1)
     # model.set_learning_rate(0.0001)
@@ -822,3 +821,111 @@ def test_graph_problem_loss_semantic():
         out_multi = sess.run(out_multi_tensor)
         assert np.all(out_multi.shape == (2,))
         assert np.allclose(out_multi, out_loss_multi, atol=0.0001)
+
+
+def test_det_random_mask(model, test_data_dir):
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_validation_split(0.25)
+    model.set_test_split(0.25)
+    model.set_maximum_training_epochs(1)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_random_mask():
+        model.set_random_seed(7)
+        labels = [' '.join(map(str, label)) for label in model._raw_labels]
+        return loaders._get_split_mask(model._test_split, model._validation_split,
+                                       len(labels), force_mask_creation=True)
+
+    mask_1 = get_random_mask()
+    model._reset_graph()
+    model._reset_session()
+    mask_2 = get_random_mask()
+    assert np.all(mask_1 == mask_2)
+
+
+def test_det_random_set_split(test_data_dir):
+    model = dpp.RegressionModel()
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_validation_split(0.25)
+    model.set_test_split(0.25)
+    model.set_maximum_training_epochs(1)
+    model.set_image_dimensions(128, 128, 3)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_random_splits():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            trn_im, trn_lab, _, tst_im, tst_lab, _, val_im, val_lab, _ \
+                = loaders.split_raw_data(model._raw_image_files, model._raw_labels,
+                                         model._test_split, model._validation_split,
+                                         split_labels=True, force_mask_creation=True)
+            return model._session.run([trn_im, trn_lab, tst_im, tst_lab, val_im, val_lab])
+
+    splits_1 = get_random_splits()
+    model._reset_graph()
+    model._reset_session()
+    splits_2 = get_random_splits()
+    assert np.all([np.all(x == y) for x, y in zip(splits_1, splits_2)])
+
+
+def test_det_random_augmentations(test_data_dir):
+    model = dpp.RegressionModel()
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_validation_split(0)
+    model.set_test_split(0)
+    model.set_maximum_training_epochs(1)
+    model.set_image_dimensions(128, 128, 3)
+    model.set_resize_images(True)
+    model.set_augmentation_brightness_and_contrast(True)
+    model.set_augmentation_flip_horizontal(True)
+    model.set_augmentation_flip_vertical(True)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_random_augmentations():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            labels = [' '.join(map(str, label)) for label in model._raw_labels]
+            model._parse_dataset(model._raw_image_files, labels, None, None, None, None, None, None, None)
+            data_iter = model._train_dataset.make_one_shot_iterator().get_next()
+
+            data = []
+            for _ in range(len(model._raw_image_files)):
+                xy = model._session.run(data_iter)
+                data.append(xy)
+            return data
+
+    data_1 = get_random_augmentations()
+    model._reset_graph()
+    model._reset_session()
+    data_2 = get_random_augmentations()
+    assert np.all([np.all(x[0] == y[0]) and x[1] == y[1] for x, y in zip(data_1, data_2)])
+
+
+def test_det_shuffle_dataset(model, test_data_dir):
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_maximum_training_epochs(1)
+    model.set_batch_size(1)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_shuffled_dataset():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            ds = tf.data.Dataset.from_tensor_slices(model._raw_image_files)
+            ds = model._batch_and_iterate(ds, shuffle=True)
+            data_iter = ds.get_next()
+
+            data = []
+            for _ in range(len(model._raw_image_files)):
+                xy = model._session.run(data_iter)
+                data.append(xy[0])
+            return data
+
+    data_1 = get_shuffled_dataset()
+    model._reset_graph()
+    model._reset_session()
+    data_2 = get_shuffled_dataset()
+    assert np.all(data_1 == data_2)
