@@ -10,6 +10,7 @@ import time
 import warnings
 import copy
 import math
+import random
 from abc import ABC, abstractmethod
 from tqdm import tqdm
 
@@ -237,6 +238,20 @@ class DPPModel(ABC):
         else:
             raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
                                .format(self._num_gpus, self._batch_size))
+
+    def set_random_seed(self, seed):
+        """
+        Sets a random seed for any random operations used during augmentation and training. This is used to help
+        reproduce results for debugging purposes.
+        :param seed: An integer to use for seeding random operations
+        """
+        if not isinstance(seed, int):
+            raise TypeError("seed must be an int")
+
+        random.seed(seed)
+        np.random.seed(seed)
+        with self._graph.as_default():
+            tf.set_random_seed(seed)
 
     def set_batch_size(self, size):
         """Set the batch size"""

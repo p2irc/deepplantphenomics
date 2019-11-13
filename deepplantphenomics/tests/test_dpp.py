@@ -2,7 +2,8 @@ import pytest
 # import unittest.mock as mock
 import numpy as np
 import os.path
-import tensorflow as tf
+import random
+import tensorflow.compat.v1 as tf
 import deepplantphenomics as dpp
 from deepplantphenomics.tests.mock_dpp_model import MockDPPModel
 
@@ -158,6 +159,32 @@ def test_force_split_shuffle(model):
 
     model.force_split_shuffle(True)
     assert model._force_split_partition
+
+
+def test_set_random_seed(model):
+    with pytest.raises(TypeError):
+        model.set_random_seed('7')
+
+    # The only real way to check that we're setting the seed properly is to do some random stuff twice and check for
+    # the same values
+    with model._graph.as_default():
+        model.set_random_seed(7)
+        py_seq_1 = [random.random() for _ in range(10)]
+        np_seq_1 = np.random.random_sample((10,))
+        tf_seq_1 = model._session.run(tf.random.uniform([10]))
+
+    # We need reproducibility across script runs; making a new graph with new ops is what essentially happens
+    model._reset_graph()
+    model._reset_session()
+    with model._graph.as_default():
+        model.set_random_seed(7)
+        py_seq_2 = [random.random() for _ in range(10)]
+        np_seq_2 = np.random.random_sample((10,))
+        tf_seq_2 = model._session.run(tf.random.uniform([10]))
+
+    assert np.all(py_seq_1 == py_seq_2)
+    assert np.all(np_seq_1 == np_seq_2)
+    assert np.all(tf_seq_1 == tf_seq_2)
 
 
 def test_set_num_regression_outputs():
