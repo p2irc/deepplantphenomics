@@ -5,7 +5,7 @@ import os.path
 import random
 import tensorflow.compat.v1 as tf
 import deepplantphenomics as dpp
-from deepplantphenomics import loaders
+from deepplantphenomics import loaders, layers
 from deepplantphenomics.tests.mock_dpp_model import MockDPPModel
 
 
@@ -929,3 +929,25 @@ def test_det_shuffle_dataset(model, test_data_dir):
     model._reset_session()
     data_2 = get_shuffled_dataset()
     assert np.all(data_1 == data_2)
+
+
+def test_det_dropout(model, test_data_dir):
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_maximum_training_epochs(1)
+    model.set_batch_size(1)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_dropout_result():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            drop_in = [float(x[0]) for x in model._raw_labels]
+            drop_layer = layers.dropoutLayer([8], 0.5)
+            drop_result = drop_layer.forward_pass(drop_in, deterministic=False)
+            return model._session.run(drop_result)
+
+    drop_1 = get_dropout_result()
+    model._reset_graph()
+    model._reset_session()
+    drop_2 = get_dropout_result()
+    assert np.all(drop_1 == drop_2)
