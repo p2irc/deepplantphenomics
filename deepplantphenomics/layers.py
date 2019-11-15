@@ -261,13 +261,13 @@ class dropoutLayer(object):
     def __init__(self, input_size, p):
         self.input_size = input_size
         self.output_size = input_size
-        self.p = p
+        self.drop_rate = 1 - p
 
     def forward_pass(self, x, deterministic):
         if deterministic:
             return x
         else:
-            return tf.nn.dropout(x, self.p)
+            return tf.nn.dropout(x, rate=self.drop_rate)
 
 
 class globalAveragePoolingLayer(object):
