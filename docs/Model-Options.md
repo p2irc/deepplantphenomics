@@ -84,6 +84,12 @@ force_split_shuffle()
 Sets whether to force shuffling of a loaded dataset into train, test, and validation partitions. These partitions are shuffled and saved the first time a dataset is used for training. By default, this is turned off and subsequent training runs load and reuse this partitioning, to avoid leaking data from the initially selected training and validation sets into the test set, and vice versa.
 
 ```
+set_random_seed()
+```
+
+Sets an integer seed for random operations during training (shuffling, augmentations, etc.). This is used to make training results reproducible across multiple attempts at training a model as a support in testing and debugging them.
+
+```
 set_loss_function()
 ```
 
