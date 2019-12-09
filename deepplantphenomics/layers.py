@@ -180,30 +180,29 @@ class poolingLayer(object):
 
 
 class fullyConnectedLayer(object):
-    def __init__(self, name, input_size, output_size, reshape, batch_size, activation_function, initializer,
+    def __init__(self, name, input_size, output_size, reshape, activation_function, initializer,
                  regularization_coefficient):
         self.name = name
         self.input_size = input_size
         self.output_size = output_size
         self.__reshape = reshape
-        self.__batch_size = batch_size
         self.__activation_function = activation_function
         self.__initializer = initializer
         self.regularization_coefficient = regularization_coefficient
 
-    def add_to_graph(self):
         # compute the vectorized size for weights if we will need to reshape it
-        if self.__reshape:
-            vec_size = self.input_size[1] * self.input_size[2] * self.input_size[3]
+        if reshape:
+            self.__vec_size = self.input_size[1] * self.input_size[2] * self.input_size[3]
         else:
-            vec_size = self.input_size
+            self.__vec_size = self.input_size
 
+    def add_to_graph(self):
         if self.__initializer == 'xavier':
-            self.weights = tf.get_variable(self.name + '_weights', shape=[vec_size, self.output_size],
+            self.weights = tf.get_variable(self.name + '_weights', shape=[self.__vec_size, self.output_size],
                                            initializer=tensorflow.contrib.layers.xavier_initializer())
         else:
             self.weights = tf.get_variable(self.name + '_weights',
-                                           shape=[vec_size, self.output_size],
+                                           shape=[self.__vec_size, self.output_size],
                                            initializer=tf.truncated_normal_initializer(
                                                stddev=math.sqrt(2.0/self.output_size)),
                                            dtype=tf.float32)
@@ -216,7 +215,7 @@ class fullyConnectedLayer(object):
     def forward_pass(self, x, deterministic):
         # Reshape into a column vector if necessary
         if self.__reshape is True:
-            x = tf.reshape(x, [self.__batch_size, -1])
+            x = tf.reshape(x, [-1, self.__vec_size])
 
         activations = tf.matmul(x, self.weights)
         activations = tf.add(activations, self.biases)
@@ -262,13 +261,26 @@ class dropoutLayer(object):
     def __init__(self, input_size, p):
         self.input_size = input_size
         self.output_size = input_size
-        self.p = p
+        self.drop_rate = 1 - p
 
     def forward_pass(self, x, deterministic):
         if deterministic:
             return x
         else:
-            return tf.nn.dropout(x, self.p)
+            return tf.nn.dropout(x, rate=self.drop_rate)
+
+
+class globalAveragePoolingLayer(object):
+    """Layer which performs global average pooling"""
+    def __init__(self, name, input_size):
+        self.name = name
+        self.input_size = input_size
+        self.output_size = copy.deepcopy(input_size)
+        self.output_size[1] = 1
+        self.output_size[2] = 1
+
+    def forward_pass(self, x, deterministic):
+        return tf.reduce_mean(x, axis=[1, 2])
 
 
 class moderationLayer(object):
@@ -280,16 +292,16 @@ class moderationLayer(object):
 
         # compute the vectorized size for weights if we will need to reshape it
         if reshape:
-            vec_size = input_size[1] * input_size[2] * input_size[3]
+            self.__vec_size = input_size[1] * input_size[2] * input_size[3]
         else:
-            vec_size = input_size
+            self.__vec_size = input_size
 
-        self.output_size = vec_size + feature_size
+        self.output_size = self.__vec_size + feature_size
 
     def forward_pass(self, x, deterministic, features):
         # Reshape into a column vector if necessary
         if self.__reshape is True:
-            x = tf.reshape(x, [self.__batch_size, -1])
+            x = tf.reshape(x, [-1, self.__vec_size])
 
         # Append the moderating features onto the vector
         x = tf.concat([x, features], axis=1)
@@ -298,9 +310,7 @@ class moderationLayer(object):
 
 
 class batchNormLayer(object):
-
     def __init__(self, name, input_size, epsilon=1e-5, decay=0.9):
-
         self.name = name
         self.input_size = input_size
         self.output_size = input_size
@@ -308,7 +318,6 @@ class batchNormLayer(object):
         self.decay = decay
 
     def add_to_graph(self):
-
         shape = self.output_size[-1]
 
         zeros = tf.constant_initializer(0.0)
@@ -321,7 +330,6 @@ class batchNormLayer(object):
         self.test_var = tf.get_variable(self.name+'_pop_var', shape=shape, initializer=ones, trainable=False)
 
     def forward_pass(self, x, deterministic):
-
         mean, var = tf.nn.moments(x, axes=(0, 1, 2))
 
         # deterministic = False in training, True in testing
@@ -341,7 +349,6 @@ class batchNormLayer(object):
 
 class paralConvBlock(object):
     """A block consists of two parallel convolutional layers"""
-
     def __init__(self, name, input_size, filter_dimension_1, filter_dimension_2):
 
         self.name = name
@@ -372,14 +379,42 @@ class paralConvBlock(object):
         self.output_size[-1] = self.conv1.output_size[-1] + self.conv2.output_size[-1]
 
     def add_to_graph(self):
-
         self.conv1.add_to_graph()
         self.conv2.add_to_graph()
 
     def forward_pass(self, x, deterministic):
-
         conv1_out = self.conv1.forward_pass(x, deterministic)
         conv2_out = self.conv2.forward_pass(x, deterministic)
         output = tf.concat([conv1_out, conv2_out], axis=3)
 
         return output
+
+
+class skipConnection(object):
+    """Makes a skip connection. Addition ops are handled by the graph-level forward_pass function."""
+    def __init__(self, name, input_size, downsampled):
+        self.name = name
+        self.input_size = input_size
+
+        if downsampled:
+            filters = self.input_size[-1]
+            self.layer = convLayer(name=self.name + '_downsample',
+                                   input_size=self.input_size,
+                                   filter_dimension=[1, 1, filters / 2, filters],
+                                   stride_length=2,
+                                   activation_function=None,
+                                   initializer='xavier')
+            self.output_size = self.layer.output_size
+        else:
+            self.layer = None
+            self.output_size = input_size
+
+    def add_to_graph(self):
+        if self.layer is not None:
+            self.layer.add_to_graph()
+
+    def forward_pass(self, x, deterministic):
+        if self.layer is not None:
+            return self.layer.forward_pass(x, deterministic)
+        else:
+            return x

@@ -1,12 +1,22 @@
-## Multithreading Options
+## Multithreading and Multi-GPU Options
 
 ```
-set_number_of_threads()
+set_number_of_threads(1)
 ```
 
-Set the number of threads for input queue runners and preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
+Set the number of threads for preprocessing tasks. Using more threads won't accelerate training or inference, but if you're using a GPU then you should make sure that you're using enough threads that no single thread is running at 100% load if possible.
 
 Note that all pre-trained networks operate with only one thread to avoid random orderings due to threading.
+
+```
+set_number_of_gpus(1)
+```
+
+Sets the number of GPUs to use for model training. This should be set to at least 1. Setting it higher than the number of GPUs available is equivalent to setting it to exactly that number (i.e. setting it to 4 with 2 GPUs will set it to 2).
+
+Using 2+ GPUs can make model training faster, provided that the model is complex enough for the GPU operations to be slower than the overhead from transferring data to/from the GPUs. Otherwise, the speedup from a multi-GPU setup will be overshadowed by the time required to move data between the GPUs and system memory.
+
+Setting this after setting the batch size will also check whether batches can be evenly split across the desired number of GPUs; an error is raised if they can't be evenly split.
 
 ## Learning Hyperparameters
 #### All Models
@@ -16,6 +26,8 @@ set_batch_size()
 ```
 
 Sets the number of examples in each mini-batch. Defaults to 1. Recall that smaller batches mean more gradient updates per epoch.
+
+Setting this after setting the number of GPUs for multi-GPU training will also check whether the batch size can be evenly split across the current number of GPUs; an error is raised if they can't be evenly split.
 
 ```
 set_maximum_training_epochs()
@@ -66,17 +78,29 @@ set_validation_split()
 Set the ratio of the total number of samples to use as a validation set during training. Defaults to 0.10 (i.e. 10% of the samples).
 
 ```
+force_split_shuffle()
+```
+
+Sets whether to force shuffling of a loaded dataset into train, test, and validation partitions. These partitions are shuffled and saved the first time a dataset is used for training. By default, this is turned off and subsequent training runs load and reuse this partitioning, to avoid leaking data from the initially selected training and validation sets into the test set, and vice versa.
+
+```
+set_random_seed()
+```
+
+Sets an integer seed for random operations during training (shuffling, augmentations, etc.). This is used to make training results reproducible across multiple attempts at training a model as a support in testing and debugging them.
+
+```
 set_loss_function()
 ```
 
 Sets the loss function to be used by the model during training and testing. The supported loss functions vary with the specific problem type/`Model`:
 
 - `ClassificationModel`: `softmax cross entropy` only
-- `RegressionModel`: `l2`, `l1`, `smooth l1`, and `log loss`
-- `SemanticSegmentationModel`: `sigmoid cross entropy` only
+- `RegressionModel`: `l2`, `l1`, and `smooth l1`
+- `SemanticSegmentationModel`: `sigmoid cross entropy` and `softmax cross entropy`
 - `ObjectDetectionModel`: `yolo` only
 - `CountCeptionModel`: `l1` only
-- `HeatmapObjectCountingModel`: `sigmoid cross entropy` only
+- `HeatmapObjectCountingModel`: `l2`, `l1`, and `smooth l1`
 
 #### Regression Models Only
 
@@ -85,6 +109,15 @@ set_num_regression_outputs()
 ```
 
 Sets the number of response variables for the regression model.
+
+#### Semantic Segmentation Models Only
+
+```
+set_num_segmentation_classes()
+```
+
+Sets the number of per-pixel classes to segment images into. This defaults to 2 (for binary segmentation) and should be at least 2. The loss function will also be set automatically based on whether the segmentations will be binary or multi-class.
+
 
 #### Object Detection Models Only
 
@@ -131,12 +164,6 @@ set_original_image_dimensions(image_height, image_width)
 Specify the original size of the image, before resizing. This is only needed in special cases; for instance, you would use this if you are resizing input images but using image coordinate labels which reference the original size.
 
 ```
-add_preprocessor()
-```
-
-Add pre-processors. For more information see the documentation for pre-processors.
-
-```
 set_crop_or_pad_images(True)
 ```
 
@@ -147,12 +174,6 @@ set_resize_images(True)
 ```
 
 Up-sample or down-sample images to specified size.
-
-```
-set_processed_images_dir()
-```
-
-Set the location to save processed images when pre-processing is used.
 
 ## Data Augmentation Options
 
@@ -199,4 +220,8 @@ Load a second set of images with corresponding labels in a csv file to augment t
 set_patch_size(height=128, width=128)
 ```
 
-Train on randomly extracted patches (of size `height`x`width`) of the original images. Testing is then performed by splitting the image into patches of `height`x`width`, passing the patches individually through the network, and then stitching the results back together to form the full image. 
+When loading datasets for semantic segmentation, heatmap counting, or object detection, this enables automatic patching of the input image dataset in order. This facilitates training models on large images that won't fit into memory during training. In this case, the patch size and image size should match.
+
+When running inference on trained models, this splits the inference images into patches, runs a forward pass on the patches, and either stitches the full image back together (for semantic segmentation and heatmap counting) or returns predictions for the patches instead (for object detection).
+
+See [this page](Automatic-Image-Patching.md) for more info about this automatic patching.

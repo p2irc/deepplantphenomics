@@ -1,9 +1,13 @@
 import pytest
+# import unittest.mock as mock
 import numpy as np
 import os.path
-import tensorflow as tf
+import random
+import tensorflow.compat.v1 as tf
 import deepplantphenomics as dpp
+from deepplantphenomics import loaders, layers
 from deepplantphenomics.tests.mock_dpp_model import MockDPPModel
+
 
 # public setters and adders, mostly testing for type and value errors
 @pytest.fixture(scope="module")
@@ -25,16 +29,161 @@ def test_set_number_of_threads(model):
         model.set_number_of_threads(-1)
 
 
-def test_set_processed_images_dir(model):
+def test_set_number_of_gpus(model):
+    assert model._num_gpus == 1
+    assert model._batch_size == 1
+    assert model._subbatch_size == 1
+    model._max_gpus = 2
+
+    # Test sanity checks for type and value range
+    with pytest.raises(ValueError):
+        model.set_number_of_gpus(0)
     with pytest.raises(TypeError):
-        model.set_processed_images_dir(5)
+        model.set_number_of_gpus('2')
+
+    # Test subbatch sets and errors when enough GPUs are available
+    with pytest.raises(RuntimeError):
+        model.set_number_of_gpus(2)  # Can't split 1 item across 2 GPUs
+    model._batch_size = 2
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 2
+    assert model._subbatch_size == 1
+
+    # Test subbatch sets and errors when enough GPUs aren't available
+    model._max_gpus = 1
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 1
+    assert model._subbatch_size == 2
+
+    model._max_gpus = 0
+    model.set_number_of_gpus(2)
+    assert model._num_gpus == 1
+    assert model._subbatch_size == 2
 
 
 def test_set_batch_size(model):
+    assert model._batch_size == 1
+    assert model._subbatch_size == 1
+
+    # Test sanity checks for type and value range
     with pytest.raises(TypeError):
         model.set_batch_size(5.0)
     with pytest.raises(ValueError):
         model.set_batch_size(-1)
+
+    # Test normal batch size sets (i.e. with 1 GPU)
+    model.set_batch_size(2)
+    assert model._batch_size == 2
+    assert model._subbatch_size == 2
+
+    # Test batch size sets with multiple GPUs and errors
+    model._num_gpus = 2
+    with pytest.raises(RuntimeError):
+        model.set_batch_size(3)  # Can't split 3 items across 2 GPUs
+    model.set_batch_size(4)
+    assert model._batch_size == 4
+    assert model._subbatch_size == 2
+
+
+def test_set_test_split(model):
+    assert model._test_split == 0.10
+    assert model._validation_split == 0.10
+
+    with pytest.raises(TypeError):
+        model.set_test_split('0.2')
+    with pytest.raises(ValueError):
+        model.set_test_split(-0.1)
+    with pytest.raises(ValueError):
+        model.set_test_split(1.1)
+
+    # No testing
+    model.set_test_split(0)
+    assert not model._testing
+    assert model._test_split == 0
+    assert model._validation_split == 0.10
+
+    # Regular testing and validation splits
+    model.set_test_split(0.25)
+    assert model._testing
+    assert model._test_split == 0.25
+    assert model._validation_split == 0.10
+
+    # Exactly half of the data is for training; warning shouldn't trigger
+    model.set_test_split(0.40)
+    assert model._testing
+    assert model._test_split == 0.40
+    assert model._validation_split == 0.10
+
+    # Less than half of the data is for testing; warning should trigger
+    with pytest.warns(Warning):
+        model.set_test_split(0.50)
+        assert model._testing
+        assert model._test_split == 0.50
+        assert model._validation_split == 0.10
+
+
+def test_set_validation_split(model):
+    assert model._test_split == 0.10
+    assert model._validation_split == 0.10
+
+    # No testing
+    model.set_validation_split(0)
+    assert not model._validation
+    assert model._validation_split == 0
+    assert model._test_split == 0.10
+
+    # Regular testing and validation splits
+    model.set_validation_split(0.25)
+    assert model._validation
+    assert model._validation_split == 0.25
+    assert model._test_split == 0.10
+
+    # Exactly half of the data is for training; warning shouldn't trigger
+    model.set_validation_split(0.40)
+    assert model._validation
+    assert model._validation_split == 0.40
+    assert model._test_split == 0.10
+
+    # Less than half of the data is for testing; warning should trigger
+    with pytest.warns(Warning):
+        model.set_validation_split(0.50)
+        assert model._validation
+        assert model._validation_split == 0.50
+        assert model._test_split == 0.10
+
+
+def test_force_split_shuffle(model):
+    assert not model._force_split_partition
+
+    with pytest.raises(TypeError):
+        model.force_split_shuffle('True')
+
+    model.force_split_shuffle(True)
+    assert model._force_split_partition
+
+
+def test_set_random_seed(model):
+    with pytest.raises(TypeError):
+        model.set_random_seed('7')
+
+    # The only real way to check that we're setting the seed properly is to do some random stuff twice and check for
+    # the same values
+    def get_random_sequences():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            py_seq = [random.random() for _ in range(10)]
+            np_seq = np.random.random_sample((10,))
+            tf_seq = model._session.run(tf.random.uniform([10]))
+        return py_seq, np_seq, tf_seq
+
+    # We need reproducibility across script runs; making a new graph with new ops is what essentially happens
+    py_seq_1, np_seq_1, tf_seq_1 = get_random_sequences()
+    model._reset_graph()
+    model._reset_session()
+    py_seq_2, np_seq_2, tf_seq_2 = get_random_sequences()
+    assert np.all(py_seq_1 == py_seq_2)
+    assert np.all(np_seq_1 == np_seq_2)
+    assert np.all(tf_seq_1 == tf_seq_2)
 
 
 def test_set_num_regression_outputs():
@@ -272,13 +421,32 @@ def test_set_patch_size(model):
                           (dpp.SemanticSegmentationModel(), 'l2', 'sigmoid cross entropy'),
                           (dpp.ObjectDetectionModel(), 'l2', 'yolo'),
                           (dpp.CountCeptionModel(), 'l2', 'l1'),
-                          (dpp.HeatmapObjectCountingModel(), 'l1', 'sigmoid cross entropy')])
+                          (dpp.HeatmapObjectCountingModel(), 'sigmoid cross entropy', 'l2')])
 def test_set_loss_function(model, bad_loss, good_loss):
     with pytest.raises(TypeError):
         model.set_loss_function(0)
     with pytest.raises(ValueError):
         model.set_loss_function(bad_loss)
     model.set_loss_function(good_loss)
+
+
+def test_set_num_segmentation_classes():
+    model = dpp.SemanticSegmentationModel()
+    assert model._num_seg_class == 2
+    assert model._loss_fn == 'sigmoid cross entropy'
+
+    with pytest.raises(TypeError):
+        model.set_num_segmentation_classes('2')
+    with pytest.raises(ValueError):
+        model.set_num_segmentation_classes(1)
+
+    model.set_num_segmentation_classes(5)
+    assert model._num_seg_class == 5
+    assert model._loss_fn == 'softmax cross entropy'
+
+    model.set_num_segmentation_classes(2)
+    assert model._num_seg_class == 2
+    assert model._loss_fn == 'sigmoid cross entropy'
 
 
 def test_set_yolo_parameters():
@@ -364,6 +532,23 @@ def test_add_paral_conv_block(model):
     assert isinstance(model._last_layer(), dpp.layers.paralConvBlock)
 
 
+def test_add_skip_connection(model):
+    model.set_image_dimensions(50, 50, 16)
+    model.set_batch_size(1)
+
+    with pytest.raises(RuntimeError):
+        model.add_skip_connection(downsampled=False)
+    model.add_input_layer()
+
+    model.add_skip_connection(downsampled=False)
+    assert isinstance(model._last_layer(), dpp.layers.skipConnection)
+    assert model._last_layer().output_size == [1, 50, 50, 16]
+
+    model.add_skip_connection(downsampled=True)
+    assert isinstance(model._last_layer(), dpp.layers.skipConnection)
+    assert model._last_layer().output_size == [1, 25, 25, 16]
+
+
 def test_add_pooling_layer(model):
     with pytest.raises(RuntimeError):
         model.add_pooling_layer(1, 1, 'avg')
@@ -444,8 +629,8 @@ def test_add_output_layer():
     model1 = dpp.ClassificationModel()
     model2 = dpp.SemanticSegmentationModel()
     model3 = dpp.CountCeptionModel()
-    model1.set_image_dimensions(5,5,3)
-    model2.set_image_dimensions(5,5,3)
+    model1.set_image_dimensions(5, 5, 3)
+    model2.set_image_dimensions(5, 5, 3)
 
     with pytest.raises(RuntimeError):
         model1.add_output_layer(2.5, 3)
@@ -470,21 +655,6 @@ def test_add_output_layer():
     assert isinstance(model2._last_layer(), dpp.layers.convLayer)
     model3.add_output_layer()
     assert isinstance(model3._last_layer(), dpp.layers.inputLayer)
-
-
-# having issue with not being able to create a new model, they all seem to inherit the fixture model
-# used in previous test functions and thus can't properly add a new outputlayer for this test
-# @pytest.fixture
-# def model2():
-#     model2 = dpp.DPPModel()
-#     return model2
-# def test_add_output_layer_2(model2): # semantic_segmentation problem type
-#     model2.set_batch_size(1)
-#     model2.set_image_dimensions(1, 1, 1)
-#     model2.add_input_layer()
-#     model2.set_problem_type('semantic_segmentation')
-#     model2.add_output_layer(2.5)
-#     assert isinstance(model2._DPPModel__last_layer(), layers.convLayer)
 
 
 # more loading data tests!!!!
@@ -543,7 +713,7 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
     model.set_image_dimensions(128, 128, channels)
     model.set_resize_images(True)
     model.set_num_regression_outputs(1)
-    # model.set_train_test_split(0.8)
+    # model.set_test_split(0.2)
     model.set_weight_initializer('xavier')
     model.set_maximum_training_epochs(1)
     # model.set_learning_rate(0.0001)
@@ -578,3 +748,206 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
 #     model.add_pooling_layer(kernel_size=3, stride_length=2)
 #     model.add_output_layer()
 #     model.begin_training()
+
+def test_forward_pass_residual():
+    model = dpp.SemanticSegmentationModel()
+    model.set_image_dimensions(50, 50, 1)
+    model.set_batch_size(1)
+
+    # Set up a small deterministic network with residuals
+    model.add_input_layer()
+    model.add_skip_connection(downsampled=False)
+    model.add_skip_connection(downsampled=False)
+
+    # Create an input image and its expected output
+    test_im = np.full([50, 50, 1], 0.5, dtype=np.float32)
+    expected_im = np.full([50, 50, 1], 1.0, dtype=np.float32)
+
+    # Add the layers and get the forward pass
+    model._add_layers_to_graph()
+    out_im = model.forward_pass(test_im)
+
+    assert out_im.size == expected_im.size
+    assert np.all(out_im == expected_im)
+
+
+def test_graph_problem_loss_semantic():
+    model = dpp.SemanticSegmentationModel()
+    assert model._loss_fn == 'sigmoid cross entropy'
+    assert model._num_seg_class == 2
+
+    in_batch_binary = np.array([[[[1.0], [0.9]],
+                                 [[0.1], [0.0]]],
+                                [[[1.0], [0.0]],
+                                 [[0.8], [0.2]]]], np.float32)
+    in_label_binary = np.array([[[[1.0], [0.0]],
+                                 [[0.0], [1.0]]],
+                                [[[1.0], [0.0]],
+                                 [[0.0], [1.0]]]], np.float32)
+    out_loss_binary = np.array([0.7480, 0.6939], np.float32)
+    # Correct outputs are one-hot encoded but as inputs to softmax; -50 should turn into a small probability and 0
+    # should turn into a probability close to 1 (i.e. softmax(0, -50, -50) ~= [1, 0, 0])
+    in_batch_multi = np.array([[[[0.0, -50.0, -50.0], [-50.0, 0.0, -50.0]],
+                                [[-50.0, -50.0, 0.0], [-50.0, 0.0, -50.0]]],
+                               [[[-50.0, 0.0, -50.0], [-50.0, 0.0, -50.0]],
+                                [[-2.0, 0.0, -2.0], [-50.0, -50.0, 0.0]]]], np.float32)
+    in_label_multi = np.array([[[[0], [1]],
+                                [[2], [1]]],
+                               [[[1], [1]],
+                                [[0], [2]]]], np.int32)
+    out_loss_multi = np.array([0.0000, 0.5599], np.float32)
+
+    with pytest.raises(RuntimeError):
+        model._loss_fn = 'sigmoid cross entropy'
+        model._num_seg_class = 3
+        model._graph_problem_loss(in_batch_multi, in_label_multi)
+    with pytest.raises(RuntimeError):
+        model._loss_fn = 'softmax cross entropy'
+        model._num_seg_class = 2
+        model._graph_problem_loss(in_batch_binary, in_label_binary)
+
+    model._loss_fn = 'sigmoid cross entropy'
+    model._num_seg_class = 2
+    with tf.Session() as sess:
+        out_binary_tensor = model._graph_problem_loss(in_batch_binary, in_label_binary)
+        out_binary = sess.run(out_binary_tensor)
+        assert np.all(out_binary.shape == (2,))
+        assert np.allclose(out_binary, out_loss_binary, atol=0.0001)
+
+    model._loss_fn = 'softmax cross entropy'
+    model._num_seg_class = 3
+    with tf.Session() as sess:
+        out_multi_tensor = model._graph_problem_loss(in_batch_multi, in_label_multi)
+        out_multi = sess.run(out_multi_tensor)
+        assert np.all(out_multi.shape == (2,))
+        assert np.allclose(out_multi, out_loss_multi, atol=0.0001)
+
+
+def test_det_random_mask(model, test_data_dir):
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_validation_split(0.25)
+    model.set_test_split(0.25)
+    model.set_maximum_training_epochs(1)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_random_mask():
+        model.set_random_seed(7)
+        labels = [' '.join(map(str, label)) for label in model._raw_labels]
+        return loaders._get_split_mask(model._test_split, model._validation_split,
+                                       len(labels), force_mask_creation=True)
+
+    mask_1 = get_random_mask()
+    model._reset_graph()
+    model._reset_session()
+    mask_2 = get_random_mask()
+    assert np.all(mask_1 == mask_2)
+
+
+def test_det_random_set_split(test_data_dir):
+    model = dpp.RegressionModel()
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_validation_split(0.25)
+    model.set_test_split(0.25)
+    model.set_maximum_training_epochs(1)
+    model.set_image_dimensions(128, 128, 3)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_random_splits():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            trn_im, trn_lab, _, tst_im, tst_lab, _, val_im, val_lab, _ \
+                = loaders.split_raw_data(model._raw_image_files, model._raw_labels,
+                                         model._test_split, model._validation_split,
+                                         split_labels=True, force_mask_creation=True)
+            return model._session.run([trn_im, trn_lab, tst_im, tst_lab, val_im, val_lab])
+
+    splits_1 = get_random_splits()
+    model._reset_graph()
+    model._reset_session()
+    splits_2 = get_random_splits()
+    assert np.all([np.all(x == y) for x, y in zip(splits_1, splits_2)])
+
+
+def test_det_random_augmentations(test_data_dir):
+    model = dpp.RegressionModel()
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_validation_split(0)
+    model.set_test_split(0)
+    model.set_maximum_training_epochs(1)
+    model.set_image_dimensions(128, 128, 3)
+    model.set_resize_images(True)
+    model.set_augmentation_brightness_and_contrast(True)
+    model.set_augmentation_flip_horizontal(True)
+    model.set_augmentation_flip_vertical(True)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_random_augmentations():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            labels = [' '.join(map(str, label)) for label in model._raw_labels]
+            model._parse_dataset(model._raw_image_files, labels, None, None, None, None, None, None, None)
+            data_iter = model._train_dataset.make_one_shot_iterator().get_next()
+
+            data = []
+            for _ in range(len(model._raw_image_files)):
+                xy = model._session.run(data_iter)
+                data.append(xy)
+            return data
+
+    data_1 = get_random_augmentations()
+    model._reset_graph()
+    model._reset_session()
+    data_2 = get_random_augmentations()
+    assert np.all([np.all(x[0] == y[0]) and x[1] == y[1] for x, y in zip(data_1, data_2)])
+
+
+def test_det_shuffle_dataset(model, test_data_dir):
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_maximum_training_epochs(1)
+    model.set_batch_size(1)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_shuffled_dataset():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            ds = tf.data.Dataset.from_tensor_slices(model._raw_image_files)
+            ds = model._batch_and_iterate(ds, shuffle=True)
+            data_iter = ds.get_next()
+
+            data = []
+            for _ in range(len(model._raw_image_files)):
+                xy = model._session.run(data_iter)
+                data.append(xy[0])
+            return data
+
+    data_1 = get_shuffled_dataset()
+    model._reset_graph()
+    model._reset_session()
+    data_2 = get_shuffled_dataset()
+    assert np.all(data_1 == data_2)
+
+
+def test_det_dropout(model, test_data_dir):
+    data_path = os.path.join(test_data_dir, 'test_Ara2013_Canon', '')
+
+    model.set_maximum_training_epochs(1)
+    model.set_batch_size(1)
+    model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+    def get_dropout_result():
+        with model._graph.as_default():
+            model.set_random_seed(7)
+            drop_in = [float(x[0]) for x in model._raw_labels]
+            drop_layer = layers.dropoutLayer([8], 0.5)
+            drop_result = drop_layer.forward_pass(drop_in, deterministic=False)
+            return model._session.run(drop_result)
+
+    drop_1 = get_dropout_result()
+    model._reset_graph()
+    model._reset_session()
+    drop_2 = get_dropout_result()
+    assert np.all(drop_1 == drop_2)

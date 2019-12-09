@@ -52,9 +52,39 @@ def test_indices_to_onehot():
     expected_output = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
     onehot = loaders.indices_to_onehot_array(idx)
     assert np.array_equal(onehot, expected_output)
+
     idx = np.array([3, 4])
     expected_output = np.array([[0, 0, 0, 1, 0], [0, 0, 0, 0, 1]])
     onehot = loaders.indices_to_onehot_array(idx)
     assert np.array_equal(onehot, expected_output)
 
-# pascal
+
+def test_get_split_mask():
+    test_mask_name = os.path.join(os.path.curdir, 'mask_ckpt.txt')
+    if os.path.exists(test_mask_name):
+        os.remove(test_mask_name)
+
+    # Make a new mask for no testing or validation
+    mask = loaders._get_split_mask(0, 0, 10)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 10 and mask.count(1) == 0 and mask.count(2) == 0
+
+    # Try to make a new mask for some testing and validation, and get the previous mask instead
+    mask = loaders._get_split_mask(0.2, 0.1, 10, 0, force_mask_creation=False)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 10 and mask.count(1) == 0 and mask.count(2) == 0
+
+    # Actually make a new mask for some testing and validation
+    mask = loaders._get_split_mask(0.2, 0.1, 10, 0, force_mask_creation=True)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 7 and mask.count(1) == 2 and mask.count(2) == 1
+
+    # Make a new mask for some testing only with some augmentation data
+    mask = loaders._get_split_mask(0.2, 0.0, 10, 2, force_mask_creation=True)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 10 and mask.count(1) == 2 and mask.count(2) == 0
+
+    # Make a new mask for some validation only
+    mask = loaders._get_split_mask(0.0, 0.2, 10, 0, force_mask_creation=True)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 8 and mask.count(1) == 2 and mask.count(2) == 0

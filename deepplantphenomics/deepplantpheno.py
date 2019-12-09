@@ -2,6 +2,7 @@ from . import layers, loaders, definitions
 import numpy as np
 import tensorflow.compat.v1 as tf
 import tensorflow.contrib
+from tensorflow.python.client import device_lib
 import os
 import json
 import datetime
@@ -9,6 +10,7 @@ import time
 import warnings
 import copy
 import math
+import random
 from abc import ABC, abstractmethod
 from tqdm import tqdm
 
@@ -19,24 +21,22 @@ class DPPModel(ABC):
     provides common functionality and parameters for models of all problem types. Subclasses of DPPModel implement any
     changes and extra methods required to support that particular problem.
     """
-    # Class variables to be shared by instances or overridden by subclasses
-    # Operation settings
-    _problem_type = definitions.ProblemType.CLASSIFICATION
-    _loss_fn = 'softmax cross entropy'
-
-    # Supported implementations for various network components
+    # Class variables with the supported implementations for various network components; subclasses should override
+    # these
     _supported_optimizers = ['adam', 'adagrad', 'adadelta', 'sgd', 'sgd_momentum']
     _supported_weight_initializers = ['normal', 'xavier']
     _supported_activation_functions = ['relu', 'tanh', 'lrelu', 'selu']
     _supported_pooling_types = ['max', 'avg']
-    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'log loss', 'sigmoid cross entropy',
+    _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'sigmoid cross entropy',
                            'yolo']
-    _supported_predefined_models = ['vgg-16', 'alexnet', 'yolov2', 'xsmall', 'small', 'medium', 'large', "countception"]
+    _supported_predefined_models = ['vgg-16', 'alexnet', 'resnet-18', 'yolov2', 'xsmall', 'small', 'medium', 'large',
+                                    "countception"]
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
                                 definitions.AugmentationType.CONTRAST_BRIGHT,
                                 definitions.AugmentationType.ROTATE]
+    _supports_standardization = True
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -60,7 +60,6 @@ class DPPModel(ABC):
         self._validation = True
         self._testing = True
         self._hyper_param_search = False
-        self._processed_images_dir = './DPP-Processed'
 
         # Input options
         self._total_classes = 0
@@ -92,6 +91,10 @@ class DPPModel(ABC):
 
         # Dataset storage
         self._all_ids = None
+
+        self._train_dataset = None
+        self._test_dataset = None
+        self._val_dataset = None
 
         self._all_images = None
         self._train_images = None
@@ -141,15 +144,18 @@ class DPPModel(ABC):
         self._num_layers_dropout = 0
         self._num_layers_batchnorm = 0
         self._num_blocks_paral_conv = 0
+        self._num_skip_connections = 0
 
         # Network options
         self._batch_size = 1
         self._test_split = 0.10
         self._validation_split = 0.10
+        self._force_split_partition = False
         self._maximum_training_batches = None
         self._reg_coeff = None
         self._optimizer = 'adam'
         self._weight_initializer = 'xavier'
+        self._loss_fn = None
 
         self._learning_rate = 0.001
         self._lr_decay_factor = None
@@ -160,18 +166,23 @@ class DPPModel(ABC):
         self._debug = debug
         self._load_from_saved = load_from_saved
         self._tb_dir = tensorboard_dir
-        self._queue_capacity = 50
         self._report_rate = report_rate
 
-        # Multi-threading
+        # Multi-threading and GPU
         self._num_threads = 1
-        self._coord = None
-        self._threads = None
+        self._num_gpus = 1
+        self._max_gpus = 1  # Set this properly below
+        self._subbatch_size = self._batch_size
 
         # Now do actual initialization stuff
         # Add the run level to the tensorboard path
         if self._tb_dir is not None:
             self._tb_dir = "{0}/{1}".format(self._tb_dir, datetime.datetime.now().strftime("%d%B%Y%I:%M%p"))
+
+        # Determine the maximum number of GPUs we can use (using code from https://stackoverflow.com/a/38580201 to find
+        # out how many we can actually reach). If this ends up as 0, then other code knows to construct CPU-only graphs.
+        gpu_list = [x.name for x in device_lib.list_local_devices() if x.device_type == 'GPU']
+        self._max_gpus = len(gpu_list)
 
         if initialize:
             self._log('TensorFlow loaded...')
@@ -193,18 +204,14 @@ class DPPModel(ABC):
                     isinstance(layer, layers.convLayer) or isinstance(layer, layers.fullyConnectedLayer))
 
     def _reset_session(self):
-        self._session = tf.Session(graph=self._graph)
+        self._session = tf.Session(graph=self._graph,
+                                   config=tf.ConfigProto(allow_soft_placement=True))
 
     def _reset_graph(self):
         self._graph = tf.Graph()
 
-    def _initialize_queue_runners(self):
-        self._log('Initializing queue runners...')
-        self._coord = tf.train.Coordinator()
-        self._threads = tf.train.start_queue_runners(sess=self._session, coord=self._coord)
-
     def set_number_of_threads(self, num_threads):
-        """Set number of threads for input queue runners and preprocessing tasks"""
+        """Set number of threads for preprocessing tasks"""
         if not isinstance(num_threads, int):
             raise TypeError("num_threads must be an int")
         if num_threads <= 0:
@@ -212,12 +219,39 @@ class DPPModel(ABC):
 
         self._num_threads = num_threads
 
-    def set_processed_images_dir(self, im_dir):
-        """Set the directory for storing processed images when pre-processing is used"""
-        if not isinstance(im_dir, str):
-            raise TypeError("im_dir must be a str")
+    def set_number_of_gpus(self, num_gpus):
+        """Set the number of GPUs to use for graph evaluation. Setting this higher than the number of available GPUs
+        has the same effect as setting this to exactly that amount (i.e. setting this to 4 with 2 GPUs available will
+        still only use 2 GPUs)."""
+        if not isinstance(num_gpus, int):
+            raise TypeError("num_gpus must be an int")
+        if num_gpus <= 0:
+            raise ValueError("num_gpus must be positive")
 
-        self._processed_images_dir = im_dir
+        if self._max_gpus != 0:
+            self._num_gpus = num_gpus if (num_gpus <= self._max_gpus) else self._max_gpus
+        else:
+            self._num_gpus = 1  # So batch-setting code doesn't gobble a goose
+
+        if self._batch_size % self._num_gpus == 0:
+            self._subbatch_size = self._batch_size // self._num_gpus
+        else:
+            raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
+                               .format(self._num_gpus, self._batch_size))
+
+    def set_random_seed(self, seed):
+        """
+        Sets a random seed for any random operations used during augmentation and training. This is used to help
+        reproduce results for debugging purposes.
+        :param seed: An integer to use for seeding random operations
+        """
+        if not isinstance(seed, int):
+            raise TypeError("seed must be an int")
+
+        random.seed(seed)
+        np.random.seed(seed)
+        with self._graph.as_default():
+            tf.set_random_seed(seed)
 
     def set_batch_size(self, size):
         """Set the batch size"""
@@ -227,7 +261,12 @@ class DPPModel(ABC):
             raise ValueError("size must be positive")
 
         self._batch_size = size
-        self._queue_capacity = size * 5
+
+        if size % self._num_gpus == 0:
+            self._subbatch_size = size // self._num_gpus
+        else:
+            raise RuntimeError("{0} GPUs can't evenly distribute a batch size of {1}"
+                               .format(self._num_gpus, size))
 
     def set_test_split(self, ratio):
         """Set a ratio for the total number of samples to use as a testing set"""
@@ -264,6 +303,18 @@ class DPPModel(ABC):
             warnings.warn('WARNING: Less than 50% of data is being used for training. ' +
                           '({test}% testing and {val}% validation)'.format(test=int(self._test_split * 100),
                                                                            val=int(self._validation_split * 100)))
+
+    def force_split_shuffle(self, force_split):
+        """
+        Sets whether to force shuffling of a loaded dataset into train, test, and validation partitions. By default,
+        this is turned off; these partitions are shuffled and saved the first time a dataset is used for training, and
+        subsequent training runs load and reuse this partitioning, making training more reproducible.
+        :param force_split: A boolean flag for whether to force
+        """
+        if not isinstance(force_split, bool):
+            raise TypeError("force_split must be a bool")
+
+        self._force_split_partition = force_split
 
     def set_maximum_training_epochs(self, epochs):
         """Set the max number of training epochs"""
@@ -302,7 +353,7 @@ class DPPModel(ABC):
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
         if definitions.AugmentationType.FLIP_HOR not in self._supported_augmentations:
-            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
+            raise RuntimeError("Flip augmentations are incompatible with the current model type")
 
         self._augmentation_flip_horizontal = flip
 
@@ -311,7 +362,7 @@ class DPPModel(ABC):
         if not isinstance(flip, bool):
             raise TypeError("flip must be a bool")
         if definitions.AugmentationType.FLIP_VER not in self._supported_augmentations:
-            raise RuntimeError("Flip augmentations are incompatible with the current problem type")
+            raise RuntimeError("Flip augmentations are incompatible with the current model type")
 
         self._augmentation_flip_vertical = flip
 
@@ -324,7 +375,7 @@ class DPPModel(ABC):
         if crop_ratio <= 0 or crop_ratio > 1:
             raise ValueError("crop_ratio must be in (0, 1]")
         if definitions.AugmentationType.CROP not in self._supported_augmentations:
-            raise RuntimeError("Crop augmentations are incompatible with the current problem type")
+            raise RuntimeError("Crop augmentations are incompatible with the current model type")
 
         self._augmentation_crop = resize
         self._crop_amount = crop_ratio
@@ -334,7 +385,7 @@ class DPPModel(ABC):
         if not isinstance(contr, bool):
             raise TypeError("contr must be a bool")
         if definitions.AugmentationType.CONTRAST_BRIGHT not in self._supported_augmentations:
-            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current problem type")
+            raise RuntimeError("Contrast and brightness augmentations are incompatible with the current model type")
 
         self._augmentation_contrast = contr
 
@@ -345,7 +396,7 @@ class DPPModel(ABC):
         if not isinstance(crop_borders, bool):
             raise TypeError("crop_borders must be a bool")
         if definitions.AugmentationType.ROTATE not in self._supported_augmentations:
-            raise RuntimeError("Rotation augmentations are incompatible with the current problem type")
+            raise RuntimeError("Rotation augmentations are incompatible with the current model type")
 
         self._augmentation_rotate = rot
         self._rotate_crop_borders = crop_borders
@@ -392,9 +443,9 @@ class DPPModel(ABC):
         loss_fn = loss_fn.lower()
 
         if loss_fn not in self._supported_loss_fns:
-            raise ValueError("'" + loss_fn + "' is not one of the currently supported loss functions for the " +
-                             "current problem type. Make sure you have the correct problem type set with " +
-                             "DPPModel.set_problem_type() first, or choose one of " +
+            raise ValueError("'" + loss_fn + "' is not a supported loss function for the current model type. Make " +
+                             "sure you're using the correct model class for the problem or selecting one of these " +
+                             "loss functions: " +
                              " ".join("'" + x + "'" for x in self._supported_loss_fns))
 
         self._loss_fn = loss_fn
@@ -467,16 +518,29 @@ class DPPModel(ABC):
         self._patch_width = width
         self._with_patching = True
 
+    def _get_device_list(self):
+        """Returns the list of CPU and/or GPU devices to construct and evaluate graphs for"""
+        if not tf.test.is_gpu_available():
+            return ['/device:cpu:0']
+        else:
+            return ['/device:gpu:' + str(x) for x in range(self._num_gpus)]
+
     def _add_layers_to_graph(self):
         """
         Adds the layers in self.layers to the computational graph.
-
-        Currently _assemble_graph is doing too many things, so this is needed as a separate function so that other
-        functions such as load_state can add layers to the graph without performing everything else in assemble_graph
         """
+        # Adding layers to the graph mostly involves setting up the required variables. Those variables should be on
+        # the CPU if we are using multiple GPUs and need to share them across multiple graph towers. Otherwise, they
+        # can go on whatever device Tensorflow deems sensible.
+        if tf.test.is_gpu_available() and self._num_gpus > 1:
+            d = '/device:cpu:0'
+        else:
+            d = None  # Effectively /device:cpu:0 for CPU-only or /device:gpu:0 for 1 GPU
+
         for layer in self._layers:
             if callable(getattr(layer, 'add_to_graph', None)):
-                layer.add_to_graph()
+                with tf.device(d):
+                    layer.add_to_graph()
 
     def _graph_parse_data(self):
         """
@@ -491,15 +555,15 @@ class DPPModel(ABC):
         elif self._images_only:
             self._parse_images(self._raw_image_files)
         else:
-            # Split the data into training, validation, and testing sets. If there is no validation set or no moderation
-            # features being used they will be returned as 0 (for validation) or None (for moderation features)
-            train_images, train_labels, train_mf, \
-                    test_images, test_labels, test_mf, \
-                    val_images, val_labels, val_mf, = \
-                    loaders.split_raw_data(self._raw_image_files, self._raw_labels, self._test_split,
-                                           self._validation_split, self._all_moderation_features,
-                                           self._training_augmentation_images, self._training_augmentation_labels,
-                                           self._split_labels)
+            # Split the data into training, validation, and testing sets. If there is no validation set or no
+            # moderation features being used they will be returned as 0 (for validation) or None (for moderation
+            # features)
+            train_images, train_labels, train_mf, test_images, test_labels, test_mf, val_images, val_labels, val_mf = \
+                loaders.split_raw_data(self._raw_image_files, self._raw_labels,
+                                       self._test_split, self._validation_split, self._all_moderation_features,
+                                       self._training_augmentation_images, self._training_augmentation_labels,
+                                       self._split_labels,
+                                       force_mask_creation=self._force_split_partition)
             # Parse the images and set the appropriate environment variables
             self._parse_dataset(train_images, train_labels, train_mf,
                                 test_images, test_labels, test_mf,
@@ -525,47 +589,97 @@ class DPPModel(ABC):
                                      normalized=False, centered=False)
         return x, offsets
 
-    def _graph_add_optimizer(self):
-        """
-        Adds graph components for setting and running an optimization operation
-        :return: The optimizer's gradients, variables, and the global_grad_norm
-        """
-        # Identify which optimizer we are using
+    def _graph_make_optimizer(self):
+        """Generate a new optimizer object for computing and applying gradients"""
         if self._optimizer == 'adagrad':
-            self._graph_ops['optimizer'] = tf.train.AdagradOptimizer(self._learning_rate)
             self._log('Using Adagrad optimizer')
+            return tf.train.AdagradOptimizer(self._learning_rate)
         elif self._optimizer == 'adadelta':
-            self._graph_ops['optimizer'] = tf.train.AdadeltaOptimizer(self._learning_rate)
-            self._log('Using adadelta optimizer')
+            self._log('Using Adadelta optimizer')
+            return tf.train.AdadeltaOptimizer(self._learning_rate)
         elif self._optimizer == 'sgd':
-            self._graph_ops['optimizer'] = tf.train.GradientDescentOptimizer(self._learning_rate)
             self._log('Using SGD optimizer')
+            return tf.train.GradientDescentOptimizer(self._learning_rate)
         elif self._optimizer == 'adam':
-            self._graph_ops['optimizer'] = tf.train.AdamOptimizer(self._learning_rate)
             self._log('Using Adam optimizer')
+            return tf.train.AdamOptimizer(self._learning_rate)
         elif self._optimizer == 'sgd_momentum':
-            self._graph_ops['optimizer'] = tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
             self._log('Using SGD with momentum optimizer')
+            return tf.train.MomentumOptimizer(self._learning_rate, 0.9, use_nesterov=True)
         else:
             warnings.warn('Unrecognized optimizer requested')
             exit()
 
-        # Compute gradients, clip them, the apply the clipped gradients
-        # This is broken up so that we can add gradients to tensorboard
-        # need to make the 5.0 an adjustable hyperparameter
-        gradients, variables = zip(*self._graph_ops['optimizer'].compute_gradients(self._graph_ops['cost']))
+    def _graph_get_gradients(self, loss, optimizer):
+        """
+        Add graph components for getting gradients given an optimizer some losses
+        :param loss: The loss value to use when computing the gradients
+        :param optimizer: The optimizer object used to generate the gradients
+        :return: The graph's gradients, variables, and the global gradient norm from clipping
+        """
+        gradients, variables = zip(*optimizer.compute_gradients(loss))
         gradients, global_grad_norm = tf.clip_by_global_norm(gradients, 5.0)
-        self._graph_ops['optimizer'] = self._graph_ops['optimizer'].apply_gradients(zip(gradients, variables))
-
         return gradients, variables, global_grad_norm
+
+    def _graph_average_gradients(self, graph_gradients):
+        """
+        Add graph components for averaging the computed gradients from multiple runs of a graph (i.e. over gradients
+        from multiple GPUs)
+        :param graph_gradients: A list of the computed gradient lists from each (GPU) run
+        :return: A list of the averaged gradients across each run
+        """
+        # No averaging needed if there's only gradients from one run (because a single device, CPU or GPU, was used)
+        if len(graph_gradients) == 1:
+            return graph_gradients[0]
+
+        averaged_gradients = []
+        for gradients in zip(*graph_gradients):
+            grads = [tf.expand_dims(g, 0) for g in gradients]
+            grads = tf.concat(grads, axis=0)
+            grads = tf.reduce_mean(grads, axis=0)
+            averaged_gradients.append(grads)
+
+        return averaged_gradients
+
+    def _graph_apply_gradients(self, gradients, variables, optimizer):
+        """
+        Add graph components for using an optimizer applying gradients to variables
+        :param gradients: The gradients to be applied
+        :param variables: The variables to apply the gradients to
+        :param optimizer: The optimizer object used to apply the gradients
+        :return: An operation for applying gradients to the graph variables
+        """
+        return optimizer.apply_gradients(zip(gradients, variables))
+
+    def _graph_layer_loss(self):
+        """Calculates and returns the total L2 loss from the weights of fully connected layers. This is 0 if a
+        regularization coefficient isn't specified."""
+        if self._reg_coeff is not None:
+            return tf.squeeze(tf.reduce_sum(
+                [layer.regularization_coefficient * tf.nn.l2_loss(layer.weights) for layer in self._layers
+                 if isinstance(layer, layers.fullyConnectedLayer)]))
+        else:
+            return 0.0
+
+    @abstractmethod
+    def _graph_problem_loss(self, pred, lab):
+        """
+        Calculates the loss function for each item in a batch with a given pairing of predictions and labels. This is
+        specific to each problem type.
+        :param pred: A Tensor with Model predictions. The shape depends on the model and problem.
+        :param lab: A Tensor Labels to compare the predictions to. Most problems expect this to be the same shape as
+        pred, but exceptions exist.
+        :return: Loss values for each item in a batch
+        """
+        pass
 
     def _graph_tensorboard_common_summary(self, l2_cost, gradients, variables, global_grad_norm):
         """
         Adds graph components common to every problem type related to outputting losses and other summary variables to
         Tensorboard.
-        :param l2_cost: ...
-        :param gradients: ...
-        :param global_grad_norm: ...
+        :param l2_cost: The L2 loss component of the computed cost
+        :param gradients: The gradients for the variables in the graph
+        :param global_grad_norm: The global norm used to normalize the gradients
         """
         self._log('Creating Tensorboard summaries...')
 
@@ -630,6 +744,22 @@ class DPPModel(ABC):
         """
         pass
 
+    def _batch_and_iterate(self, dataset, shuffle=False):
+        """
+        Sets up batching and prefetching for a Dataset, with optional shuffling (for training), and returns an iterator
+        for the final Dataset.
+        :param dataset: The Dataset to prepare with batching and prefetching
+        :param shuffle: A flag for whether to shuffle the Dataset items
+        :return: A one-shot iterator for the prepared Dataset
+        """
+        if shuffle:
+            dataset = dataset.shuffle(10000)
+        dataset = dataset.batch(self._subbatch_size)
+        dataset = dataset.repeat()
+        dataset = dataset.prefetch(self._num_gpus)
+        data_iter = dataset.make_one_shot_iterator()
+        return data_iter
+
     def _training_batch_results(self, batch_num, start_time, tqdm_range, train_writer=None):
         """
         Calculates and reports mid-training losses and other statistics, both through the console and through writing
@@ -681,10 +811,9 @@ class DPPModel(ABC):
             print('assembled the graph')
 
             # Either load the network parameters from a checkpoint file or start training
-            if self._load_from_saved is not False:
+            if self._load_from_saved:
                 self._has_trained = True
                 self.load_state()
-                self._initialize_queue_runners()
                 self.compute_full_test_accuracy()
                 self.shut_down()
             else:
@@ -693,7 +822,6 @@ class DPPModel(ABC):
 
                 self._log('Initializing parameters...')
                 self._session.run(tf.global_variables_initializer())
-                self._initialize_queue_runners()
 
                 self._log('Beginning training...')
                 self._set_learning_rate()
@@ -705,9 +833,9 @@ class DPPModel(ABC):
                 tqdm_range = tqdm(range(self._maximum_training_batches))
                 for i in tqdm_range:
                     start_time = time.time()
-
                     self._global_epoch = i
                     self._session.run(self._graph_ops['optimizer'])
+
                     if self._global_epoch > 0 and self._global_epoch % self._report_rate == 0:
                         if self._tb_dir is not None:
                             self._training_batch_results(i, start_time, tqdm_range, train_writer)
@@ -821,12 +949,8 @@ class DPPModel(ABC):
         pass
 
     def shut_down(self):
-        """Stop all queues and end session. The model cannot be used anymore after a shut down is completed."""
+        """End the current session. The model cannot be used anymore after this is done."""
         self._log('Shutdown requested, ending session...')
-
-        self._coord.request_stop()
-        self._coord.join(self._threads)
-
         self._session.close()
 
     def _get_weights_as_image(self, kernel, size=None):
@@ -937,9 +1061,19 @@ class DPPModel(ABC):
         :param moderation_features: ???
         :return: output tensor where the first dimension is batch
         """
+        residual = None
+
         with self._graph.as_default():
             for layer in self._layers:
-                if isinstance(layer, layers.moderationLayer) and moderation_features is not None:
+                if isinstance(layer, layers.skipConnection):
+                    # The first skip only sends its residual value down to later layers. Further skips have to receive
+                    # that, possibly downsample it, and add it to the latest output before setting the next residual.
+                    if residual is None:
+                        residual = x
+                    else:
+                        x = x + layer.forward_pass(residual, False)
+                        residual = x
+                elif isinstance(layer, layers.moderationLayer) and moderation_features is not None:
                     x = layer.forward_pass(x, deterministic, moderation_features)
                 else:
                     x = layer.forward_pass(x, deterministic)
@@ -979,13 +1113,13 @@ class DPPModel(ABC):
         apply_crop = (self._augmentation_crop and self._all_images is None and self._train_images is None)
 
         if apply_crop:
-            size = [self._batch_size, int(self._image_height * self._crop_amount),
+            size = [self._subbatch_size, int(self._image_height * self._crop_amount),
                     int(self._image_width * self._crop_amount), self._image_depth]
         else:
-            size = [self._batch_size, self._image_height, self._image_width, self._image_depth]
+            size = [self._subbatch_size, self._image_height, self._image_width, self._image_depth]
 
         if self._with_patching:
-            size = [self._batch_size, self._patch_height, self._patch_width, self._image_depth]
+            size = [self._subbatch_size, self._patch_height, self._patch_width, self._image_depth]
 
         with self._graph.as_default():
             layer = layers.inputLayer(size)
@@ -1001,8 +1135,8 @@ class DPPModel(ABC):
         feat_size = self._moderation_features_size
 
         with self._graph.as_default():
-            layer = layers.moderationLayer(copy.deepcopy(
-                self._last_layer().output_size), feat_size, reshape, self._batch_size)
+            layer = layers.moderationLayer(copy.deepcopy(self._last_layer().output_size),
+                                           feat_size, reshape, self._subbatch_size)
 
         self._layers.append(layer)
 
@@ -1040,12 +1174,14 @@ class DPPModel(ABC):
             raise ValueError("stride_length must be positive")
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
+
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
             raise ValueError(
                 "'" + activation_function + "' is not one of the currently supported activation functions." +
                 " Choose one of: " +
                 " ".join("'" + x + "'" for x in self._supported_activation_functions))
+
         if padding is not None:
             if not isinstance(padding, int):
                 raise TypeError("padding must be an int")
@@ -1236,11 +1372,13 @@ class DPPModel(ABC):
             raise ValueError("output_size must be positive")
         if not isinstance(activation_function, str):
             raise TypeError("activation_function must be a str")
+
         activation_function = activation_function.lower()
         if activation_function not in self._supported_activation_functions:
             raise ValueError("'" + activation_function + "' is not one of the currently supported activation " +
                              "functions. Choose one of: " +
                              " ".join("'"+x+"'" for x in self._supported_activation_functions))
+
         if regularization_coefficient is not None:
             if not isinstance(regularization_coefficient, float):
                 raise TypeError("regularization_coefficient must be a float or None")
@@ -1259,13 +1397,8 @@ class DPPModel(ABC):
             regularization_coefficient = 0.0
 
         with self._graph.as_default():
-            layer = layers.fullyConnectedLayer(layer_name,
-                                               copy.deepcopy(self._last_layer().output_size),
-                                               output_size,
-                                               reshape,
-                                               self._batch_size,
-                                               activation_function,
-                                               self._weight_initializer,
+            layer = layers.fullyConnectedLayer(layer_name, copy.deepcopy(self._last_layer().output_size), output_size,
+                                               reshape, activation_function, self._weight_initializer,
                                                regularization_coefficient)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
@@ -1314,6 +1447,36 @@ class DPPModel(ABC):
                                                                     block.output_size))
 
         self._layers.append(block)
+
+    def add_skip_connection(self, downsampled=False):
+        """Adds a residual connection between this point and the last residual connection"""
+        if len(self._layers) < 1:
+            raise RuntimeError("A skip connection cannot be the first layer added to the model.")
+
+        self._num_skip_connections += 1
+        layer_name = 'skip%d' % self._num_skip_connections
+        self._log('Adding skip connection...')
+
+        layer = layers.skipConnection(layer_name, self._last_layer().output_size, downsampled)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
+
+    def add_global_average_pooling_layer(self):
+        """Adds a global average pooling layer"""
+        if len(self._layers) < 1:
+            raise RuntimeError("A GAP layer cannot be the first layer added to the model.")
+
+        self._num_skip_connections += 1
+        layer_name = 'GAP'
+        self._log('Adding global average pooling layer...')
+
+        layer = layers.globalAveragePoolingLayer(layer_name, self._last_layer().output_size)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
 
     @abstractmethod
     def add_output_layer(self, regularization_coefficient=None, output_size=None):
@@ -1395,6 +1558,64 @@ class DPPModel(ABC):
 
             self.add_output_layer()
 
+        if model_name == 'resnet-18':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[7, 7, self._image_depth, 64], stride_length=2,
+                                         activation_function='relu', batch_norm=True)
+            self.add_pooling_layer(kernel_size=3, stride_length=2)
+
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=2,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=2,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=2,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=2,
+                                         activation_function='relu', batch_norm=True)
+            self.add_skip_connection()
+
+            self.add_global_average_pooling_layer()
+
+            self.add_fully_connected_layer(output_size=1000, activation_function='relu')
+
+            self.add_output_layer()
+
         if model_name == 'xsmall':
             self.add_input_layer()
 
@@ -1416,19 +1637,20 @@ class DPPModel(ABC):
             self.add_input_layer()
 
             self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64],
-                                         stride_length=1, activation_function='relu')
+                                         stride_length=1, activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
             self.add_fully_connected_layer(output_size=64, activation_function='relu')
 
@@ -1438,32 +1660,38 @@ class DPPModel(ABC):
             self.add_input_layer()
 
             self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64],
-                                         stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
+                                         stride_length=1, activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
             self.add_fully_connected_layer(output_size=256, activation_function='relu')
 
@@ -1472,33 +1700,39 @@ class DPPModel(ABC):
         if model_name == 'large':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64],
-                                         stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1,
+                                         activation_function='relu', batch_norm=True)
             self.add_pooling_layer(kernel_size=2, stride_length=2)
-            self.add_batch_norm_layer()
 
             self.add_fully_connected_layer(output_size=512, activation_function='relu')
             self.add_fully_connected_layer(output_size=384, activation_function='relu')
@@ -1508,8 +1742,8 @@ class DPPModel(ABC):
         if model_name == 'yolov2':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 32],
-                                         stride_length=1, activation_function='lrelu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 32],  stride_length=1,
+                                         activation_function='lrelu')
             self.add_pooling_layer(kernel_size=3, stride_length=2)
 
             self.add_convolutional_layer(filter_dimension=[3, 3, 32, 64], stride_length=1, activation_function='lrelu')
@@ -1739,7 +1973,6 @@ class DPPModel(ABC):
         train_dir = os.path.join(dirname, 'train')
         test_dir = os.path.join(dirname, 'test')
         self._total_classes = 10
-        self._queue_capacity = 60000
 
         train_labels, train_images = loaders.read_csv_labels_and_ids(os.path.join(train_dir, 'train.txt'), 1, 0,
                                                                      character=' ')
@@ -1819,7 +2052,6 @@ class DPPModel(ABC):
         images = sorted_paths
 
         # prepare images for training (if there are any labels loaded)
-
         if self._all_labels is not None:
             labels = self._all_labels
 
@@ -1962,27 +2194,15 @@ class DPPModel(ABC):
     def _parse_dataset(self, train_images, train_labels, train_mf,
                        test_images, test_labels, test_mf,
                        val_images, val_labels, val_mf):
-        """Takes training and testing images and labels, creates input queues internally to this instance"""
+        """Parses training & testing images and labels, creating input pipelines internal to this instance"""
         with self._graph.as_default():
-
             # Get the number of training, testing, and validation samples
-            self._parse_get_sample_counts(test_images, train_images, val_images)
+            self._parse_get_sample_counts(train_images, test_images, val_images)
 
             # Logging verbosity
             self._log('Total training samples is {0}'.format(self._total_training_samples))
             self._log('Total validation samples is {0}'.format(self._total_validation_samples))
             self._log('Total testing samples is {0}'.format(self._total_testing_samples))
-
-            # Create moderation features queues
-            if train_mf is not None:
-                train_moderation_queue = tf.train.slice_input_producer([train_mf], shuffle=False)
-                self._train_moderation_features = tf.cast(train_moderation_queue[0], tf.float32)
-            if test_mf is not None:
-                test_moderation_queue = tf.train.slice_input_producer([test_mf], shuffle=False)
-                self._test_moderation_features = tf.cast(test_moderation_queue[0], tf.float32)
-            if val_mf is not None:
-                val_moderation_queue = tf.train.slice_input_producer([val_mf], shuffle=False)
-                self._val_moderation_features = tf.cast(val_moderation_queue[0], tf.float32)
 
             # Calculate number of batches to run
             batches_per_epoch = self._total_training_samples / float(self._batch_size)
@@ -1994,84 +2214,149 @@ class DPPModel(ABC):
             self._log('Batches per epoch: {:f}'.format(batches_per_epoch))
             self._log('Running to {0} batches'.format(self._maximum_training_batches))
 
-            # Create input queues
-            train_input_queue = tf.train.slice_input_producer([train_images, train_labels], shuffle=False)
+            # Create datasets for moderation features
+            def _make_mod_features_dataset(mod):
+                mod_dataset = tf.data.Dataset.from_tensor_slices(mod)
+                mod_dataset = mod_dataset.map(lambda x: tf.cast(x, tf.float32), num_parallel_calls=self._num_threads)
+                return mod_dataset
+
+            if train_mf is not None:
+                self._train_moderation_features = _make_mod_features_dataset(train_mf)
+            if test_mf is not None:
+                self._test_moderation_features = _make_mod_features_dataset(test_mf)
+            if val_mf is not None:
+                self._val_moderation_features = _make_mod_features_dataset(val_mf)
+
+            # Create datasets for the input data
+            self._train_dataset = self._make_input_dataset(train_images, train_labels, True)
             if self._testing:
-                test_input_queue = tf.train.slice_input_producer([test_images, test_labels], shuffle=False)
+                self._test_dataset = self._make_input_dataset(test_images, test_labels, False)
             if self._validation:
-                val_input_queue = tf.train.slice_input_producer([val_images, val_labels], shuffle=False)
+                self._val_dataset = self._make_input_dataset(val_images, val_labels, False)
 
-            # Apply pre-processing for training, testing, and validation images and labels
-            self._train_images, self._train_labels = self._parse_apply_preprocessing(train_input_queue)
-            if self._testing:
-                self._test_images, self._test_labels = self._parse_apply_preprocessing(test_input_queue)
-            if self._validation:
-                self._val_images, self._val_labels = self._parse_apply_preprocessing(val_input_queue)
-
-            # Apply the various augmentations to the images
-            if self._augmentation_crop:  # Apply random crops to images
-                self._parse_crop_augment()
-
-            if self._crop_or_pad_images:  # Apply padding or cropping to deal with images of different sizes
-                self._parse_crop_or_pad()
-
-            if self._augmentation_flip_horizontal:  # Apply random horizontal flips
-                self._train_images = tf.image.random_flip_left_right(self._train_images)
-
-            if self._augmentation_flip_vertical:  # Apply random vertical flips
-                self._train_images = tf.image.random_flip_up_down(self._train_images)
-
-            if self._augmentation_contrast:  # Apply random contrast and brightness adjustments
-                self._train_images = tf.image.random_brightness(self._train_images, max_delta=63)
-                self._train_images = tf.image.random_contrast(self._train_images, lower=0.2, upper=1.8)
-
-            if self._augmentation_rotate:  # Apply random rotations, then optionally crop out black borders and resize
-                self._parse_rotation_augment()
-
-            # Mean-center all inputs
-            self._train_images = tf.image.per_image_standardization(self._train_images)
-            if self._testing:
-                self._test_images = tf.image.per_image_standardization(self._test_images)
-            if self._validation:
-                self._val_images = tf.image.per_image_standardization(self._val_images)
-
-            # Manually set the shape of the image tensors so it matches the shape of the images
-            self._parse_force_set_shape()
-
-    def _parse_images(self, images):
-        """Takes some images as input, creates producer of processed images internally to this instance"""
-        with self._graph.as_default():
-            input_queue = tf.train.string_input_producer(images, shuffle=False)
-
-            reader = tf.WholeFileReader()
-            key, file = reader.read(input_queue)
-
-            # Pre-processing for all images
-            input_images = self._parse_preprocess_images(file, channels=self._image_depth)
-
-            if self._augmentation_crop is True:
+            # Set the image size to cropped values if crop augmentation was used
+            if self._augmentation_crop:
                 self._image_height = int(self._image_height * self._crop_amount)
                 self._image_width = int(self._image_width * self._crop_amount)
-                input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
-                                                                      self._image_width)
 
-            if self._crop_or_pad_images is True:  # Pad or crop to deal with images of different sizes
-                input_images = tf.image.resize_image_with_crop_or_pad(input_images, self._image_height,
-                                                                      self._image_width)
+    def _make_input_dataset(self, images, labels, train_set):
+        """
+        Create Tensorflow datasets and construct an input and augmentation pipeline given paired images and labels
+        :param images: A list of image names for the dataset
+        :param labels: The labels corresponding to the images
+        :param train_set: A flag for whether this is the training dataset; certain augmentations only occur or change
+        for training data specifically
+        :return: A tf.data.Dataset object that encapsulates the data input and augmentation pipeline
+        """
+        def _with_labels(fn):
+            """Takes a function on images only and appends its labels to the output"""
+            return lambda im, lab: (fn(im), lab)
 
-            # mean-center all inputs
-            input_images = tf.image.per_image_standardization(input_images)
+        data_height = self._image_height
+        data_width = self._image_width
+
+        # Create the dataset and load in the images
+        input_dataset = tf.data.Dataset.from_tensor_slices((images, labels))
+        input_dataset = input_dataset.map(self._parse_apply_preprocessing, num_parallel_calls=self._num_threads)
+        if self._resize_images:
+            input_dataset = input_dataset.map(lambda x, y: self._parse_resize_images(x, y, data_height, data_width),
+                                              num_parallel_calls=self._num_threads)
+
+        # Augmentations that we should do to every dataset (training, testing, and validation)
+        if self._augmentation_crop:  # Apply random crops to images
+            data_height = int(data_height * self._crop_amount)
+            data_width = int(data_width * self._crop_amount)
+            if train_set:
+                input_dataset = input_dataset.map(
+                    _with_labels(lambda x: tf.random_crop(x, [data_height, data_width, self._image_depth])),
+                    num_parallel_calls=self._num_threads)
+            else:
+                input_dataset = input_dataset.map(lambda x, y: self._parse_crop_or_pad(x, y, data_height, data_width),
+                                                  num_parallel_calls=self._num_threads)
+
+        if self._crop_or_pad_images:  # Apply padding or cropping to deal with images of different sizes
+            input_dataset = input_dataset.map(lambda x, y: self._parse_crop_or_pad(x, y, data_height, data_width),
+                                              num_parallel_calls=self._num_threads)
+
+        if train_set:
+            # Augmentations that we should only do to the training dataset
+            if self._augmentation_flip_horizontal:  # Apply random horizontal flips
+                input_dataset = input_dataset.map(_with_labels(tf.image.random_flip_left_right),
+                                                  num_parallel_calls=self._num_threads)
+
+            if self._augmentation_flip_vertical:  # Apply random vertical flips
+                input_dataset = input_dataset.map(_with_labels(tf.image.random_flip_up_down),
+                                                  num_parallel_calls=self._num_threads)
+
+            if self._augmentation_contrast:  # Apply random contrast and brightness adjustments
+                def contrast_fn(x):
+                    x = tf.image.random_brightness(x, max_delta=63)
+                    x = tf.image.random_contrast(x, lower=0.2, upper=1.8)
+                    return x
+
+                input_dataset = input_dataset.map(_with_labels(contrast_fn), num_parallel_calls=self._num_threads)
+
+            if self._augmentation_rotate:  # Apply random rotations, then optionally border crop and resize
+                input_dataset = input_dataset.map(_with_labels(self._parse_rotate),
+                                                  num_parallel_calls=self._num_threads)
+                if self._rotate_crop_borders:
+                    crop_fraction = self._smallest_crop_fraction(data_height, data_width)
+                    input_dataset = input_dataset.map(
+                        _with_labels(lambda x: self._parse_rotation_crop(x, crop_fraction, data_height, data_width)),
+                        num_parallel_calls=self._num_threads)
+
+        # Mean-center all inputs
+        if self._supports_standardization:
+            input_dataset = input_dataset.map(_with_labels(tf.image.per_image_standardization),
+                                              num_parallel_calls=self._num_threads)
+
+        # Manually set the shape of the image tensors so it matches the shape of the images
+        input_dataset = input_dataset.map(
+            lambda x, y: self._parse_force_set_shape(x, y, data_height, data_width, self._image_depth),
+            num_parallel_calls=self._num_threads)
+
+        return input_dataset
+
+    def _parse_images(self, images):
+        """
+        Convert a list of image names into an internal Dataset of processed images
+        :param images: A list of image names to parse
+        """
+        with self._graph.as_default():
+            input_dataset = tf.data.Dataset.from_tensor_slices(images)
+            input_dataset = input_dataset.map(lambda x: self._parse_read_images(x, channels=self._image_depth),
+                                              num_parallel_calls=self._num_threads)
+            input_dataset = input_dataset.map(
+                lambda x: tf.image.resize_images(x, [self._image_height, self._image_width]),
+                num_parallel_calls=self._num_threads)
+
+            if self._augmentation_crop or self._crop_or_pad_images:
+                if self._augmentation_crop:
+                    self._image_height = int(self._image_height * self._crop_amount)
+                    self._image_width = int(self._image_width * self._crop_amount)
+                input_dataset = input_dataset.map(
+                    lambda x: tf.image.resize_image_with_crop_or_pad(x, self._image_height, self._image_width),
+                    num_parallel_calls=self._num_threads)
+
+            # Mean-center all inputs
+            if self._supports_standardization:
+                input_dataset = input_dataset.map(tf.image.per_image_standardization,
+                                                  num_parallel_calls=self._num_threads)
 
             # Manually set the shape of the image tensors so it matches the shape of the images
-            input_images.set_shape([self._image_height, self._image_width, self._image_depth])
+            def force_set(x):
+                x.set_shape([self._image_height, self._image_width, self._image_depth])
+                return x
 
-            self._all_images = input_images
+            input_dataset = input_dataset.map(force_set, num_parallel_calls=self._num_threads)
 
-    def _parse_get_sample_counts(self, test_images, train_images, val_images):
+            self._all_images = input_dataset
+
+    def _parse_get_sample_counts(self, train_images, test_images, val_images):
         """
         Determines the number of training, testing, and validation samples in a dataset while parsing it
-        :param test_images: A tensor or list of tensors with the training images
-        :param train_images: A tensor or list of tensors with the testing images
+        :param train_images: A tensor or list of tensors with the training images
+        :param test_images: A tensor or list of tensors with the testing images
         :param val_images: A tensor or list of tensors with the validation images
         """
         # Try to get the number of samples the normal way
@@ -2101,97 +2386,117 @@ class DPPModel(ABC):
                 self._total_validation_samples = int(self._total_raw_samples * self._validation_split)
                 self._total_training_samples = self._total_training_samples - self._total_validation_samples
 
-    def _parse_preprocess_images(self, images, channels=1):
+    def _parse_apply_preprocessing(self, images, labels):
         """
-        Preprocess input images during dataset parsing. This involves decoding the images, converting them to 0-1 float
-        images, and resizing them if necessary.
+        Applies input loading and preprocessing to images and labels from a dataset
+        :param images: Image names to load and preprocess
+        :param labels: The accompanying labels; normally passed through unchanged
+        :return: The preprocessed versions of the images and the passed-through labels
+        """
+        images = self._parse_read_images(images, channels=self._image_depth)
+        return images, labels
+
+    def _parse_read_images(self, images, channels=1, image_type=tf.float32):
+        """
+        Read in input images during dataset parsing. This involves reading from disk, decoding the images, and
+        converting them to 0-1 float images.
         :param images: Strings with the names of the images to preprocess
         :param channels: The number of channels in the image. Defaults to 1
+        :param image_type: The desired Tensorflow type for the image after reading it in. Defaults to tf.float32
+        (32-bit float images).
         :return: The preprocessed versions of the images
         """
         # decode_png and decode_jpeg apparently both accept JPEG and PNG. We're using one of them because decode_image
         # also accepts GIF, preventing the return of a static shape and preventing resize_images from running. See this
         # Github issue for Tensorflow: https://github.com/tensorflow/tensorflow/issues/9356
+        images = tf.io.read_file(images)
         images = tf.io.decode_png(images, channels=channels)
-        images = tf.image.convert_image_dtype(images, dtype=tf.float32)
-        if self._resize_images:
-            images = tf.image.resize_images(images, [self._image_height, self._image_width])
+        images = tf.image.convert_image_dtype(images, dtype=image_type)
         return images
 
-    def _parse_apply_preprocessing(self, input_queue):
+    def _parse_resize_images(self, images, labels, height, width):
         """
-        Applies input preprocessing to images and labels from a queue
-        :param input_queue: The queue to apply preprocessing to
-        :return: The preprocessed images and labels from the queue
+        Resize images to a consistent size during dataset parsing
+        :param images: The images to resize
+        :param labels: The accompanying labels; normally passed through unchanged
+        :param height: The new height for the images
+        :param width: The new width for the images
+        :return: The resized images and passed through labels
         """
-        images = self._parse_preprocess_images(tf.read_file(input_queue[0]), channels=self._image_depth)
-        labels = input_queue[1]
+        images = tf.image.resize_images(images, [height, width])
         return images, labels
 
-    def _parse_crop_augment(self):
-        """Applies random cropping augmentation to input images during dataset parsing"""
-        self._image_height = int(self._image_height * self._crop_amount)
-        self._image_width = int(self._image_width * self._crop_amount)
+    def _parse_crop_or_pad(self, images, labels, height, width):
+        """
+        Applies a crop/pad resizing to input images to standardize their size during dataset parsing
+        :param images: The images to resize with crop/pad
+        :param labels: The accompanying labels; normally passed through unchanged
+        :param height: The new height for the images
+        :param width: The new width for the images
+        :return: The resized images
+        """
+        images = tf.image.resize_image_with_crop_or_pad(images, height, width)
+        return images, labels
 
-        self._train_images = tf.random_crop(self._train_images, [self._image_height, self._image_width, 3])
-        if self._testing:
-            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                       self._image_width)
-        if self._validation:
-            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                      self._image_width)
-
-    def _parse_crop_or_pad(self):
-        """Applies a crop/pad resizing to input images to standardize their size during dataset parsing"""
-        self._train_images = tf.image.resize_image_with_crop_or_pad(self._train_images, self._image_height,
-                                                                    self._image_width)
-        if self._testing:
-            self._test_images = tf.image.resize_image_with_crop_or_pad(self._test_images, self._image_height,
-                                                                       self._image_width)
-        if self._validation:
-            self._val_images = tf.image.resize_image_with_crop_or_pad(self._val_images, self._image_height,
-                                                                      self._image_width)
-
-    def _parse_rotation_augment(self):
-        """Applies random rotation augmentation to input images during dataset parsing"""
+    def _parse_rotate(self, images):
+        """
+        Applies random rotation augmentation to input images during dataset parsing
+        :param images: The images to rotate
+        :return: The randomly rotated images
+        """
         angle = tf.random_uniform([], maxval=2 * math.pi)
-        self._train_images = tensorflow.contrib.image.rotate(self._train_images, angle, interpolation='BILINEAR')
-        if self._rotate_crop_borders:
-            # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a
-            # consistent scale across the images
-            small_crop_fraction = self._smallest_crop_fraction()
-            self._train_images = tf.image.central_crop(self._train_images, small_crop_fraction)
-            self._train_images = tf.image.resize_images(self._train_images,
-                                                        [self._image_height, self._image_width])
+        images = tensorflow.contrib.image.rotate(images, angle, interpolation='BILINEAR')
+        return images
 
-    def _parse_force_set_shape(self):
-        """Force sets the shapes of the image Tensors, since we know what their sizes should be but Tensorflow can't
-        properly infer them (unless image resizing is turned on)"""
-        self._train_images.set_shape([self._image_height, self._image_width, self._image_depth])
-        if self._testing:
-            self._test_images.set_shape([self._image_height, self._image_width, self._image_depth])
-        if self._validation:
-            self._val_images.set_shape([self._image_height, self._image_width, self._image_depth])
+    def _parse_rotation_crop(self, images, crop_fraction, height, width):
+        """
+        Applies optional centre cropping for random rotation augmentation
+        :param images: Rotated images to centre crop
+        :param crop_fraction: The fraction of the image to keep with the crop
+        :param height: The original height to maintain after cropping the images
+        :param width: The original width to maintain after cropping the images
+        :return: The centre cropped images
+        """
+        # Cropping is done using the smallest fraction possible for the image's aspect ratio to maintain a consistent
+        # scale across the images
+        images = tf.image.central_crop(images, crop_fraction)
+        images = tf.image.resize_images(images, [height, width])
+        return images
 
-    def _smallest_crop_fraction(self):
+    def _parse_force_set_shape(self, images, labels, height, width, depth):
+        """
+        Force set the shapes of image tensors, since we know what their sizes should be but Tensorflow can't properly
+        infer them (unless image resizing occurs)
+        :param images: The images to force-set shapes for
+        :param labels: The accompanying labels; passed through unchanged
+        :param height: The height to force for the image tensors
+        :param width: The width to force for the image tensors
+        :param depth: The depth/channels to force for the image tensors
+        :return: The shape-defined images and passed through labels
+        """
+        images.set_shape([height, width, depth])
+        return images, labels
+
+    def _smallest_crop_fraction(self, height, width):
         """
         Determine the angle and crop fraction for rotated images that gives the maximum border-less crop area for a
         given angle but the smallest such area among all angles from 0-90 degrees. This is used during rotation
         augmentation to apply a consistent crop and maintain similar scale across all images. Using larger crop
         fractions based on the rotation angle would result in different scales.
+        :param height: The original height of the rotated image
+        :param width: The original width of the rotated image
         :return: The crop fraction that achieves the smallest area among border-less crops for rotated images
         """
-
         # Regardless of the aspect ratio, the smallest crop fraction always corresponds to the required crop for a 45
         # degree or pi/4 radian rotation
         angle = math.pi / 4
 
         # Determine which sides of the original image are the shorter and longer sides
-        width_is_longer = self._image_width >= self._image_height
+        width_is_longer = width >= height
         if width_is_longer:
-            (short_length, long_length) = (self._image_height, self._image_width)
+            (short_length, long_length) = (height, width)
         else:
-            (short_length, long_length) = (self._image_width, self._image_height)
+            (short_length, long_length) = (width, height)
 
         # Get the absolute sin and cos of the angle, since the quadrant doesn't affect us
         sin_a = abs(math.sin(angle))
@@ -2208,4 +2513,4 @@ class DPPModel(ABC):
             (crop_width, crop_height) = (x / cos_a, x / sin_a)
 
         # Use the crop width and height to calculate the required crop ratio
-        return (crop_width * crop_height) / (self._image_width * self._image_height)
+        return (crop_width * crop_height) / (width * height)
