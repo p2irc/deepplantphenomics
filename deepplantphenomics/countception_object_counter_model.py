@@ -262,13 +262,13 @@ class CountCeptionModel(DPPModel):
         # There is no need to do this in the Countception model
         pass
 
-    def _parse_read_images(self, images, channels=1):
+    def _parse_read_images(self, images, channels=1, image_type=tf.float32):
         # With Countception, we can have either strings from an inference forward pass, or straight arrays from a
         # pickle file during training.
         if images.dtype == tf.string:
             images = super()._parse_read_images(images, channels)
         else:
-            images = tf.image.convert_image_dtype(images, dtype=tf.float32)
+            images = tf.image.convert_image_dtype(images, dtype=image_type)
         return images
 
     def load_countception_dataset_from_pkl_file(self, pkl_file_name):
