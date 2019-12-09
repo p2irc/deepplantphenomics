@@ -1070,7 +1070,7 @@ class ObjectDetectionModel(DPPModel):
             self._log(str(img_num + 1) + '/' + str(num_orig_images))
 
         # Save all of the patch labels as a JSON file before returning the patch filenames and labels
-        with open(json_file, 'w') as outfile:
+        with open(json_file + 'train_patches.json', 'w', encoding='utf-8') as outfile:
             json.dump(img_dict, outfile)
 
         return new_raw_image_files, new_raw_labels

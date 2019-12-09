@@ -29,14 +29,16 @@ class tools(object):
         """
         Uses a pre-trained fully convolutional network to perform vegetation segmentation
         """
-
         net = networks.vegetationSegmentationNetwork(batch_size=batch_size)
         predictions = net.forward_pass(x)
         net.shut_down()
 
         # round for binary mask
-        _, predictions = cv2.threshold(predictions.astype(np.float32), 0.5, 1.0, cv2.THRESH_BINARY)
-
+        predictions = predictions.astype(np.float32)
+        predictions = np.squeeze(predictions, axis=3)
+        for i, mask in enumerate(predictions):
+            _, thresh_mask = cv2.threshold(mask, 0.5, 1.0, cv2.THRESH_BINARY)
+            predictions[i, :, :] = thresh_mask
         return predictions
 
     @staticmethod

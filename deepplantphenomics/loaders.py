@@ -61,7 +61,7 @@ def _get_split_mask(test_ratio, validation_ratio, n_label, n_augmentation=0, for
     mask = []
     if not force_mask_creation:
         try:
-            mask_file = open(mask_name, "r")
+            mask_file = open(mask_name, "r", encoding='utf-8-sig')
             with mask_file:
                 for line in mask_file:
                     mask.append(int(line.rstrip()))
@@ -97,7 +97,7 @@ def _get_split_mask(test_ratio, validation_ratio, n_label, n_augmentation=0, for
         random.shuffle(mask)
 
         # save the mask file in current directory for future use
-        with open(mask_name, 'w+') as mask_file:
+        with open(mask_name, 'w+', encoding='utf-8-sig') as mask_file:
             for entry in mask:
                 mask_file.write(str(entry) + '\n')
 
@@ -117,7 +117,7 @@ def get_dir_images(dirname):
 
 
 def read_csv_labels(file_name, column_number=False, character=','):
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     labels = []
 
     for line in f:
@@ -138,7 +138,7 @@ def read_csv_rows(file_name, column_number=False, character=','):
 
     read_csv_labels and its variants read column-wise, this function is needed for row-wise parsing
     """
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     rows = []
 
     for line in f:
@@ -150,7 +150,7 @@ def read_csv_rows(file_name, column_number=False, character=','):
 
 
 def read_csv_labels_and_ids(file_name, column_number, id_column_number, character=','):
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     labels = []
     ids = []
 
@@ -165,7 +165,7 @@ def read_csv_labels_and_ids(file_name, column_number, id_column_number, characte
 
 
 def read_csv_multi_labels_and_ids(file_name, id_column_number, character=','):
-    f = open(file_name, 'r')
+    f = open(file_name, 'r', encoding='utf-8-sig')
     labels = []
     ids = []
 

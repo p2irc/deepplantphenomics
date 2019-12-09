@@ -2168,7 +2168,7 @@ class DPPModel(ABC):
         self._all_ids = []
         self._all_labels = []
 
-        with open(filename, 'r') as f:
+        with open(filename, 'r', encoding='utf-8-sig') as f:
             box_data = json.load(f)
         for box in sorted(box_data.items()):
             self._all_ids.append(box[0])  # Name of corresponding image
