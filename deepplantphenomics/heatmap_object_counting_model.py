@@ -6,8 +6,8 @@ import warnings
 import numbers
 import itertools
 from tqdm import tqdm, trange
-from scipy.ndimage import gaussian_filter
 from PIL import Image
+import cv2
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
@@ -224,14 +224,54 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param points: A list of (x,y) tuples for object locations in an image
         :return: An ndarray of the heatmap image
         """
-        # The simple way to do this is to place single pixel 1's on a blank image at each point and then apply a
-        # gaussian filter to that image. The result is our density map.
-        den_map = np.zeros([self._image_height, self._image_width, 1], dtype=np.float32)
-        for (x, y) in points:
-            den_map[y, x, 0] = 1
-        den_map = gaussian_filter(den_map, self._density_sigma, mode='constant')
 
-        return den_map
+        output_img = np.zeros([self._image_height, self._image_width], dtype=np.float32)
+
+        # Fixed
+        diameter = 60
+        radius = diameter / 2
+
+        h = self._image_height
+        w = self._image_width
+
+        gauss = cv2.getGaussianKernel(diameter, self._density_sigma)
+        gauss2d = gauss * gauss.T
+        gauss2d = gauss2d / np.sum(gauss2d)
+
+        for (x, y) in points:
+            gx1 = 0
+            gx2 = diameter
+
+            gy1 = 0
+            gy2 = diameter
+
+            if x - radius < 0:
+                x1 = 0
+                gx1 = int(radius - x)
+            else:
+                x1 = int(x - radius)
+
+            if x + radius > w:
+                x2 = int(w)
+                gx2 = int(radius + (w - x))
+            else:
+                x2 = int(x + radius)
+
+            if y - radius < 0:
+                y1 = 0
+                gy1 = int(radius - y)
+            else:
+                y1 = int(y - radius)
+
+            if y + radius > h:
+                y2 = h
+                gy2 = int(radius + (h - y))
+            else:
+                y2 = int(y + radius)
+
+            output_img[y1:y2, x1:x2] += gauss2d[gy1:gy2, gx1:gx2]
+
+        return np.expand_dims(output_img, -1)
 
     def __autopatch_heatmap_dataset(self, labels, patch_dir=None):
         """
