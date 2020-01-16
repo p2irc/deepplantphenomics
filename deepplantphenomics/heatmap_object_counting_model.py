@@ -218,6 +218,35 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         self._raw_labels = heatmaps
         self._split_labels = False  # Band-aid fix
 
+    def load_heatmap_dataset_with_json_files_from_directory(self, dirname):
+        """
+        Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
+        train on and a csv file that maps image names to multiple x and y labels (formatted like x1,y1,x2,y2,...)
+        :param dirname: The path to the directory with the image files and label file
+        :param label_file: The path to the csv file with heatmap point labels
+        """
+        self._raw_image_files, labels = loaders.read_dataset_from_directory_with_json_labels(dirname)
+
+        if self._with_patching:
+            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
+
+        # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
+        # ground truth heatmap
+        heatmaps = []
+        for coords in labels:
+            if coords:
+                heatmaps.append(self.__points_to_density_map(coords))
+            else:
+                # There are no objects, so the heatmap is blank
+                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32))
+
+        self._total_raw_samples = len(self._raw_image_files)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+
+        heatmaps = np.stack(heatmaps)
+        self._raw_labels = heatmaps
+        self._split_labels = False  # Band-aid fix
+
     def __points_to_density_map(self, points):
         """
         Convert point labels for a heatmap into a grayscale image with a gaussian placed at heatmap points

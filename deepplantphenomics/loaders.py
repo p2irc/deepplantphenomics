@@ -4,6 +4,7 @@ import numpy as np
 import random
 import os
 import datetime
+import json
 
 
 def split_raw_data(images, labels, test_ratio=0, validation_ratio=0, moderation_features=None, augmentation_images=None,
@@ -113,7 +114,7 @@ def label_string_to_tensor(x, batch_size, num_outputs=-1):
 
 def get_dir_images(dirname):
     return sorted([os.path.join(dirname, f) for f in os.listdir(dirname) if
-                   os.path.isfile(os.path.join(dirname, f)) and f.endswith('.png')])
+                   os.path.isfile(os.path.join(dirname, f)) and (f.endswith('.png') or f.endswith('.jpg'))])
 
 
 def read_csv_labels(file_name, column_number=False, character=','):
@@ -162,6 +163,26 @@ def read_csv_labels_and_ids(file_name, column_number, id_column_number, characte
         ids.append(temp[id_column_number])
 
     return labels, ids
+
+
+def read_dataset_from_directory_with_json_labels(directory_name):
+    image_paths = get_dir_images(directory_name)
+    image_files = [str(os.path.basename(img)) for img in image_paths]
+    label_files = [img.split('.')[0] + '.json' for img in image_files]
+    labels_parsed = []
+
+    for i in range(len(image_paths)):
+        label_file = os.path.join(directory_name, label_files[i])
+
+        with open(label_file, 'r') as f:
+            d = json.load(f)
+
+            xs = list(d['x'].values())
+            ys = list(d['y'].values())
+
+            labels_parsed.append(list(zip(xs, ys)))
+
+    return image_paths, labels_parsed
 
 
 def read_csv_multi_labels_and_ids(file_name, id_column_number, character=','):
