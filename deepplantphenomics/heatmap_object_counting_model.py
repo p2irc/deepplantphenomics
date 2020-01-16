@@ -330,9 +330,9 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         for n, im_file, im_labels in zip(trange(n_image), self._raw_image_files, labels):
             im = np.array(Image.open(im_file))
 
-            def place_points_in_patches(tl_coord, br_coord, points):
+            def place_points_in_patches(tl_corner, br_corner, points):
                 # The slow, O(mn) way
-                for (py0, px0), (py1, px1) in zip(tl_coord, br_coord):
+                for (py0, px0), (py1, px1) in zip(tl_corner, br_corner):
                     points_in_patch = [(x - px0, y - py0) for (x, y) in points if py0 <= y < py1 and px0 <= x < px1]
                     new_labels.append(points_in_patch)
 
@@ -340,9 +340,9 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             num_patch = len(patch_start)
             place_points_in_patches(patch_start, patch_end, im_labels)
 
-            for i, (y0, x0), (y1, x1), patch_labels in zip(itertools.count(patch_num),
+            for i, tl_coord, br_coord, patch_labels in zip(itertools.count(patch_num),
                                                            patch_start, patch_end, new_labels):
-                im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
+                im_patch = Image.fromarray(self._autopatch_extract_patch(im, tl_coord, br_coord))
                 im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
                 im_patch.save(im_name)
                 image_files.append(im_name)

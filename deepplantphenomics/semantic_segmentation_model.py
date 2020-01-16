@@ -5,6 +5,7 @@ import os
 import warnings
 import copy
 import itertools
+from math import ceil
 from tqdm import tqdm, trange
 from PIL import Image
 
@@ -403,9 +404,9 @@ class SemanticSegmentationModel(DPPModel):
             patch_start, patch_end = self._autopatch_get_patch_coords(im)
             num_patch = len(patch_start)
 
-            for i, (y0, x0), (y1, x1) in zip(itertools.count(patch_num), patch_start, patch_end):
-                im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
-                seg_patch = Image.fromarray(seg[y0:y1, x0:x1].astype(np.uint8))
+            for i, tl_coord, br_coord in zip(itertools.count(patch_num), patch_start, patch_end):
+                im_patch = Image.fromarray(self._autopatch_extract_patch(im, tl_coord, br_coord))
+                seg_patch = Image.fromarray(self._autopatch_extract_patch(seg, tl_coord, br_coord))
                 im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
                 seg_name = os.path.join(seg_dir, 'seg_{:0>6d}.png'.format(i))
                 im_patch.save(im_name)
@@ -420,21 +421,46 @@ class SemanticSegmentationModel(DPPModel):
     def _autopatch_get_patch_coords(self, im):
         """
         Gets the starting (top-left) and ending (bottom-right) coordinates for splitting an image into patches. Patches
-        are taken from the centre of the image, so edges may be cut off if the patch size doesn't perfectly fit.
+        are taken starting from the top and left edges of the image and continue, padding the bottom and right images
+        with black if they go over the edge.
         :param im: A numpy array with an image to split into patches
         :return: Lists of tuples with the starting (top-left) and ending (bottom-right) coordinates for patches
         """
         im_height, im_width, _ = im.shape
-        num_patch_h = im_height // self._patch_height
-        num_patch_w = im_width // self._patch_width
-        patch_offset_h = (im_height - num_patch_h * self._patch_height) // 2
-        patch_offset_w = (im_width - num_patch_w * self._patch_width) // 2
+        num_patch_h = ceil(im_height / self._patch_height)
+        num_patch_w = ceil(im_width / self._patch_width)
 
-        patch_start = [(y * self._patch_height + patch_offset_h, x * self._patch_width + patch_offset_w)
+        patch_start = [(y * self._patch_height, x * self._patch_width)
                        for y in range(num_patch_h) for x in range(num_patch_w)]
         patch_end = [(y + self._patch_height, x + self._patch_width) for (y, x) in patch_start]
 
         return patch_start, patch_end
+
+    def _autopatch_extract_patch(self, im, tl_coord, br_coord):
+        """
+        Extracts a patch from an image, padding it with black if it extends over the edge
+        :param im: An ndarray for the image to extract the patch from
+        :param tl_coord: A tuple for the top-left (y, x) corner of the patch
+        :param br_coord: A tuple for the bottom-right (y, x) corner of the patch
+        :return: An ndarray of the extracted patch suitable for saving as a PNG
+        """
+        y0, x0 = tl_coord
+        y1, x1 = br_coord
+        patch_x = x1 - x0
+        patch_y = y1 - y0
+        im_height, im_width, im_depth = im.shape
+
+        fill_x = x1 - im_width if x1 > im_width else 0
+        fill_y = y1 - im_height if y1 > im_height else 0
+        if x1 > im_width:
+            x1 -= fill_x
+        if y1 > im_height:
+            y1 -= fill_y
+
+        im_patch = np.full((patch_y, patch_x, im_depth), 0, dtype=np.uint8)
+        im_patch[0:patch_y - fill_y, 0:patch_x - fill_x, :] = im[y0:y1, x0:x1, :].astype(np.uint8)
+
+        return im_patch
 
     def _parse_apply_preprocessing(self, images, labels):
         # Apply pre-processing to the image labels too (which are images for semantic segmentation). If there are
