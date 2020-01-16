@@ -272,3 +272,10 @@ def box_coordinates_to_xywh_coordinates(coords):
     y = int(h / 2 + y1)
 
     return x, y, w, h
+
+
+def csv_points_to_tuples(labels):
+    """Converts nested lists of x,y,x,y,... points to point tuples"""
+    labels = [list(map(int, im_labels)) for im_labels in labels]
+    labels = [list(zip(im_labels[0::2], im_labels[1::2])) for im_labels in labels]
+    return labels

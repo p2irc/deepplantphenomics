@@ -191,21 +191,17 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         filename = os.path.join(dirname, label_file)
         labels, ids = loaders.read_csv_multi_labels_and_ids(filename, 0)
-        labels = [list(map(int, x)) for x in labels]
+        if any([len(im_labels) % 2 == 1 for im_labels in labels]):
+            raise ValueError("Unpaired coordinate found in points labels from " + label_file)
+
+        labels = loaders.csv_points_to_tuples(labels)
 
         if self._with_patching:
             self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
 
-        # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
-        # ground truth heatmap
         heatmaps = []
-        for coords in labels:
-            if coords:
-                if len(coords) % 2 == 1:
-                    # There is an odd number of coordinates, which is problematic
-                    raise ValueError("Unpaired coordinate found in points labels from " + label_file)
-
-                points = zip(coords[0::2], coords[1::2])
+        for points in labels:
+            if points:
                 heatmaps.append(self.__points_to_density_map(points))
             else:
                 # There are no objects, so the heatmap is blank
@@ -221,17 +217,14 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
     def load_heatmap_dataset_with_json_files_from_directory(self, dirname):
         """
         Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
-        train on and a csv file that maps image names to multiple x and y labels (formatted like x1,y1,x2,y2,...)
+        train on and JSON files that store the labels as x and y lists
         :param dirname: The path to the directory with the image files and label file
-        :param label_file: The path to the csv file with heatmap point labels
         """
         self._raw_image_files, labels = loaders.read_dataset_from_directory_with_json_labels(dirname)
 
         if self._with_patching:
             self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
 
-        # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
-        # ground truth heatmap
         heatmaps = []
         for coords in labels:
             if coords:
@@ -306,7 +299,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         """
         Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
         set of patches made previously
-        :param labels: A nested list of point labels for the original images
+        :param labels: A nested list of point tuple labels for the original images (i.e. [[(x,y), (x,y), ...], ...]
         :param patch_dir: The directory to place patched images into, or where to read previous patches from
         :return: The patched dataset as a list of image filenames and a nested list of their corresponding point labels
         """
@@ -321,7 +314,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             self._log("Loading preexisting patched data from " + patch_dir)
             image_files = loaders.get_dir_images(im_dir)
             new_labels, _ = loaders.read_csv_multi_labels_and_ids(point_file, 0)
-            new_labels = [list(map(int, x)) for x in new_labels]
+            new_labels = loaders.csv_points_to_tuples(new_labels)
             return image_files, new_labels
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
@@ -337,12 +330,10 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         for n, im_file, im_labels in zip(trange(n_image), self._raw_image_files, labels):
             im = np.array(Image.open(im_file))
 
-            def place_points_in_patches(tl_coord, br_coord, serial_points):
+            def place_points_in_patches(tl_coord, br_coord, points):
                 # The slow, O(mn) way
-                points = list(zip(serial_points[0::2], serial_points[1::2]))
                 for (py0, px0), (py1, px1) in zip(tl_coord, br_coord):
                     points_in_patch = [(x - px0, y - py0) for (x, y) in points if py0 <= y < py1 and px0 <= x < px1]
-                    points_in_patch = [c for p in points_in_patch for c in p]  # Convert (x,y) tuples to flat x,y list
                     new_labels.append(points_in_patch)
 
             patch_start, patch_end = self._autopatch_get_patch_coords(im)
