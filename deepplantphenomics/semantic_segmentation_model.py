@@ -447,6 +447,8 @@ class SemanticSegmentationModel(DPPModel):
         y1, x1 = br_coord
         patch_x = x1 - x0
         patch_y = y1 - y0
+        if im.ndim == 2:
+            im = np.expand_dims(im, axis=-1)  # Give 2D images an explicit 1-channel dimension
         im_height, im_width, im_depth = im.shape
 
         fill_x = x1 - im_width if x1 > im_width else 0
@@ -459,6 +461,8 @@ class SemanticSegmentationModel(DPPModel):
         im_patch = np.full((patch_y, patch_x, im_depth), 0, dtype=np.uint8)
         im_patch[0:patch_y - fill_y, 0:patch_x - fill_x, :] = im[y0:y1, x0:x1, :].astype(np.uint8)
 
+        if im_depth == 1:
+            return im_patch.squeeze(axis=2)  # Remove the 1-channel dimension; some image libraries don't like it
         return im_patch
 
     def _parse_apply_preprocessing(self, images, labels):
