@@ -174,7 +174,7 @@ def read_dataset_from_directory_with_json_labels(directory_name):
     for i in range(len(image_paths)):
         label_file = os.path.join(directory_name, label_files[i])
 
-        with open(label_file, 'r') as f:
+        with open(label_file, 'r', encoding='utf-8-sig') as f:
             d = json.load(f)
 
             xs = list(d['x'].values())
