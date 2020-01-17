@@ -236,18 +236,6 @@ class SemanticSegmentationModel(DPPModel):
 
     def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
-            if self._with_patching:
-                # we want the largest multiple of of patch height/width that is smaller than the original
-                # image height/width, for the final image dimensions
-                patch_height = self._patch_height
-                patch_width = self._patch_width
-                final_height = (self._image_height // patch_height) * patch_height
-                final_width = (self._image_width // patch_width) * patch_width
-                # find image differences to determine re-centering crop coords, we divide by 2 so that the leftover
-                # is equal on all sides of image
-                offset_height = (self._image_height - final_height) // 2
-                offset_width = (self._image_width - final_width) // 2
-
             num_batches = len(images) // self._batch_size
             if len(images) % self._batch_size != 0:
                 num_batches += 1
@@ -259,14 +247,24 @@ class SemanticSegmentationModel(DPPModel):
             if self._load_from_saved:
                 self.load_state()
 
-            # Break images up into patches if necessary
             if self._with_patching:
-                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
-                # Split the images up into the multiple slices of size patch_height x patch_width
-                ksizes = [1, patch_height, patch_width, 1]
-                strides = [1, patch_height, patch_width, 1]
+                # Processing and returning whole images is more important than preventing erroneous results from
+                # padding, so we the image size with the required padding to accommodate the patch size
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                num_patch_rows = ceil(self._image_height / patch_height)
+                num_patch_cols = ceil(self._image_width / patch_width)
+                final_height = num_patch_rows * patch_height
+                final_width = num_patch_cols * patch_width
+
+                # Apply any padding to the images if, then extract the patches. Padding is only added to the bottom and
+                # right sides.
+                x_test = tf.image.pad_to_bounding_box(x_test, 0, 0, final_height, final_width)
+                sizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]  # Same as sizes in order to tightly tile patches
                 rates = [1, 1, 1, 1]
-                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.image.extract_image_patches(x_test, sizes=sizes, strides=strides, rates=rates,
+                                                        padding="VALID")
                 x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
 
             # Run model on them
@@ -274,8 +272,6 @@ class SemanticSegmentationModel(DPPModel):
 
             total_outputs = []
             if self._with_patching:
-                num_patch_rows = final_height // patch_height
-                num_patch_cols = final_width // patch_width
                 n_patches = num_patch_rows * num_patch_cols
                 for i in range(num_batches):
                     xx = self._session.run(x_pred)
@@ -287,6 +283,9 @@ class SemanticSegmentationModel(DPPModel):
                             row_patches = [row_of_patches[i] for i in range(num_patch_cols)]
                             full_img.append(np.concatenate(row_patches, axis=1))
                         full_img = np.concatenate(full_img, axis=0)
+
+                        # Trim off any padding that was added
+                        full_img = full_img[0:self._image_height, 0:self._image_width, :]
 
                         # Keep the final image, but with an extra dimension to concatenate the images together
                         total_outputs.append(np.expand_dims(full_img, axis=0))
