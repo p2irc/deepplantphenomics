@@ -172,10 +172,27 @@ load_dataset_from_pkl_file(pkl_file_name)
 
 #### Load Heatmap-based Counting Dataset From Directory
 
-Loads a dataset for object counting using heatmaps from directory with images and a CSV file of object locations for each image. For each image, the labels should be the x and y point coordinates of each object location such that x and y alternate with each other (i.e. `filename, x1, y1, x2, y2, ...`). **Requires using the `HeatmapObjectCountingModel`**.
+Two variants of this loader exist. **Both require using the `HeatmapObjectCountingModel`**.
+
+##### With CSV Labels
+
+Loads a dataset for object counting using heatmaps from directory with images and a CSV file of object locations for each image. For each image, the labels should be the x and y point coordinates of each object location such that x and y alternate with each other (i.e. `filename, x1, y1, x2, y2, ...`).
 
 The object location labels will be used to automatically generate the ground truth heatmap for the corresponding image. The generated heatmap consists of a 2D gaussian placed at every location in the image; the size of the gaussians is controlled by setting the standard deviation using `set_density_map_sigma(sigma)`.
 
 ```
 load_heatmap_dataset_with_csv_from_directory(dirname, label_file)
+```
+
+##### With JSON Labels
+
+Loads a similar dataset whose labels are a JSON file per image of object locations. JSON files should have the same name as the corresponding image file and be in the same directory. The JSON labels should be in the following format (though keys p1, p2, ... are arbitrary):
+
+```json
+{"x": {"p1": x1, "p2": x2, ...}, 
+"y": {"p1": y1, "p2": y2, ...}}
+```
+
+```
+load_heatmap_dataset_with_json_files_from_directory(dirname)
 ```

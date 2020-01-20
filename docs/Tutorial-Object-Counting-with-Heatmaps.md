@@ -42,20 +42,33 @@ model.begin_training()
 
 ### Data/Label Loading
 
-There are two ways to load in a dataset for training a heatmap-based object counter. The first way involves places the training images and a CSV file in a directory and calling:
+There are three ways to load in a dataset for training a heatmap-based object counter. The first way involves places the training images and a CSV file in a directory and calling:
 
 ```python
-model.load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file)
+model.load_heatmap_dataset_with_csv_from_directory(dirname, label_file)
 ```
 
 The CSV file should contain a mapping of image names to the coordinates of multiple objects in x,y,x,y,... order. This will take the object locations and generate the ground truth heatmap, placing a 2D gaussian distribution at every labeled location. The standard deviation (and thus size) of the gaussians can be set with `set_density_map_sigma(sigma)`. An example generated heatmap is shown below.
 
 ![Example Generated Heatmap](heatmap_labels.png)
 
+Alternatively, the point labels can be placed into JSON files (1 per image) in the same directory as the images. These can then be loaded using:
+
+```python
+model.load_heatmap_with_json_files_from_directory(dirname)
+```
+
+The JSON label files, however, have a different format to the CSV labels:
+
+```json
+{"x": {"p1": x1, "p2": x2, ...}, 
+"y": {"p1": y1, "p2": y2, ...}}
+```
+
 The other way to load datasets in is to use one of the semantic segmentation loaders:
 
 ```python
-model.load_dataset_from_directory_with_segmentation_masks(self, dirname, seg_dirname)
+model.load_dataset_from_directory_with_segmentation_masks(dirname, seg_dirname)
 ```
 
 This can be used to load in images with pre-made heatmaps, provided that the image and heatmap images are separated into different directories.
