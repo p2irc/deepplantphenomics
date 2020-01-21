@@ -275,7 +275,14 @@ def box_coordinates_to_xywh_coordinates(coords):
 
 
 def csv_points_to_tuples(labels):
-    """Converts nested lists of x,y,x,y,... points to point tuples"""
-    labels = [list(map(int, im_labels)) for im_labels in labels]
+    """Converts nested lists of string x,y,x,y,... points to int point tuples"""
+    def string_list_to_ints(str_list):
+        if not str_list:
+            return []  # No items from other processing
+        if str_list == ['']:
+            return []  # No items from CSV reading; either empty line or only ID was supplied
+        return list(map(int, str_list))
+
+    labels = [string_list_to_ints(im_labels) for im_labels in labels]
     labels = [list(zip(im_labels[0::2], im_labels[1::2])) for im_labels in labels]
     return labels
