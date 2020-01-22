@@ -418,3 +418,12 @@ class skipConnection(object):
             return self.layer.forward_pass(x, deterministic)
         else:
             return x
+
+
+class copyConnection(object):
+    """Defines a coconcatenation connection a la u-net. """
+    def __init__(self, name, input_size, mode):
+        self.name = name
+        self.input_size = input_size
+        self.mode = mode
+        self.output_size = copy.deepcopy(input_size)

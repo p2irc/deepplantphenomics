@@ -30,7 +30,7 @@ class DPPModel(ABC):
     _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'sigmoid cross entropy',
                            'yolo']
     _supported_predefined_models = ['vgg-16', 'alexnet', 'resnet-18', 'yolov2', 'xsmall', 'small', 'medium', 'large',
-                                    "countception"]
+                                    'countception', 'u-net']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
@@ -145,6 +145,7 @@ class DPPModel(ABC):
         self._num_layers_batchnorm = 0
         self._num_blocks_paral_conv = 0
         self._num_skip_connections = 0
+        self._num_copy_connections = 0
 
         # Network options
         self._batch_size = 1
@@ -1062,6 +1063,7 @@ class DPPModel(ABC):
         :return: output tensor where the first dimension is batch
         """
         residual = None
+        copy_stack = []
 
         with self._graph.as_default():
             for layer in self._layers:
@@ -1075,6 +1077,11 @@ class DPPModel(ABC):
                         residual = x
                 elif isinstance(layer, layers.moderationLayer) and moderation_features is not None:
                     x = layer.forward_pass(x, deterministic, moderation_features)
+                elif isinstance(layer, layers.copyLayer):
+                    if layer.mode == 'save':
+                        copy_stack.append(x)
+                    else:
+                        x = tf.concat([x, copy_stack.pop()], -1)
                 else:
                     x = layer.forward_pass(x, deterministic)
 
@@ -1463,6 +1470,20 @@ class DPPModel(ABC):
 
         self._layers.append(layer)
 
+    def add_copy_connection(self, mode):
+        if len(self._layers) < 1:
+            raise RuntimeError("A copy connection cannot be the first layer added to the model.")
+
+        self._num_copy_connections += 1
+        layer_name = 'copy%d' % self._num_copy_connections
+        self._log('Adding copy connection...')
+
+        layer = layers.copyConnection(layer_name, self._last_layer().output_size, mode)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
+
     def add_global_average_pooling_layer(self):
         """Adds a global average pooling layer"""
         if len(self._layers) < 1:
@@ -1500,6 +1521,50 @@ class DPPModel(ABC):
                              " Make sure you have the correct problem type set with DPPModel.set_problem_type() " +
                              "first, or choose one of " +
                              " ".join("'" + x + "'" for x in self._supported_predefined_models))
+
+        if model_name == 'u-net':
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 112], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 112], stride_length=1, activation_function='relu')
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 224], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 224], stride_length=1, activation_function='relu')
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 448], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 448], stride_length=1, activation_function='relu')
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 448], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 448], stride_length=1, activation_function='relu')
+            self.add_upsampling_layer(filter_size=2, num_filters=448)
+
+            self.add_copy_connection('load')
+            self.add_dropout_layer(0.5)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 896, 224], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 224], stride_length=1, activation_function='relu')
+            self.add_upsampling_layer(filter_size=2, num_filters=224)
+
+            self.add_copy_connection('load')
+            self.add_dropout_layer(0.5)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 112], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 112], stride_length=1, activation_function='relu')
+            self.add_upsampling_layer(filter_size=2, num_filters=112)
+
+            self.add_copy_connection('load')
+            self.add_dropout_layer(0.5)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 112], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 112], stride_length=1, activation_function='relu')
+
+            # Output layer
+            #self.add_convolutional_layer(filter_dimension=[3, 3, 112, 1], stride_length=1, activation_function='sigmoid')
+
+            self.add_output_layer()
 
         if model_name == 'vgg-16':
             self.add_input_layer()
