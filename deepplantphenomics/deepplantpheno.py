@@ -1525,44 +1525,52 @@ class DPPModel(ABC):
         if model_name == 'u-net':
             self.add_input_layer()
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 112], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 112], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
             self.add_copy_connection('save')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 224], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 224], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
             self.add_copy_connection('save')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 448], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 448], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
             self.add_copy_connection('save')
             self.add_pooling_layer(kernel_size=2, stride_length=2)
 
-            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 448], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 448], stride_length=1, activation_function='relu')
-            self.add_upsampling_layer(filter_size=2, num_filters=448)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 1024], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 1024], stride_length=1, activation_function='relu')
+
+            self.add_upsampling_layer(filter_size=2, num_filters=512)
 
             self.add_copy_connection('load')
-            self.add_dropout_layer(0.5)
-            self.add_convolutional_layer(filter_dimension=[3, 3, 896, 224], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 224], stride_length=1, activation_function='relu')
-            self.add_upsampling_layer(filter_size=2, num_filters=224)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 512], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu')
+            self.add_upsampling_layer(filter_size=2, num_filters=256)
 
             self.add_copy_connection('load')
-            self.add_dropout_layer(0.5)
-            self.add_convolutional_layer(filter_dimension=[3, 3, 448, 112], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 112], stride_length=1, activation_function='relu')
-            self.add_upsampling_layer(filter_size=2, num_filters=112)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 256], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu')
+            self.add_upsampling_layer(filter_size=2, num_filters=128)
 
             self.add_copy_connection('load')
-            self.add_dropout_layer(0.5)
-            self.add_convolutional_layer(filter_dimension=[3, 3, 224, 112], stride_length=1, activation_function='relu')
-            self.add_convolutional_layer(filter_dimension=[3, 3, 112, 112], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 128], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu')
+            self.add_upsampling_layer(filter_size=2, num_filters=64)
+
+            self.add_copy_connection('load')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 64], stride_length=1, activation_function='relu')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu')
 
             # Output layer
-            #self.add_convolutional_layer(filter_dimension=[3, 3, 112, 1], stride_length=1, activation_function='sigmoid')
+            #self.add_convolutional_layer(filter_dimension=[1, 1, 64, 1], stride_length=1, activation_function='sigmoid')
 
             self.add_output_layer()
 
