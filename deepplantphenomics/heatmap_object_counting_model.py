@@ -227,7 +227,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         heatmaps = []
         for coords in labels:
-            if coords:
+            if len(coords) > 0:
                 heatmaps.append(self.__points_to_density_map(coords))
             else:
                 # There are no objects, so the heatmap is blank
@@ -250,7 +250,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         output_img = np.zeros([self._image_height, self._image_width], dtype=np.float32)
 
         # Fixed
-        diameter = 60
+        diameter = 100
         radius = diameter / 2
 
         h = self._image_height

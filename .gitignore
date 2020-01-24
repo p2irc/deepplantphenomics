@@ -1,4 +1,5 @@
 .idea
 /data
 /DPP-Processed
+/train_patch
 *.pyc

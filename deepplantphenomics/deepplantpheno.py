@@ -1077,7 +1077,7 @@ class DPPModel(ABC):
                         residual = x
                 elif isinstance(layer, layers.moderationLayer) and moderation_features is not None:
                     x = layer.forward_pass(x, deterministic, moderation_features)
-                elif isinstance(layer, layers.copyLayer):
+                elif isinstance(layer, layers.copyConnection):
                     if layer.mode == 'save':
                         copy_stack.append(x)
                     else:
@@ -1476,7 +1476,7 @@ class DPPModel(ABC):
 
         self._num_copy_connections += 1
         layer_name = 'copy%d' % self._num_copy_connections
-        self._log('Adding copy connection...')
+        self._log('Adding copy connection ({0})...'.format(mode))
 
         layer = layers.copyConnection(layer_name, self._last_layer().output_size, mode)
 
