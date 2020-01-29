@@ -1,4 +1,4 @@
-from deepplantphenomics import loaders, SemanticSegmentationModel
+from deepplantphenomics import loaders, layers, SemanticSegmentationModel
 import tensorflow.compat.v1 as tf
 import numpy as np
 import os
@@ -8,6 +8,7 @@ import itertools
 from tqdm import tqdm, trange
 from PIL import Image
 import cv2
+import copy
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
@@ -54,7 +55,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L2 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
+        #y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
+        y = tf.reduce_mean(tf.square(x), axis=[1,2,3])
         return y
 
     def __l1_loss(self, x):
@@ -63,7 +65,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
+        y = tf.reduce_mean(tf.abs(x), axis=[1,2,3])
         return y
 
     def __smooth_l1_loss(self, x, huber_delta=1):
@@ -394,3 +396,27 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             return super(SemanticSegmentationModel, self)._parse_force_set_shape(images, labels, height, width, depth)
         else:
             return super()._parse_force_set_shape(images, labels, height, width, depth)
+
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            warnings.warn("Heatmap counter doesn't use regularization_coefficient in its output layer")
+        if output_size is not None:
+            raise RuntimeError("output_size should be None for heatmap counting")
+
+        self._log('Adding output layer...')
+
+        filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
+
+        with self._graph.as_default():
+            layer = layers.convLayer('output',
+                                     copy.deepcopy(self._last_layer().output_size),
+                                     filter_dimension,
+                                     1,
+                                     None,
+                                     self._weight_initializer)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._layers.append(layer)

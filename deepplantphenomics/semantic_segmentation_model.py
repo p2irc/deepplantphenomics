@@ -165,6 +165,8 @@ class SemanticSegmentationModel(DPPModel):
                 self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
                                                                          self._graph_ops['y_val'])
 
+                self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
+
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
                 self._graph_tensorboard_summary(l2_cost, gradients, variables, global_grad_norm)
