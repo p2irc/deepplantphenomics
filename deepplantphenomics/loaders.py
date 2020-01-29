@@ -113,8 +113,10 @@ def label_string_to_tensor(x, batch_size, num_outputs=-1):
 
 
 def get_dir_images(dirname):
-    return sorted([os.path.join(dirname, f) for f in os.listdir(dirname) if
-                   os.path.isfile(os.path.join(dirname, f)) and (f.endswith('.png') or f.endswith('.jpg'))])
+    dir_files = sorted([os.path.join(dirname, f) for f in os.listdir(dirname)])
+    is_file = [os.path.isfile(f) for f in dir_files]
+    is_image = [os.path.splitext(f)[1].lower() in ['.jpg', '.jpeg', '.png'] for f in dir_files]
+    return [f for (f, b1, b2) in zip(dir_files, is_file, is_image) if b1 and b2]
 
 
 def read_csv_labels(file_name, column_number=False, character=','):
