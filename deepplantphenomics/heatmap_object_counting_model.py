@@ -198,21 +198,11 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         labels = loaders.csv_points_to_tuples(labels)
 
-        if self._with_patching:
-            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
-
-        heatmaps = []
-        for points in labels:
-            if points:
-                heatmaps.append(self.__points_to_density_map(points))
-            else:
-                # There are no objects, so the heatmap is blank
-                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32))
+        heatmaps = self.__labels_to_heatmaps(labels)
 
         self._total_raw_samples = len(self._raw_image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
-        heatmaps = np.stack(heatmaps)
         self._raw_labels = heatmaps
         self._split_labels = False  # Band-aid fix
 
@@ -227,20 +217,51 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         if self._with_patching:
             self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
 
-        heatmaps = []
-        for coords in labels:
-            if len(coords) > 0:
-                heatmaps.append(self.__points_to_density_map(coords))
-            else:
-                # There are no objects, so the heatmap is blank
-                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32))
+        heatmaps = self.__labels_to_heatmaps(labels)
 
         self._total_raw_samples = len(self._raw_image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
-        heatmaps = np.stack(heatmaps)
         self._raw_labels = heatmaps
         self._split_labels = False  # Band-aid fix
+
+    def __labels_to_heatmaps(self, labels):
+        """
+        Converts point labels to heatmap labels and stores them as binary files
+        :param labels: A list of lists of tuples with the point labels for each image
+        :return: A list of file names for the generated heatmaps
+        """
+        out_dir = os.path.join(os.path.curdir, 'generated_heatmaps')
+        if not os.path.exists(out_dir):
+            os.mkdir(out_dir)
+
+        heatmaps = []
+        for filename, coords in zip(self._raw_image_files, labels):
+            if len(coords) > 0:
+                heatmap = self.__points_to_density_map(coords)
+            else:
+                # There are no points, so the heatmap is blank
+                heatmap = np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32)
+
+            heatmap_file = self.__save_heatmap_as_binary(heatmap, os.path.splitext(os.path.basename(filename))[0],
+                                                         out_dir=out_dir)
+            heatmaps.append(heatmap_file)
+
+        return heatmaps
+
+    def __save_heatmap_as_binary(self, heatmap, filename, out_dir=None):
+        """
+        Saves a floating-point heatmap array as a binary .npy file for later use in training
+        :param heatmap:
+        :param filename: The filename to save the heatmap array with, excluding the extension
+        :return: The file path for later use in reloading the array
+        """
+        if out_dir is None:
+            out_dir = os.path.curdir
+        out_name = os.path.join(out_dir, '{}.npy'.format(filename))
+
+        np.save(out_name, heatmap)
+        return out_name
 
     def __points_to_density_map(self, points):
         """
@@ -362,15 +383,19 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         return image_files, new_labels
 
+    def _parse_load_heatmap_binary(self, filename):
+        return np.load(filename)
+
     def _parse_apply_preprocessing(self, images, labels):
-        # This is tricky. If we read in the heatmaps as images, then we want to use the version in
-        # SemanticSegmentationModel, which treats the labels like regular images. If we instead generated the heatmaps
-        # from points in a CSV file, then we want to treat the labels like other labels, which the version in DPPModel
-        # does. super() will let us choose which one by making it look through this or Semantic...Model's MRO.
         if not self.__label_from_image_file:
-            # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_apply_preprocessing(images, labels)
+            # If we generated the heatmaps from points in a CSV or JSON file, then we want to treat the labels like
+            # other labels, with the wrinkle that loading them requires wrapping a binary loader with tf.py_func
+            images = self._parse_read_images(images, channels=self._image_depth)
+            labels = tf.numpy_function(self._parse_load_heatmap_binary, [labels], tf.float32)
+            return images, labels
         else:
+            # If we instead read in the heatmaps as images, then we want to use the version in
+            # SemanticSegmentationModel, which treats the labels like regular images.
             return super()._parse_apply_preprocessing(images, labels)
 
     def _parse_resize_images(self, images, labels, height, width):
