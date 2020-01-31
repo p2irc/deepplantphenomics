@@ -5,6 +5,7 @@ import os
 import warnings
 import numbers
 import itertools
+import shutil
 from tqdm import tqdm, trange
 from PIL import Image
 import cv2
@@ -227,13 +228,22 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
     def __labels_to_heatmaps(self, labels):
         """
-        Converts point labels to heatmap labels and stores them as binary files
+        Converts point labels to heatmap labels and stores them as binary files. This will check for existing heatmaps
+        first and load them if found unless data overwriting is turned on.
         :param labels: A list of lists of tuples with the point labels for each image
         :return: A list of file names for the generated heatmaps
         """
         out_dir = os.path.join(os.path.curdir, 'generated_heatmaps')
-        if not os.path.exists(out_dir):
-            os.mkdir(out_dir)
+        if os.path.exists(out_dir) and not self._gen_data_overwrite:
+            # If we've already generated heatmaps, just load their filenames
+            heatmaps = sorted([os.path.join(out_dir, f) for f in os.listdir(out_dir) if
+                               os.path.splitext(f)[1] == '.npy'])
+            return heatmaps
+
+        if os.path.exists(out_dir):
+            self._log("Overwriting preexisting heatmaps...")
+            shutil.rmtree(out_dir)
+        os.mkdir(out_dir)
 
         heatmaps = []
         for filename, coords in zip(self._raw_image_files, labels):
@@ -252,7 +262,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
     def __save_heatmap_as_binary(self, heatmap, filename, out_dir=None):
         """
         Saves a floating-point heatmap array as a binary .npy file for later use in training
-        :param heatmap:
+        :param heatmap: A float ndarray with a heatmap
         :param filename: The filename to save the heatmap array with, excluding the extension
         :return: The file path for later use in reloading the array
         """
@@ -320,8 +330,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
     def __autopatch_heatmap_dataset(self, labels, patch_dir=None):
         """
-        Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
-        set of patches made previously
+        Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
+        labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
         :param labels: A nested list of point tuple labels for the original images (i.e. [[(x,y), (x,y), ...], ...]
         :param patch_dir: The directory to place patched images into, or where to read previous patches from
         :return: The patched dataset as a list of image filenames and a nested list of their corresponding point labels
@@ -332,7 +342,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         im_dir = patch_dir
         point_file = os.path.join(patch_dir, 'patch_point_labels.csv')
 
-        if os.path.exists(patch_dir):
+        if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
             image_files = loaders.get_dir_images(im_dir)
@@ -341,6 +351,9 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             return image_files, new_labels
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
+        if os.path.exists(patch_dir):
+            self._log("Overwriting preexisting patched data...")
+            shutil.rmtree(patch_dir)
         os.mkdir(patch_dir)
 
         # We need to construct patches from the previously loaded dataset. We'll take as many of them as we can fit

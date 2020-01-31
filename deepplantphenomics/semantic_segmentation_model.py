@@ -5,6 +5,7 @@ import os
 import warnings
 import copy
 import itertools
+import shutil
 from math import ceil
 from tqdm import tqdm, trange
 from PIL import Image
@@ -369,8 +370,8 @@ class SemanticSegmentationModel(DPPModel):
 
     def __autopatch_segmentation_dataset(self, patch_dir=None):
         """
-        Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
-        set of patches made previously
+        Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
+        labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
         :param patch_dir: The directory to place patched images into, or where to read previous patches from
         :return The patched dataset as lists of the image and segmentation mask filenames
         """
@@ -380,7 +381,7 @@ class SemanticSegmentationModel(DPPModel):
         im_dir = os.path.join(patch_dir, 'im_patch', '')
         seg_dir = os.path.join(patch_dir, 'mask_patch', '')
 
-        if os.path.exists(patch_dir):
+        if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
             image_files = loaders.get_dir_images(im_dir)
@@ -388,6 +389,9 @@ class SemanticSegmentationModel(DPPModel):
             return image_files, seg_files
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
+        if os.path.exists(patch_dir):
+            self._log("Overwriting preexisting patched data...")
+            shutil.rmtree(patch_dir)
         os.mkdir(patch_dir)
         os.mkdir(im_dir)
         os.mkdir(seg_dir)
