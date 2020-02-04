@@ -199,6 +199,9 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         labels = loaders.csv_points_to_tuples(labels)
 
+        if self._with_patching:
+            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
+
         heatmaps = self.__labels_to_heatmaps(labels)
 
         self._total_raw_samples = len(self._raw_image_files)
