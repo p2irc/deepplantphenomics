@@ -382,14 +382,13 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             num_patch = len(patch_start)
             place_points_in_patches(patch_start, patch_end, im_labels)
 
-            for i, tl_coord, br_coord, serial_labels in zip(itertools.count(patch_num), patch_start, patch_end,
-                                                            out_labels):
+            for i, tl_coord, br_coord in zip(itertools.count(patch_num), patch_start, patch_end):
                 im_patch = Image.fromarray(self._autopatch_extract_patch(im, tl_coord, br_coord))
                 im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
                 im_patch.save(im_name)
                 image_files.append(im_name)
 
-                label_str.append('im_{:0>6d},'.format(i) + ','.join([str(x) for x in serial_labels]))
+                label_str.append('im_{:0>6d},'.format(i) + ','.join([str(x) for x in out_labels[i]]))
 
             patch_num += num_patch
 
