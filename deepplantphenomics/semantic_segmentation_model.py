@@ -45,9 +45,13 @@ class SemanticSegmentationModel(DPPModel):
         # Summaries specific to semantic segmentation
         # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
         # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-        train_images_summary = self._get_weights_as_image(
-            tf.transpose(self._graph_forward_pass, (1, 2, 3, 0)), self._layers[-1].output_size)
-        tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
+
+        tf.summary.image('masks/train', self._graph_forward_pass, collections=['custom_summaries'])
+
+        tf.summary.image('masks/target', self._graph_target, collections=['custom_summaries'])
+
+        tf.summary.image('input_image', self._graph_input, collections=['custom_summaries'])
+
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_cost'], collections=['custom_summaries'])
             val_images_summary = self._get_weights_as_image(
@@ -104,6 +108,8 @@ class SemanticSegmentationModel(DPPModel):
                     else:
                         xx = self.forward_pass(x, deterministic=False)
                     self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
+                    self._graph_input = x
+                    self._graph_target = y
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
