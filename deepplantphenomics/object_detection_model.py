@@ -6,6 +6,7 @@ import json
 import warnings
 import copy
 import itertools
+import shutil
 from math import ceil
 from collections.abc import Sequence
 from scipy.special import expit
@@ -817,13 +818,19 @@ class ObjectDetectionModel(DPPModel):
         self._raw_labels = self._all_labels
 
     def __autopatch_object_detection_dataset(self, patch_dir=None):
+        """
+        Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
+        labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
+        :param patch_dir: The directory to place patched images into, or where to read previous patches from
+        :return: The patched dataset as a list of image filenames and a nested list of their corresponding point labels
+        """
         if not patch_dir:
             patch_dir = os.path.curdir
         patch_dir = os.path.join(patch_dir, 'tmp_train', '')
         img_dir = os.path.join(patch_dir, 'image_patches', '')
         json_file = os.path.join(patch_dir, 'train_patches.json')
 
-        if os.path.exists(patch_dir):
+        if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
             self._json_no_convert = True
@@ -834,6 +841,9 @@ class ObjectDetectionModel(DPPModel):
             return self._raw_image_files, self._all_labels
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
+        if os.path.exists(patch_dir):
+            self._log("Overwriting preexisting patched data...")
+            shutil.rmtree(patch_dir)
         os.makedirs(patch_dir)
         os.makedirs(img_dir)
 

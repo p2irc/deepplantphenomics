@@ -91,6 +91,7 @@ class DPPModel(ABC):
 
         # Dataset storage
         self._all_ids = None
+        self._gen_data_overwrite = False
 
         self._train_dataset = None
         self._test_dataset = None
@@ -506,6 +507,7 @@ class DPPModel(ABC):
         self._all_moderation_features = moderation_features
 
     def set_patch_size(self, height, width):
+        """Sets the size of patches generated from larger input images and turns on automatic patching"""
         if not isinstance(height, int):
             raise TypeError("height must be an int")
         if height <= 0:
@@ -518,6 +520,14 @@ class DPPModel(ABC):
         self._patch_height = height
         self._patch_width = width
         self._with_patching = True
+
+    def set_gen_data_overwrite(self, overwrite):
+        """Sets whether to overwrite generated data like patches and object heatmaps when loading data or to load any
+        previous generated data that exists"""
+        if not isinstance(overwrite, bool):
+            raise TypeError("overwrite must be a bool")
+
+        self._gen_data_overwrite = overwrite
 
     def _get_device_list(self):
         """Returns the list of CPU and/or GPU devices to construct and evaluate graphs for"""

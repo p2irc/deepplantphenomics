@@ -186,7 +186,7 @@ load_heatmap_dataset_with_csv_from_directory(dirname, label_file)
 
 ##### With JSON Labels
 
-Loads a similar dataset whose labels are a JSON file per image of object locations. JSON files should have the same name as the corresponding image file and be in the same directory. The JSON labels should be in the following format (though keys p1, p2, ... are arbitrary):
+Loads a similar dataset whose labels are a JSON file per image of object locations. JSON files should have the same name as the corresponding image file and be in the same directory. The JSON labels should be in the following format (though key names like p1, p2, ... are arbitrary):
 
 ```json
 {"x": {"p1": x1, "p2": x2, ...}, 

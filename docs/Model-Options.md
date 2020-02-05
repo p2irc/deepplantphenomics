@@ -84,6 +84,12 @@ force_split_shuffle()
 Sets whether to force shuffling of a loaded dataset into train, test, and validation partitions. These partitions are shuffled and saved the first time a dataset is used for training. By default, this is turned off and subsequent training runs load and reuse this partitioning, to avoid leaking data from the initially selected training and validation sets into the test set, and vice versa.
 
 ```
+set_gen_data_overwrite()
+```
+
+Sets the treatment of generated data like image patches and heatmaps. If true, existing generated data is overwritten. If false, existing generated data will be checked for and loaded when possible.
+
+```
 set_random_seed()
 ```
 
