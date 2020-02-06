@@ -40,7 +40,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         self._density_sigma = sigma
 
     def _graph_problem_loss(self, pred, lab):
-        heatmap_diffs = pred - lab
+        heatmap_diffs = (pred / 100.) - (lab / 100.)
         if self._loss_fn == 'l2':
             return self.__l2_loss(heatmap_diffs)
         elif self._loss_fn == 'l1':
@@ -158,8 +158,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param label_heatmap: The image's corresponding label heatmap as an ndarray
         :return: The accuracy of the heatmap prediction
         """
-        predicted_count = np.sum(predict_heatmap)
-        label_count = np.sum(label_heatmap)
+        predicted_count = np.sum(predict_heatmap / 100.)
+        label_count = np.sum(label_heatmap / 100.)
         return np.abs(predicted_count - label_count)
 
     def forward_pass_with_interpreted_outputs(self, x):
@@ -296,7 +296,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         gauss = cv2.getGaussianKernel(diameter, self._density_sigma)
         gauss2d = gauss * gauss.T
-        gauss2d = gauss2d / np.sum(gauss2d)
+        gauss2d = (gauss2d / np.sum(gauss2d)) * 100.
 
         for (x, y) in points:
             gx1 = 0
@@ -460,7 +460,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                                      copy.deepcopy(self._last_layer().output_size),
                                      filter_dimension,
                                      1,
-                                     None,
+                                     'relu',
                                      self._weight_initializer,
                                      use_bias=False)
 
