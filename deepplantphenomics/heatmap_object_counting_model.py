@@ -183,24 +183,27 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         super().load_dataset_from_directory_with_segmentation_masks(dirname, seg_dirname)
         self.__label_from_image_file = True
 
-    def load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file):
+    def load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file, ext='jpg'):
         """
         Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
         train on and a csv file that maps image names to multiple x and y labels (formatted like x1,y1,x2,y2,...)
         :param dirname: The path to the directory with the image files and label file
         :param label_file: The path to the csv file with heatmap point labels
         """
-        self._raw_image_files = loaders.get_dir_images(dirname)
+        # self._raw_image_files = loaders.get_dir_images(dirname)
 
         filename = os.path.join(dirname, label_file)
         labels, ids = loaders.read_csv_multi_labels_and_ids(filename, 0)
+
+        self._raw_image_files = [os.path.join(dirname, id) + '.' + ext for id in ids]
+
         if any([len(im_labels) % 2 == 1 for im_labels in labels]):
             raise ValueError("Unpaired coordinate found in points labels from " + label_file)
 
         labels = loaders.csv_points_to_tuples(labels)
 
         if self._with_patching:
-            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
+            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels, ext=ext)
 
         heatmaps = self.__labels_to_heatmaps(labels)
 
@@ -285,8 +288,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         output_img = np.zeros([self._image_height, self._image_width], dtype=np.float32)
 
-        # Fixed
-        diameter = 100
+        diameter = int(self._density_sigma * 6)
         radius = diameter / 2
 
         h = self._image_height
@@ -331,7 +333,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         return np.expand_dims(output_img, -1)
 
-    def __autopatch_heatmap_dataset(self, labels, patch_dir=None):
+    def __autopatch_heatmap_dataset(self, labels, patch_dir=None, ext='jpg'):
         """
         Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
         labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
@@ -348,8 +350,11 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
-            image_files = loaders.get_dir_images(im_dir)
-            new_labels, _ = loaders.read_csv_multi_labels_and_ids(point_file, 0)
+            #image_files = loaders.get_dir_images(im_dir)
+            new_labels, ids = loaders.read_csv_multi_labels_and_ids(point_file, 0)
+
+            image_files = [os.path.join(patch_dir, id) + '.' + ext for id in ids]
+
             new_labels = loaders.csv_points_to_tuples(new_labels)
             return image_files, new_labels
 
@@ -456,7 +461,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                                      filter_dimension,
                                      1,
                                      None,
-                                     self._weight_initializer)
+                                     self._weight_initializer,
+                                     use_bias=False)
 
         self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
         self._layers.append(layer)

@@ -703,7 +703,8 @@ class DPPModel(ABC):
 
         def _add_layer_histograms(net_layer):
             tf.summary.histogram('weights/' + net_layer.name, net_layer.weights, collections=['custom_summaries'])
-            tf.summary.histogram('biases/' + net_layer.name, net_layer.biases, collections=['custom_summaries'])
+            if not ((isinstance(net_layer, layers.convLayer) or isinstance(net_layer, layers.upsampleLayer)) and net_layer.use_bias is False):
+                tf.summary.histogram('biases/' + net_layer.name, net_layer.biases, collections=['custom_summaries'])
 
             # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
             # and it was found that if you commented the below line then the code wouldn't hang. Never
@@ -1159,7 +1160,7 @@ class DPPModel(ABC):
         self._layers.append(layer)
 
     def add_convolutional_layer(self, filter_dimension, stride_length, activation_function,
-                                padding=None, batch_norm=False, epsilon=1e-5, decay=0.9):
+                                padding=None, batch_norm=False, use_bias=True, epsilon=1e-5, decay=0.9):
         """
         Add a convolutional layer to the model.
 
@@ -1230,6 +1231,7 @@ class DPPModel(ABC):
                                      self._weight_initializer,
                                      padding,
                                      batch_norm,
+                                     use_bias,
                                      epsilon,
                                      decay)
 
@@ -1238,7 +1240,7 @@ class DPPModel(ABC):
         self._layers.append(layer)
 
     def add_upsampling_layer(self, filter_size, num_filters, upscale_factor=2,
-                             activation_function=None, regularization_coefficient=None):
+                             activation_function=None, use_bias=True, regularization_coefficient=None):
         """
         Add a 2d upsampling layer to the model.
 
@@ -1275,6 +1277,7 @@ class DPPModel(ABC):
                                          activation_function,
                                          batch_multiplier,
                                          self._weight_initializer,
+                                         use_bias,
                                          regularization_coefficient)
 
         self._log('Filter dimensions: {0} Outputs: {1}'.format(layer.weights_shape, layer.output_size))
