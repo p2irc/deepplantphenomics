@@ -242,8 +242,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         out_dir = os.path.join(os.path.curdir, 'generated_heatmaps')
         if os.path.exists(out_dir) and not self._gen_data_overwrite:
             # If we've already generated heatmaps, just load their filenames
-            heatmaps = sorted([os.path.join(out_dir, f) for f in os.listdir(out_dir) if
-                               os.path.splitext(f)[1] == '.npy'])
+            heatmaps = ["{}.npy".format(os.path.splitext(f)[0]) for f in self._raw_image_files]
             return heatmaps
 
         if os.path.exists(out_dir):
