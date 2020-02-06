@@ -40,7 +40,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         self._density_sigma = sigma
 
     def _graph_problem_loss(self, pred, lab):
-        heatmap_diffs = (pred / 100.) - (lab / 100.)
+        heatmap_diffs = pred - lab
         if self._loss_fn == 'l2':
             return self.__l2_loss(heatmap_diffs)
         elif self._loss_fn == 'l1':
