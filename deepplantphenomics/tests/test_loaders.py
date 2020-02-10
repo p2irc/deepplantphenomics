@@ -92,6 +92,11 @@ def test_get_split_mask():
     assert os.path.exists(test_mask_name)
     assert mask.count(0) == 8 and mask.count(1) == 2 and mask.count(2) == 0
 
+    # Make a mask for 12 labels instead of 10, and have a new mask actually made regardless of force_mask_creation
+    mask = loaders._get_split_mask(0.0, 0.25, 12, 0, force_mask_creation=False)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 9 and mask.count(1) == 3 and mask.count(2) == 0
+
     os.remove(test_mask_name)
 
 
