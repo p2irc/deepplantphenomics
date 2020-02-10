@@ -55,9 +55,6 @@ class SemanticSegmentationModel(DPPModel):
 
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_cost'], collections=['custom_summaries'])
-            val_images_summary = self._get_weights_as_image(
-                tf.transpose(self._graph_ops['x_val_predicted'], (1, 2, 3, 0)), self._layers[-1].output_size)
-            tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
         self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 

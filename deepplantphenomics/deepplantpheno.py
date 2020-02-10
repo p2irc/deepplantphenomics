@@ -161,8 +161,8 @@ class DPPModel(ABC):
 
         self._learning_rate = 0.001
         self._lr_decay_factor = None
-        self._epochs_per_decay = None
         self._lr_decay_epochs = None
+        self._lr_epoch = None
 
         # Wrapper options
         self._debug = debug
@@ -412,19 +412,19 @@ class DPPModel(ABC):
 
         self._reg_coeff = lamb
 
-    def set_learning_rate_decay(self, decay_factor, epochs_per_decay):
+    def set_learning_rate_decay(self, decay_factor, batches_per_decay):
         """Set learning rate decay"""
         if not isinstance(decay_factor, float):
             raise TypeError("decay_factor must be a float")
         if decay_factor <= 0:
             raise ValueError("decay_factor must be positive")
-        if not isinstance(epochs_per_decay, int):
+        if not isinstance(batches_per_decay, int):
             raise TypeError("epochs_per_day must be an int")
-        if epochs_per_decay <= 0:
+        if batches_per_decay <= 0:
             raise ValueError("epochs_per_day must be positive")
 
         self._lr_decay_factor = decay_factor
-        self._epochs_per_decay = epochs_per_decay
+        self._lr_decay_epochs = batches_per_decay
 
     def set_optimizer(self, optimizer):
         """Set the optimizer to use"""
@@ -660,7 +660,7 @@ class DPPModel(ABC):
         :param optimizer: The optimizer object used to apply the gradients
         :return: An operation for applying gradients to the graph variables
         """
-        return optimizer.apply_gradients(zip(gradients, variables))
+        return optimizer.apply_gradients(zip(gradients, variables), global_step=self._lr_epoch)
 
     def _graph_layer_loss(self):
         """Calculates and returns the total L2 loss from the weights of fully connected layers. This is 0 if a
@@ -820,8 +820,10 @@ class DPPModel(ABC):
         relevant hyper-parameters.
         """
         with self._graph.as_default():
+            self._lr_epoch = tf.Variable(0, trainable=False)
+            self._set_learning_rate()
             self._assemble_graph()
-            print('assembled the graph')
+            self._log('Assembled the graph')
 
             # Either load the network parameters from a checkpoint file or start training
             if self._load_from_saved:
@@ -833,15 +835,20 @@ class DPPModel(ABC):
                 if self._tb_dir is not None:
                     train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
 
+                #self._set_learning_rate()
+
                 self._log('Initializing parameters...')
                 self._session.run(tf.global_variables_initializer())
 
                 self._log('Beginning training...')
-                self._set_learning_rate()
 
                 # Needed for batch norm
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                # Weight decay
+                if False:
+                    decay_ops = [l.decay_weights() for l in self._layers if callable(getattr(l, 'decay_weights', None))]
 
                 tqdm_range = tqdm(range(self._maximum_training_batches))
                 for i in tqdm_range:
@@ -859,6 +866,9 @@ class DPPModel(ABC):
                             self.save_state(self._save_dir)
                     else:
                         loss = self._session.run([self._graph_ops['cost']])
+
+                        if False:
+                            self._session.run(decay_ops)
 
                     if loss == 0.0:
                         self._log('Stopping due to zero loss')
@@ -1055,10 +1065,10 @@ class DPPModel(ABC):
 
     def _set_learning_rate(self):
         if self._lr_decay_factor is not None:
-            # needs to be reexamined
-            self._lr_decay_epochs = self._epochs_per_decay * (self._total_training_samples * (1 - self._test_split))
+            self._log('Setting learning rate decay to every {0} steps'.format(self._lr_decay_epochs))
+
             self._learning_rate = tf.train.exponential_decay(self._learning_rate,
-                                                             self._global_epoch,
+                                                             self._lr_epoch,
                                                              self._lr_decay_epochs,
                                                              self._lr_decay_factor,
                                                              staircase=True)

@@ -14,6 +14,7 @@ import copy
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
     _supported_loss_fns = ['l2', 'l1', 'smooth l1']
+    _multiplier = 100.
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -158,8 +159,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param label_heatmap: The image's corresponding label heatmap as an ndarray
         :return: The accuracy of the heatmap prediction
         """
-        predicted_count = np.sum(predict_heatmap / 100.)
-        label_count = np.sum(label_heatmap / 100.)
+        predicted_count = np.sum(predict_heatmap / self._multiplier)
+        label_count = np.sum(label_heatmap / self._multiplier)
         return np.abs(predicted_count - label_count)
 
     def forward_pass_with_interpreted_outputs(self, x):
@@ -295,7 +296,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         gauss = cv2.getGaussianKernel(diameter, self._density_sigma)
         gauss2d = gauss * gauss.T
-        gauss2d = (gauss2d / np.sum(gauss2d)) * 100.
+        gauss2d = (gauss2d / np.sum(gauss2d)) * self._multiplier
 
         for (x, y) in points:
             gx1 = 0
@@ -459,7 +460,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
                                      copy.deepcopy(self._last_layer().output_size),
                                      filter_dimension,
                                      1,
-                                     'relu',
+                                     None,
                                      self._weight_initializer,
                                      use_bias=False)
 

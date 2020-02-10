@@ -53,6 +53,9 @@ class convLayer(object):
         if self.batch_norm_layer is not None:
             self.batch_norm_layer.add_to_graph()
 
+    def decay_weights(self):
+        return tf.assign(self.weights, self.weights * (1. - 1e-5))
+
     def forward_pass(self, x, deterministic=False):
         activations = tf.nn.conv2d(x, self.weights,
                                    strides=[1, self.__stride_length, self.__stride_length, 1],
@@ -125,6 +128,9 @@ class upsampleLayer(object):
                                           [self.num_filters],
                                           initializer=tf.constant_initializer(0.1),
                                           dtype=tf.float32)
+
+    def decay_weights(self):
+        return tf.assign(self.weights, self.weights * (1. - 1e-5))
 
     def forward_pass(self, x, deterministic):
         # upsampling will have the same batch size (first dimension of x),
