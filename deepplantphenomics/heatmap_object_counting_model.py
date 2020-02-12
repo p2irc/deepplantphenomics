@@ -23,7 +23,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         # This is needed for reading in heatmap labels expressed as object locations, since we want to convert points
         # to gaussians when reading them in and constructing ground truth heatmaps
-        self._density_sigma = 5
+        self._density_sigma = 1
 
         # This in needed to ensure that dataset parsing in the graph is done correctly whether or not the heatmap labels
         # come from an external image or are generated
@@ -57,7 +57,6 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L2 loss for each item
         """
-        #y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
         y = tf.reduce_mean(tf.square(x), axis=[1,2,3])
         return y
 

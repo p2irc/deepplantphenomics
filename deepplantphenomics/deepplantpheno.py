@@ -835,8 +835,6 @@ class DPPModel(ABC):
                 if self._tb_dir is not None:
                     train_writer = tf.summary.FileWriter(self._tb_dir, self._session.graph)
 
-                #self._set_learning_rate()
-
                 self._log('Initializing parameters...')
                 self._session.run(tf.global_variables_initializer())
 
