@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 # import unittest.mock as mock
 import numpy as np
@@ -718,6 +720,70 @@ def test_load_ippn_leaf_count_dataset_from_directory(test_data_dir):
     model.set_maximum_training_epochs(1)
     # model.set_learning_rate(0.0001)
     model.load_ippn_leaf_count_dataset_from_directory(data_path)
+
+
+def test_heatmap_csv_data_load(test_data_dir):
+    im_dir = os.path.join(test_data_dir, 'test_Ara2013_heatmap')
+    expected_heatmap_dir = os.path.join(os.path.curdir, 'generated_heatmaps')
+    if os.path.exists(expected_heatmap_dir):
+        shutil.rmtree(expected_heatmap_dir)
+
+    model = dpp.HeatmapObjectCountingModel()
+    model.set_image_dimensions(128, 128, 3)
+    assert model._raw_image_files is None
+    assert model._raw_labels is None
+
+    base_names = ['ara2013_plant007_rgb', 'ara2013_plant008_rgb', 'ara2013_plant001_rgb',
+                  'ara2013_plant002_rgb', 'ara2013_plant003_rgb', 'ara2013_plant004_rgb',
+                  'ara2013_plant005_rgb', 'ara2013_plant006_rgb']
+    expected_images = [os.path.join(im_dir, '{}.png'.format(x)) for x in base_names]
+    expected_labels = [os.path.join(expected_heatmap_dir, '{}.npy'.format(x)) for x in base_names]
+
+    # Load data from CSV; generate heatmaps
+    model.load_heatmap_dataset_with_csv_from_directory(im_dir, 'point_labels.csv', ext='png')
+    assert model._raw_image_files == expected_images
+    assert model._raw_labels == expected_labels
+
+    # Load data from CSV and pre-existing heatmaps
+    model._raw_image_files = None
+    model._raw_labels = None
+    model.load_heatmap_dataset_with_csv_from_directory(im_dir, 'point_labels.csv', ext='png')
+    assert model._raw_image_files == expected_images
+    assert model._raw_labels == expected_labels
+
+    shutil.rmtree(expected_heatmap_dir)
+
+
+def test_heatmap_json_data_load(test_data_dir):
+    im_dir = os.path.join(test_data_dir, 'test_Ara2013_heatmap')
+    expected_heatmap_dir = os.path.join(os.path.curdir, 'generated_heatmaps')
+    if os.path.exists(expected_heatmap_dir):
+        shutil.rmtree(expected_heatmap_dir)
+
+    model = dpp.HeatmapObjectCountingModel()
+    model.set_image_dimensions(128, 128, 3)
+    assert model._raw_image_files is None
+    assert model._raw_labels is None
+
+    base_names = ['ara2013_plant001_rgb', 'ara2013_plant002_rgb', 'ara2013_plant003_rgb',
+                  'ara2013_plant004_rgb', 'ara2013_plant005_rgb', 'ara2013_plant006_rgb',
+                  'ara2013_plant007_rgb', 'ara2013_plant008_rgb']
+    expected_images = [os.path.join(im_dir, '{}.png'.format(x)) for x in base_names]
+    expected_labels = [os.path.join(expected_heatmap_dir, '{}.npy'.format(x)) for x in base_names]
+
+    # Load data from JSON; generate heatmaps
+    model.load_heatmap_dataset_with_json_files_from_directory(im_dir)
+    assert model._raw_image_files == expected_images
+    assert model._raw_labels == expected_labels
+
+    # Load data from JSON and pre-existing heatmaps
+    model._raw_image_files = None
+    model._raw_labels = None
+    model.load_heatmap_dataset_with_json_files_from_directory(im_dir)
+    assert model._raw_image_files == expected_images
+    assert model._raw_labels == expected_labels
+
+    shutil.rmtree(expected_heatmap_dir)
 
 
 # seems to be some issue with tensorflow not using the same graph when run inside pytest framework

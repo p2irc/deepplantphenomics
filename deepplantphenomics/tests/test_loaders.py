@@ -1,4 +1,7 @@
+import shutil
+
 import pytest
+from unittest.mock import patch
 import os
 import numpy as np
 from deepplantphenomics import loaders
@@ -88,3 +91,41 @@ def test_get_split_mask():
     mask = loaders._get_split_mask(0.0, 0.2, 10, 0, force_mask_creation=True)
     assert os.path.exists(test_mask_name)
     assert mask.count(0) == 8 and mask.count(1) == 2 and mask.count(2) == 0
+
+    # Make a mask for 12 labels instead of 10, and have a new mask actually made regardless of force_mask_creation
+    mask = loaders._get_split_mask(0.0, 0.25, 12, 0, force_mask_creation=False)
+    assert os.path.exists(test_mask_name)
+    assert mask.count(0) == 9 and mask.count(1) == 3 and mask.count(2) == 0
+
+    os.remove(test_mask_name)
+
+
+def test_get_dir_images():
+    def make_fake_file(f_name):
+        open(f_name, 'a').close()
+
+    dir_name = os.path.join(os.path.curdir, 'fake_dir')
+    if os.path.exists(dir_name):
+        shutil.rmtree(dir_name)
+
+    # Getting images from an empty directory
+    os.mkdir(dir_name)
+    ims = loaders.get_dir_images(dir_name)
+    assert ims == []
+
+    # Getting images when there are no images
+    make_fake_file(os.path.join(dir_name, 'labels.csv'))
+    os.mkdir(os.path.join(dir_name, 'patches'))
+    ims = loaders.get_dir_images('fake_dir')
+    assert ims == []
+
+    # Getting images with different extensions
+    make_fake_file(os.path.join(dir_name, 'im1.jpg'))
+    make_fake_file(os.path.join(dir_name, 'im2.JPG'))
+    make_fake_file(os.path.join(dir_name, 'im3.jpeg'))
+    make_fake_file(os.path.join(dir_name, 'im4.png'))
+    make_fake_file(os.path.join(dir_name, 'im5.tif'))
+    ims = loaders.get_dir_images('fake_dir')
+    assert ims == ['fake_dir/im1.jpg', 'fake_dir/im2.JPG', 'fake_dir/im3.jpeg', 'fake_dir/im4.png']
+
+    shutil.rmtree(dir_name)

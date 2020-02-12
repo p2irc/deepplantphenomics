@@ -6,6 +6,8 @@ import json
 import warnings
 import copy
 import itertools
+import shutil
+from math import ceil
 from collections.abc import Sequence
 from scipy.special import expit
 from PIL import Image
@@ -593,19 +595,6 @@ class ObjectDetectionModel(DPPModel):
 
     def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
-            if self._with_patching:
-                # we want the largest multiple of patch height/width that is smaller than the original
-                # image height/width, for the final image dimensions
-                num_patches_vert = self._image_height // self._patch_height
-                num_patches_horiz = self._image_width // self._patch_width
-                final_height = num_patches_vert * self._patch_height
-                final_width = num_patches_horiz * self._patch_width
-
-                # find image differences to determine re-centering crop coords, we divide by 2 so that the leftover
-                # is equal on all sides of image
-                offset_height = (self._image_height - final_height) // 2
-                offset_width = (self._image_width - final_width) // 2
-
             num_batches = len(images) // self._batch_size
             if len(images) % self._batch_size != 0:
                 num_batches += 1
@@ -615,13 +604,24 @@ class ObjectDetectionModel(DPPModel):
             x_test = im_data.make_one_shot_iterator().get_next()
 
             if self._with_patching:
-                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
-                # Split the images up into the multiple slices of size patch_height x patch_width
-                ksizes = [1, self._patch_height, self._patch_width, 1]
-                strides = [1, self._patch_height, self._patch_width, 1]
+                # Processing and returning whole images is more important than preventing erroneous results from
+                # padding, so we the image size with the required padding to accommodate the patch size
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                num_patch_rows = ceil(self._image_height / patch_height)
+                num_patch_cols = ceil(self._image_width / patch_width)
+                final_height = num_patch_rows * patch_height
+                final_width = num_patch_cols * patch_width
+
+                # Apply any padding to the images if, then extract the patches. Padding is only added to the bottom and
+                # right sides.
+                x_test = tf.image.pad_to_bounding_box(x_test, 0, 0, final_height, final_width)
+                sizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]  # Same as sizes in order to tightly tile patches
                 rates = [1, 1, 1, 1]
-                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
-                x_test = tf.reshape(x_test, shape=[-1, self._patch_height, self._patch_width, self._image_depth])
+                x_test = tf.image.extract_image_patches(x_test, sizes=sizes, strides=strides, rates=rates,
+                                                        padding="VALID")
+                x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
 
             if self._load_from_saved:
                 self.load_state()
@@ -630,7 +630,7 @@ class ObjectDetectionModel(DPPModel):
             x_pred = self.forward_pass(x_test, deterministic=True)
 
             if self._with_patching:
-                xx_output_size = [-1, num_patches_vert * num_patches_horiz,
+                xx_output_size = [-1, num_patch_rows * num_patch_cols,
                                   self._grid_w * self._grid_h, 5 * self._NUM_BOXES + self._NUM_CLASSES]
             else:
                 xx_output_size = [-1,
@@ -818,13 +818,19 @@ class ObjectDetectionModel(DPPModel):
         self._raw_labels = self._all_labels
 
     def __autopatch_object_detection_dataset(self, patch_dir=None):
+        """
+        Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
+        labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
+        :param patch_dir: The directory to place patched images into, or where to read previous patches from
+        :return: The patched dataset as a list of image filenames and a nested list of their corresponding point labels
+        """
         if not patch_dir:
             patch_dir = os.path.curdir
         patch_dir = os.path.join(patch_dir, 'tmp_train', '')
         img_dir = os.path.join(patch_dir, 'image_patches', '')
         json_file = os.path.join(patch_dir, 'train_patches.json')
 
-        if os.path.exists(patch_dir):
+        if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
             self._json_no_convert = True
@@ -835,6 +841,9 @@ class ObjectDetectionModel(DPPModel):
             return self._raw_image_files, self._all_labels
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
+        if os.path.exists(patch_dir):
+            self._log("Overwriting preexisting patched data...")
+            shutil.rmtree(patch_dir)
         os.makedirs(patch_dir)
         os.makedirs(img_dir)
 

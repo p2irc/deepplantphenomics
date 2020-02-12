@@ -30,7 +30,7 @@ class DPPModel(ABC):
     _supported_loss_fns = ['softmax cross entropy', 'l2', 'l1', 'smooth l1', 'sigmoid cross entropy',
                            'yolo']
     _supported_predefined_models = ['vgg-16', 'alexnet', 'resnet-18', 'yolov2', 'xsmall', 'small', 'medium', 'large',
-                                    "countception"]
+                                    'countception', 'u-net', 'fcn-18']
     _supported_augmentations = [definitions.AugmentationType.FLIP_HOR,
                                 definitions.AugmentationType.FLIP_VER,
                                 definitions.AugmentationType.CROP,
@@ -91,6 +91,7 @@ class DPPModel(ABC):
 
         # Dataset storage
         self._all_ids = None
+        self._gen_data_overwrite = False
 
         self._train_dataset = None
         self._test_dataset = None
@@ -145,6 +146,7 @@ class DPPModel(ABC):
         self._num_layers_batchnorm = 0
         self._num_blocks_paral_conv = 0
         self._num_skip_connections = 0
+        self._num_copy_connections = 0
 
         # Network options
         self._batch_size = 1
@@ -159,8 +161,8 @@ class DPPModel(ABC):
 
         self._learning_rate = 0.001
         self._lr_decay_factor = None
-        self._epochs_per_decay = None
         self._lr_decay_epochs = None
+        self._lr_epoch = None
 
         # Wrapper options
         self._debug = debug
@@ -410,19 +412,19 @@ class DPPModel(ABC):
 
         self._reg_coeff = lamb
 
-    def set_learning_rate_decay(self, decay_factor, epochs_per_decay):
+    def set_learning_rate_decay(self, decay_factor, batches_per_decay):
         """Set learning rate decay"""
         if not isinstance(decay_factor, float):
             raise TypeError("decay_factor must be a float")
         if decay_factor <= 0:
             raise ValueError("decay_factor must be positive")
-        if not isinstance(epochs_per_decay, int):
+        if not isinstance(batches_per_decay, int):
             raise TypeError("epochs_per_day must be an int")
-        if epochs_per_decay <= 0:
+        if batches_per_decay <= 0:
             raise ValueError("epochs_per_day must be positive")
 
         self._lr_decay_factor = decay_factor
-        self._epochs_per_decay = epochs_per_decay
+        self._lr_decay_epochs = batches_per_decay
 
     def set_optimizer(self, optimizer):
         """Set the optimizer to use"""
@@ -505,6 +507,7 @@ class DPPModel(ABC):
         self._all_moderation_features = moderation_features
 
     def set_patch_size(self, height, width):
+        """Sets the size of patches generated from larger input images and turns on automatic patching"""
         if not isinstance(height, int):
             raise TypeError("height must be an int")
         if height <= 0:
@@ -517,6 +520,14 @@ class DPPModel(ABC):
         self._patch_height = height
         self._patch_width = width
         self._with_patching = True
+
+    def set_gen_data_overwrite(self, overwrite):
+        """Sets whether to overwrite generated data like patches and object heatmaps when loading data or to load any
+        previous generated data that exists"""
+        if not isinstance(overwrite, bool):
+            raise TypeError("overwrite must be a bool")
+
+        self._gen_data_overwrite = overwrite
 
     def _get_device_list(self):
         """Returns the list of CPU and/or GPU devices to construct and evaluate graphs for"""
@@ -649,7 +660,7 @@ class DPPModel(ABC):
         :param optimizer: The optimizer object used to apply the gradients
         :return: An operation for applying gradients to the graph variables
         """
-        return optimizer.apply_gradients(zip(gradients, variables))
+        return optimizer.apply_gradients(zip(gradients, variables), global_step=self._lr_epoch)
 
     def _graph_layer_loss(self):
         """Calculates and returns the total L2 loss from the weights of fully connected layers. This is 0 if a
@@ -692,7 +703,8 @@ class DPPModel(ABC):
 
         def _add_layer_histograms(net_layer):
             tf.summary.histogram('weights/' + net_layer.name, net_layer.weights, collections=['custom_summaries'])
-            tf.summary.histogram('biases/' + net_layer.name, net_layer.biases, collections=['custom_summaries'])
+            if not ((isinstance(net_layer, layers.convLayer) or isinstance(net_layer, layers.upsampleLayer)) and net_layer.use_bias is False):
+                tf.summary.histogram('biases/' + net_layer.name, net_layer.biases, collections=['custom_summaries'])
 
             # At one point the graph would hang on session.run(graph_ops['merged']) inside of begin_training
             # and it was found that if you commented the below line then the code wouldn't hang. Never
@@ -708,7 +720,8 @@ class DPPModel(ABC):
                 if isinstance(layer, layers.paralConvBlock):
                     _add_layer_histograms(layer.conv1)
                     _add_layer_histograms(layer.conv2)
-                elif not isinstance(layer, layers.batchNormLayer):
+                elif not isinstance(layer, layers.batchNormLayer) and not isinstance(layer, layers.copyConnection) \
+                        and not isinstance(layer, layers.skipConnection):
                     _add_layer_histograms(layer)
 
         # Summaries for gradients
@@ -807,8 +820,10 @@ class DPPModel(ABC):
         relevant hyper-parameters.
         """
         with self._graph.as_default():
+            self._lr_epoch = tf.Variable(0, trainable=False)
+            self._set_learning_rate()
             self._assemble_graph()
-            print('assembled the graph')
+            self._log('Assembled the graph')
 
             # Either load the network parameters from a checkpoint file or start training
             if self._load_from_saved:
@@ -824,11 +839,14 @@ class DPPModel(ABC):
                 self._session.run(tf.global_variables_initializer())
 
                 self._log('Beginning training...')
-                self._set_learning_rate()
 
                 # Needed for batch norm
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 self._graph_ops['optimizer'] = tf.group([self._graph_ops['optimizer'], update_ops])
+
+                # Weight decay
+                if False:
+                    decay_ops = [l.decay_weights() for l in self._layers if callable(getattr(l, 'decay_weights', None))]
 
                 tqdm_range = tqdm(range(self._maximum_training_batches))
                 for i in tqdm_range:
@@ -846,6 +864,9 @@ class DPPModel(ABC):
                             self.save_state(self._save_dir)
                     else:
                         loss = self._session.run([self._graph_ops['cost']])
+
+                        if False:
+                            self._session.run(decay_ops)
 
                     if loss == 0.0:
                         self._log('Stopping due to zero loss')
@@ -1042,10 +1063,10 @@ class DPPModel(ABC):
 
     def _set_learning_rate(self):
         if self._lr_decay_factor is not None:
-            # needs to be reexamined
-            self._lr_decay_epochs = self._epochs_per_decay * (self._total_training_samples * (1 - self._test_split))
+            self._log('Setting learning rate decay to every {0} steps'.format(self._lr_decay_epochs))
+
             self._learning_rate = tf.train.exponential_decay(self._learning_rate,
-                                                             self._global_epoch,
+                                                             self._lr_epoch,
                                                              self._lr_decay_epochs,
                                                              self._lr_decay_factor,
                                                              staircase=True)
@@ -1062,6 +1083,7 @@ class DPPModel(ABC):
         :return: output tensor where the first dimension is batch
         """
         residual = None
+        copy_stack = []
 
         with self._graph.as_default():
             for layer in self._layers:
@@ -1075,6 +1097,11 @@ class DPPModel(ABC):
                         residual = x
                 elif isinstance(layer, layers.moderationLayer) and moderation_features is not None:
                     x = layer.forward_pass(x, deterministic, moderation_features)
+                elif isinstance(layer, layers.copyConnection):
+                    if layer.mode == 'save':
+                        copy_stack.append(x)
+                    else:
+                        x = tf.concat([x, copy_stack.pop()], -1)
                 else:
                     x = layer.forward_pass(x, deterministic)
 
@@ -1141,7 +1168,7 @@ class DPPModel(ABC):
         self._layers.append(layer)
 
     def add_convolutional_layer(self, filter_dimension, stride_length, activation_function,
-                                padding=None, batch_norm=False, epsilon=1e-5, decay=0.9):
+                                padding=None, batch_norm=False, use_bias=True, epsilon=1e-5, decay=0.9):
         """
         Add a convolutional layer to the model.
 
@@ -1212,6 +1239,7 @@ class DPPModel(ABC):
                                      self._weight_initializer,
                                      padding,
                                      batch_norm,
+                                     use_bias,
                                      epsilon,
                                      decay)
 
@@ -1220,7 +1248,7 @@ class DPPModel(ABC):
         self._layers.append(layer)
 
     def add_upsampling_layer(self, filter_size, num_filters, upscale_factor=2,
-                             activation_function=None, regularization_coefficient=None):
+                             activation_function=None, use_bias=True, regularization_coefficient=None):
         """
         Add a 2d upsampling layer to the model.
 
@@ -1257,6 +1285,7 @@ class DPPModel(ABC):
                                          activation_function,
                                          batch_multiplier,
                                          self._weight_initializer,
+                                         use_bias,
                                          regularization_coefficient)
 
         self._log('Filter dimensions: {0} Outputs: {1}'.format(layer.weights_shape, layer.output_size))
@@ -1463,6 +1492,20 @@ class DPPModel(ABC):
 
         self._layers.append(layer)
 
+    def add_copy_connection(self, mode):
+        if len(self._layers) < 1:
+            raise RuntimeError("A copy connection cannot be the first layer added to the model.")
+
+        self._num_copy_connections += 1
+        layer_name = 'copy%d' % self._num_copy_connections
+        self._log('Adding copy connection ({0})...'.format(mode))
+
+        layer = layers.copyConnection(layer_name, self._last_layer().output_size, mode)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+
+        self._layers.append(layer)
+
     def add_global_average_pooling_layer(self):
         """Adds a global average pooling layer"""
         if len(self._layers) < 1:
@@ -1500,6 +1543,104 @@ class DPPModel(ABC):
                              " Make sure you have the correct problem type set with DPPModel.set_problem_type() " +
                              "first, or choose one of " +
                              " ".join("'" + x + "'" for x in self._supported_predefined_models))
+
+        if model_name == 'u-net':
+            bn = False
+
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_copy_connection('save')
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 1024], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 1024], stride_length=1, activation_function='relu', batch_norm=bn)
+
+            self.add_upsampling_layer(filter_size=2, num_filters=512, activation_function='relu')
+
+            self.add_copy_connection('load')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_upsampling_layer(filter_size=2, num_filters=256, activation_function='relu')
+
+            self.add_copy_connection('load')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_upsampling_layer(filter_size=2, num_filters=128, activation_function='relu')
+
+            self.add_copy_connection('load')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_upsampling_layer(filter_size=2, num_filters=64, activation_function='relu')
+
+            self.add_copy_connection('load')
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+
+            self.add_output_layer()
+
+        if model_name == 'fcn-18':
+            bn = False
+
+            self.add_input_layer()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, self._image_depth, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+            self.add_skip_connection()
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_pooling_layer(kernel_size=2, stride_length=2)
+            self.add_skip_connection(downsampled=True)
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 1024], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 1024, 1024], stride_length=1, activation_function='relu', batch_norm=bn)
+
+            self.add_upsampling_layer(filter_size=2, num_filters=512, activation_function='relu')
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 512, 512], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_upsampling_layer(filter_size=2, num_filters=256, activation_function='relu')
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 256, 256], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_upsampling_layer(filter_size=2, num_filters=128, activation_function='relu')
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 128, 128], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_upsampling_layer(filter_size=2, num_filters=64, activation_function='relu')
+
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+            self.add_convolutional_layer(filter_dimension=[3, 3, 64, 64], stride_length=1, activation_function='relu', batch_norm=bn)
+
+            self.add_output_layer()
 
         if model_name == 'vgg-16':
             self.add_input_layer()

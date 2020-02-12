@@ -5,6 +5,8 @@ import os
 import warnings
 import copy
 import itertools
+import shutil
+from math import ceil
 from tqdm import tqdm, trange
 from PIL import Image
 
@@ -44,14 +46,15 @@ class SemanticSegmentationModel(DPPModel):
         # Summaries specific to semantic segmentation
         # We send in the last layer's output size (i.e. the final image dimensions) to get_weights_as_image
         # because xx and x_test_predicted have dynamic dims [?,?,?,?], so we need actual numbers passed in
-        train_images_summary = self._get_weights_as_image(
-            tf.transpose(self._graph_forward_pass, (1, 2, 3, 0)), self._layers[-1].output_size)
-        tf.summary.image('masks/train', train_images_summary, collections=['custom_summaries'])
+
+        tf.summary.image('masks/train', self._graph_forward_pass, collections=['custom_summaries'])
+
+        tf.summary.image('masks/target', self._graph_target, collections=['custom_summaries'])
+
+        tf.summary.image('input_image', self._graph_input, collections=['custom_summaries'])
+
         if self._validation:
             tf.summary.scalar('validation/loss', self._graph_ops['val_cost'], collections=['custom_summaries'])
-            val_images_summary = self._get_weights_as_image(
-                tf.transpose(self._graph_ops['x_val_predicted'], (1, 2, 3, 0)), self._layers[-1].output_size)
-            tf.summary.image('masks/validation', val_images_summary, collections=['custom_summaries'])
 
         self._graph_ops['merged'] = tf.summary.merge_all(key='custom_summaries')
 
@@ -103,6 +106,8 @@ class SemanticSegmentationModel(DPPModel):
                     else:
                         xx = self.forward_pass(x, deterministic=False)
                     self._graph_forward_pass = xx  # Needed to output raw forward pass output to Tensorboard
+                    self._graph_input = x
+                    self._graph_target = y
 
                     # Define regularization cost
                     self._log('Graph: Calculating loss and gradients...')
@@ -163,6 +168,8 @@ class SemanticSegmentationModel(DPPModel):
 
                 self._graph_ops['val_losses'] = self._graph_problem_loss(self._graph_ops['x_val_predicted'],
                                                                          self._graph_ops['y_val'])
+
+                self._graph_ops['val_cost'] = tf.reduce_mean(tf.abs(self._graph_ops['val_losses']))
 
             # Epoch summaries for Tensorboard
             if self._tb_dir is not None:
@@ -235,18 +242,6 @@ class SemanticSegmentationModel(DPPModel):
 
     def forward_pass_with_file_inputs(self, images):
         with self._graph.as_default():
-            if self._with_patching:
-                # we want the largest multiple of of patch height/width that is smaller than the original
-                # image height/width, for the final image dimensions
-                patch_height = self._patch_height
-                patch_width = self._patch_width
-                final_height = (self._image_height // patch_height) * patch_height
-                final_width = (self._image_width // patch_width) * patch_width
-                # find image differences to determine re-centering crop coords, we divide by 2 so that the leftover
-                # is equal on all sides of image
-                offset_height = (self._image_height - final_height) // 2
-                offset_width = (self._image_width - final_width) // 2
-
             num_batches = len(images) // self._batch_size
             if len(images) % self._batch_size != 0:
                 num_batches += 1
@@ -258,14 +253,24 @@ class SemanticSegmentationModel(DPPModel):
             if self._load_from_saved:
                 self.load_state()
 
-            # Break images up into patches if necessary
             if self._with_patching:
-                x_test = tf.image.crop_to_bounding_box(x_test, offset_height, offset_width, final_height, final_width)
-                # Split the images up into the multiple slices of size patch_height x patch_width
-                ksizes = [1, patch_height, patch_width, 1]
-                strides = [1, patch_height, patch_width, 1]
+                # Processing and returning whole images is more important than preventing erroneous results from
+                # padding, so we the image size with the required padding to accommodate the patch size
+                patch_height = self._patch_height
+                patch_width = self._patch_width
+                num_patch_rows = ceil(self._image_height / patch_height)
+                num_patch_cols = ceil(self._image_width / patch_width)
+                final_height = num_patch_rows * patch_height
+                final_width = num_patch_cols * patch_width
+
+                # Apply any padding to the images if, then extract the patches. Padding is only added to the bottom and
+                # right sides.
+                x_test = tf.image.pad_to_bounding_box(x_test, 0, 0, final_height, final_width)
+                sizes = [1, patch_height, patch_width, 1]
+                strides = [1, patch_height, patch_width, 1]  # Same as sizes in order to tightly tile patches
                 rates = [1, 1, 1, 1]
-                x_test = tf.extract_image_patches(x_test, ksizes, strides, rates, "VALID")
+                x_test = tf.image.extract_image_patches(x_test, sizes=sizes, strides=strides, rates=rates,
+                                                        padding="VALID")
                 x_test = tf.reshape(x_test, shape=[-1, patch_height, patch_width, self._image_depth])
 
             # Run model on them
@@ -273,8 +278,6 @@ class SemanticSegmentationModel(DPPModel):
 
             total_outputs = []
             if self._with_patching:
-                num_patch_rows = final_height // patch_height
-                num_patch_cols = final_width // patch_width
                 n_patches = num_patch_rows * num_patch_cols
                 for i in range(num_batches):
                     xx = self._session.run(x_pred)
@@ -286,6 +289,9 @@ class SemanticSegmentationModel(DPPModel):
                             row_patches = [row_of_patches[i] for i in range(num_patch_cols)]
                             full_img.append(np.concatenate(row_patches, axis=1))
                         full_img = np.concatenate(full_img, axis=0)
+
+                        # Trim off any padding that was added
+                        full_img = full_img[0:self._image_height, 0:self._image_width, :]
 
                         # Keep the final image, but with an extra dimension to concatenate the images together
                         total_outputs.append(np.expand_dims(full_img, axis=0))
@@ -367,8 +373,8 @@ class SemanticSegmentationModel(DPPModel):
 
     def __autopatch_segmentation_dataset(self, patch_dir=None):
         """
-        Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
-        set of patches made previously
+        Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
+        labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
         :param patch_dir: The directory to place patched images into, or where to read previous patches from
         :return The patched dataset as lists of the image and segmentation mask filenames
         """
@@ -378,7 +384,7 @@ class SemanticSegmentationModel(DPPModel):
         im_dir = os.path.join(patch_dir, 'im_patch', '')
         seg_dir = os.path.join(patch_dir, 'mask_patch', '')
 
-        if os.path.exists(patch_dir):
+        if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
             image_files = loaders.get_dir_images(im_dir)
@@ -386,6 +392,9 @@ class SemanticSegmentationModel(DPPModel):
             return image_files, seg_files
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
+        if os.path.exists(patch_dir):
+            self._log("Overwriting preexisting patched data...")
+            shutil.rmtree(patch_dir)
         os.mkdir(patch_dir)
         os.mkdir(im_dir)
         os.mkdir(seg_dir)
@@ -403,9 +412,9 @@ class SemanticSegmentationModel(DPPModel):
             patch_start, patch_end = self._autopatch_get_patch_coords(im)
             num_patch = len(patch_start)
 
-            for i, (y0, x0), (y1, x1) in zip(itertools.count(patch_num), patch_start, patch_end):
-                im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
-                seg_patch = Image.fromarray(seg[y0:y1, x0:x1].astype(np.uint8))
+            for i, tl_coord, br_coord in zip(itertools.count(patch_num), patch_start, patch_end):
+                im_patch = Image.fromarray(self._autopatch_extract_patch(im, tl_coord, br_coord))
+                seg_patch = Image.fromarray(self._autopatch_extract_patch(seg, tl_coord, br_coord))
                 im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
                 seg_name = os.path.join(seg_dir, 'seg_{:0>6d}.png'.format(i))
                 im_patch.save(im_name)
@@ -420,21 +429,50 @@ class SemanticSegmentationModel(DPPModel):
     def _autopatch_get_patch_coords(self, im):
         """
         Gets the starting (top-left) and ending (bottom-right) coordinates for splitting an image into patches. Patches
-        are taken from the centre of the image, so edges may be cut off if the patch size doesn't perfectly fit.
+        are taken starting from the top and left edges of the image and continue, padding the bottom and right images
+        with black if they go over the edge.
         :param im: A numpy array with an image to split into patches
         :return: Lists of tuples with the starting (top-left) and ending (bottom-right) coordinates for patches
         """
         im_height, im_width, _ = im.shape
-        num_patch_h = im_height // self._patch_height
-        num_patch_w = im_width // self._patch_width
-        patch_offset_h = (im_height - num_patch_h * self._patch_height) // 2
-        patch_offset_w = (im_width - num_patch_w * self._patch_width) // 2
+        num_patch_h = ceil(im_height / self._patch_height)
+        num_patch_w = ceil(im_width / self._patch_width)
 
-        patch_start = [(y * self._patch_height + patch_offset_h, x * self._patch_width + patch_offset_w)
+        patch_start = [(y * self._patch_height, x * self._patch_width)
                        for y in range(num_patch_h) for x in range(num_patch_w)]
         patch_end = [(y + self._patch_height, x + self._patch_width) for (y, x) in patch_start]
 
         return patch_start, patch_end
+
+    def _autopatch_extract_patch(self, im, tl_coord, br_coord):
+        """
+        Extracts a patch from an image, padding it with black if it extends over the edge
+        :param im: An ndarray for the image to extract the patch from
+        :param tl_coord: A tuple for the top-left (y, x) corner of the patch
+        :param br_coord: A tuple for the bottom-right (y, x) corner of the patch
+        :return: An ndarray of the extracted patch suitable for saving as a PNG
+        """
+        y0, x0 = tl_coord
+        y1, x1 = br_coord
+        patch_x = x1 - x0
+        patch_y = y1 - y0
+        if im.ndim == 2:
+            im = np.expand_dims(im, axis=-1)  # Give 2D images an explicit 1-channel dimension
+        im_height, im_width, im_depth = im.shape
+
+        fill_x = x1 - im_width if x1 > im_width else 0
+        fill_y = y1 - im_height if y1 > im_height else 0
+        if x1 > im_width:
+            x1 -= fill_x
+        if y1 > im_height:
+            y1 -= fill_y
+
+        im_patch = np.full((patch_y, patch_x, im_depth), 0, dtype=np.uint8)
+        im_patch[0:patch_y - fill_y, 0:patch_x - fill_x, :] = im[y0:y1, x0:x1, :].astype(np.uint8)
+
+        if im_depth == 1:
+            return im_patch.squeeze(axis=2)  # Remove the 1-channel dimension; some image libraries don't like it
+        return im_patch
 
     def _parse_apply_preprocessing(self, images, labels):
         # Apply pre-processing to the image labels too (which are images for semantic segmentation). If there are

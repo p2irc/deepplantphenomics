@@ -60,7 +60,7 @@ model.add_convolutional_layer([1, 1, 0, 1], 1, 'lrelu', 0, True, 1e-5, 0.9)
 Different from convolutional layers used in other networks, Countception follows each convolutional layer by a batch normalization layer. The last three parameters of add_convolutional_layer() method are used for setting up these batch normalization layers.
 
 ```python
-add_convolutional_layer(self, filter_dimension, stride_length, activation_function,
+add_convolutional_layer(filter_dimension, stride_length, activation_function,
                         padding=None, batch_norm=False, epsilon=1e-5, decay=0.9)
 ```
 In the current implementation in DPP, a receptive field of 32 is used. For this setting, the first convolutional layer uses a 3x3 filter with `padding=32`, the second convolutional layer uses a 14x14 filter with `padding=0` and the third convolutional layer uses a 18x18 filter with `padding=0`. To use other receptive fields, these parameters should be modified and set properly. Each convolutional layer uses `xavier` weight initialization and the `LeakyReLu` activation function.

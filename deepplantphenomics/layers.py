@@ -6,12 +6,13 @@ import copy
 
 class convLayer(object):
     def __init__(self, name, input_size, filter_dimension, stride_length,
-                 activation_function, initializer, padding=None, batch_norm=False, epsilon=1e-5, decay=0.9):
+                 activation_function, initializer, padding=None, batch_norm=False, use_bias=False, epsilon=1e-5, decay=0.9):
         self.name = name
         self.filter_dimension = filter_dimension
         self.__stride_length = stride_length
         self.__activation_function = activation_function
         self.__initializer = initializer
+        self.use_bias = use_bias
         self.input_size = input_size
         self.output_size = copy.deepcopy(input_size)
         self.batch_norm_layer = None
@@ -43,20 +44,25 @@ class convLayer(object):
                                            initializer=tf.truncated_normal_initializer(stddev=5e-2),
                                            dtype=tf.float32)
 
-        self.biases = tf.get_variable(self.name + '_bias',
-                                      [self.filter_dimension[-1]],
-                                      initializer=tf.constant_initializer(0.1),
-                                      dtype=tf.float32)
+        if self.use_bias:
+            self.biases = tf.get_variable(self.name + '_bias',
+                                          [self.filter_dimension[-1]],
+                                          initializer=tf.constant_initializer(0.1),
+                                          dtype=tf.float32)
 
         if self.batch_norm_layer is not None:
             self.batch_norm_layer.add_to_graph()
+
+    def decay_weights(self):
+        return tf.assign(self.weights, self.weights * (1. - 1e-5))
 
     def forward_pass(self, x, deterministic=False):
         activations = tf.nn.conv2d(x, self.weights,
                                    strides=[1, self.__stride_length, self.__stride_length, 1],
                                    padding=self.padding)
 
-        activations = tf.nn.bias_add(activations, self.biases)
+        if self.use_bias:
+            activations = tf.nn.bias_add(activations, self.biases)
 
         if self.batch_norm_layer is not None:
             activations = self.batch_norm_layer.forward_pass(activations, deterministic)
@@ -78,7 +84,7 @@ class convLayer(object):
 
 class upsampleLayer(object):
     def __init__(self, name, input_size, filter_size, num_filters, upscale_factor,
-                 activation_function, batch_multiplier, initializer, regularization_coefficient):
+                 activation_function, batch_multiplier, initializer, use_bias, regularization_coefficient):
         self.name = name
         self.__activation_function = activation_function
         self.__initializer = initializer
@@ -86,7 +92,9 @@ class upsampleLayer(object):
         self.strides = [1, upscale_factor, upscale_factor, 1]
         self.upscale_factor = upscale_factor
         self.batch_multiplier = batch_multiplier
+        self.num_filters = num_filters
         self.regularization_coefficient = regularization_coefficient
+        self.use_bias = use_bias
 
         # if upscale_factor is an int then height and width are scaled the same
         if isinstance(upscale_factor, int):
@@ -98,13 +106,11 @@ class upsampleLayer(object):
             h = self.input_size[1] * upscale_factor[0]
             w = self.input_size[2] * upscale_factor[1]
 
-        # upsampling will have the same batch size self.input_size[0],
-        # and will preserve the number of filters self.input_size[-1], (NHWC)
-        self.output_size = [self.input_size[0], h, w, self.input_size[-1]]
+        # upsampling will have the same batch size self.input_size[0]
+        self.output_size = [self.input_size[0], h, w, num_filters]
 
         # the shape needed to initialize weights is based on
-        # filter_height x filter_width x input_depth x output_depth
-        self.weights_shape = [filter_size, filter_size, input_size[-1], num_filters]
+        self.weights_shape = [filter_size, filter_size, num_filters, input_size[-1]]
 
     def add_to_graph(self):
         if self.__initializer == 'xavier':
@@ -117,10 +123,14 @@ class upsampleLayer(object):
                                            initializer=tf.truncated_normal_initializer(stddev=5e-2),
                                            dtype=tf.float32)
 
-        self.biases = tf.get_variable(self.name + '_bias',
-                                      [self.weights_shape[-1]],
-                                      initializer=tf.constant_initializer(0.1),
-                                      dtype=tf.float32)
+        if self.use_bias:
+            self.biases = tf.get_variable(self.name + '_bias',
+                                          [self.num_filters],
+                                          initializer=tf.constant_initializer(0.1),
+                                          dtype=tf.float32)
+
+    def decay_weights(self):
+        return tf.assign(self.weights, self.weights * (1. - 1e-5))
 
     def forward_pass(self, x, deterministic):
         # upsampling will have the same batch size (first dimension of x),
@@ -129,11 +139,13 @@ class upsampleLayer(object):
         batch_size = dyn_input_shape[0]
         h = dyn_input_shape[1] * self.upscale_factor
         w = dyn_input_shape[2] * self.upscale_factor
-        output_shape = tf.stack([batch_size, h, w, self.weights_shape[-1]])
+        output_shape = tf.stack([batch_size, h, w, self.num_filters])
 
         activations = tf.nn.conv2d_transpose(x, self.weights, output_shape=output_shape,
                                              strides=self.strides, padding='SAME')
-        activations = tf.nn.bias_add(activations, self.biases)
+
+        if self.use_bias:
+            activations = tf.nn.bias_add(activations, self.biases)
 
         # Apply a non-linearity specified by the user
         if self.__activation_function == 'relu':
@@ -418,3 +430,15 @@ class skipConnection(object):
             return self.layer.forward_pass(x, deterministic)
         else:
             return x
+
+
+class copyConnection(object):
+    """Defines a coconcatenation connection a la u-net. """
+    def __init__(self, name, input_size, mode):
+        self.name = name
+        self.input_size = input_size
+        self.mode = mode
+        self.output_size = copy.deepcopy(input_size)
+
+        if mode == 'load':
+            self.output_size[-1] = self.output_size[-1] * 2

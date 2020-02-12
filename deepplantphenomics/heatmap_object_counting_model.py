@@ -1,17 +1,20 @@
-from deepplantphenomics import loaders, SemanticSegmentationModel
+from deepplantphenomics import loaders, layers, SemanticSegmentationModel
 import tensorflow.compat.v1 as tf
 import numpy as np
 import os
 import warnings
 import numbers
 import itertools
+import shutil
 from tqdm import tqdm, trange
 from PIL import Image
 import cv2
+import copy
 
 
 class HeatmapObjectCountingModel(SemanticSegmentationModel):
     _supported_loss_fns = ['l2', 'l1', 'smooth l1']
+    _multiplier = 100.
 
     def __init__(self, debug=False, load_from_saved=False, save_checkpoints=True, initialize=True, tensorboard_dir=None,
                  report_rate=100, save_dir=None):
@@ -20,7 +23,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         # This is needed for reading in heatmap labels expressed as object locations, since we want to convert points
         # to gaussians when reading them in and constructing ground truth heatmaps
-        self._density_sigma = 5
+        self._density_sigma = 1
 
         # This in needed to ensure that dataset parsing in the graph is done correctly whether or not the heatmap labels
         # come from an external image or are generated
@@ -54,7 +57,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L2 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_sum(ex ** 2), x)
+        y = tf.reduce_mean(tf.square(x), axis=[1,2,3])
         return y
 
     def __l1_loss(self, x):
@@ -63,7 +66,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param x: A Tensor with prediction differences for each item in a batch
         :return: A Tensor with the scalar L1 loss for each item
         """
-        y = tf.map_fn(lambda ex: tf.reduce_sum(tf.abs(ex)), x)
+        y = tf.reduce_mean(tf.abs(x), axis=[1,2,3])
         return y
 
     def __smooth_l1_loss(self, x, huber_delta=1):
@@ -155,8 +158,8 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         :param label_heatmap: The image's corresponding label heatmap as an ndarray
         :return: The accuracy of the heatmap prediction
         """
-        predicted_count = np.sum(predict_heatmap)
-        label_count = np.sum(label_heatmap)
+        predicted_count = np.sum(predict_heatmap / self._multiplier)
+        label_count = np.sum(label_heatmap / self._multiplier)
         return np.abs(predicted_count - label_count)
 
     def forward_pass_with_interpreted_outputs(self, x):
@@ -180,43 +183,101 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         super().load_dataset_from_directory_with_segmentation_masks(dirname, seg_dirname)
         self.__label_from_image_file = True
 
-    def load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file):
+    def load_heatmap_dataset_with_csv_from_directory(self, dirname, label_file, ext='jpg'):
         """
         Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
         train on and a csv file that maps image names to multiple x and y labels (formatted like x1,y1,x2,y2,...)
         :param dirname: The path to the directory with the image files and label file
         :param label_file: The path to the csv file with heatmap point labels
         """
-        self._raw_image_files = loaders.get_dir_images(dirname)
+        # self._raw_image_files = loaders.get_dir_images(dirname)
 
         filename = os.path.join(dirname, label_file)
         labels, ids = loaders.read_csv_multi_labels_and_ids(filename, 0)
-        labels = [list(map(int, x)) for x in labels]
+
+        self._raw_image_files = [os.path.join(dirname, id) + '.' + ext for id in ids]
+
+        if any([len(im_labels) % 2 == 1 for im_labels in labels]):
+            raise ValueError("Unpaired coordinate found in points labels from " + label_file)
+
+        labels = loaders.csv_points_to_tuples(labels)
 
         if self._with_patching:
             self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
 
-        # The labels are [x1,y1,x2,y2,...] points, which we need to turn into (x,y) tuples and use to generate the
-        # ground truth heatmap
-        heatmaps = []
-        for coords in labels:
-            if coords:
-                if len(coords) % 2 == 1:
-                    # There is an odd number of coordinates, which is problematic
-                    raise ValueError("Unpaired coordinate found in points labels from " + label_file)
-
-                points = zip(coords[0::2], coords[1::2])
-                heatmaps.append(self.__points_to_density_map(points))
-            else:
-                # There are no objects, so the heatmap is blank
-                heatmaps.append(np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32))
+        heatmaps = self.__labels_to_heatmaps(labels)
 
         self._total_raw_samples = len(self._raw_image_files)
         self._log('Total raw examples is %d' % self._total_raw_samples)
 
-        heatmaps = np.stack(heatmaps)
         self._raw_labels = heatmaps
         self._split_labels = False  # Band-aid fix
+
+    def load_heatmap_dataset_with_json_files_from_directory(self, dirname):
+        """
+        Loads in a dataset for heatmap object counting. This dataset should consist of a directory of image files to
+        train on and JSON files that store the labels as x and y lists
+        :param dirname: The path to the directory with the image files and label file
+        """
+        self._raw_image_files, labels = loaders.read_dataset_from_directory_with_json_labels(dirname)
+
+        if self._with_patching:
+            self._raw_image_files, labels = self.__autopatch_heatmap_dataset(labels)
+
+        heatmaps = self.__labels_to_heatmaps(labels)
+
+        self._total_raw_samples = len(self._raw_image_files)
+        self._log('Total raw examples is %d' % self._total_raw_samples)
+
+        self._raw_labels = heatmaps
+        self._split_labels = False  # Band-aid fix
+
+    def __labels_to_heatmaps(self, labels):
+        """
+        Converts point labels to heatmap labels and stores them as binary files. This will check for existing heatmaps
+        first and load them if found unless data overwriting is turned on.
+        :param labels: A list of lists of tuples with the point labels for each image
+        :return: A list of file names for the generated heatmaps
+        """
+        out_dir = os.path.join(os.path.curdir, 'generated_heatmaps')
+        if os.path.exists(out_dir) and not self._gen_data_overwrite:
+            # If we've already generated heatmaps, just load their filenames
+            im_names = [os.path.splitext(os.path.basename(f))[0] for f in self._raw_image_files]
+            heatmap_files = ["{}.npy".format(os.path.join(out_dir, f)) for f in im_names]
+            return heatmap_files
+
+        if os.path.exists(out_dir):
+            self._log("Overwriting preexisting heatmaps...")
+            shutil.rmtree(out_dir)
+        os.mkdir(out_dir)
+
+        heatmaps = []
+        for filename, coords in zip(self._raw_image_files, labels):
+            if len(coords) > 0:
+                heatmap = self.__points_to_density_map(coords)
+            else:
+                # There are no points, so the heatmap is blank
+                heatmap = np.full([self._image_height, self._image_width, 1], 0, dtype=np.float32)
+
+            heatmap_file = self.__save_heatmap_as_binary(heatmap, os.path.splitext(os.path.basename(filename))[0],
+                                                         out_dir=out_dir)
+            heatmaps.append(heatmap_file)
+
+        return heatmaps
+
+    def __save_heatmap_as_binary(self, heatmap, filename, out_dir=None):
+        """
+        Saves a floating-point heatmap array as a binary .npy file for later use in training
+        :param heatmap: A float ndarray with a heatmap
+        :param filename: The filename to save the heatmap array with, excluding the extension
+        :return: The file path for later use in reloading the array
+        """
+        if out_dir is None:
+            out_dir = os.path.curdir
+        out_name = os.path.join(out_dir, '{}.npy'.format(filename))
+
+        np.save(out_name, heatmap)
+        return out_name
 
     def __points_to_density_map(self, points):
         """
@@ -227,8 +288,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         output_img = np.zeros([self._image_height, self._image_width], dtype=np.float32)
 
-        # Fixed
-        diameter = 60
+        diameter = int(self._density_sigma * 6)
         radius = diameter / 2
 
         h = self._image_height
@@ -236,7 +296,7 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         gauss = cv2.getGaussianKernel(diameter, self._density_sigma)
         gauss2d = gauss * gauss.T
-        gauss2d = gauss2d / np.sum(gauss2d)
+        gauss2d = (gauss2d / np.sum(gauss2d)) * self._multiplier
 
         for (x, y) in points:
             gx1 = 0
@@ -275,9 +335,9 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
     def __autopatch_heatmap_dataset(self, labels, patch_dir=None):
         """
-        Generates a dataset of image patches from a loaded dataset of larger images, or simply sets the dataset to a
-        set of patches made previously
-        :param labels: A nested list of point labels for the original images
+        Generates a dataset of image patches from a loaded dataset of larger images and returns the new images and
+        labels. This will check for existing patches first and load them if found unless data overwriting is turned on.
+        :param labels: A nested list of point tuple labels for the original images (i.e. [[(x,y), (x,y), ...], ...]
         :param patch_dir: The directory to place patched images into, or where to read previous patches from
         :return: The patched dataset as a list of image filenames and a nested list of their corresponding point labels
         """
@@ -287,15 +347,21 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         im_dir = patch_dir
         point_file = os.path.join(patch_dir, 'patch_point_labels.csv')
 
-        if os.path.exists(patch_dir):
+        if os.path.exists(patch_dir) and not self._gen_data_overwrite:
             # If there already is a patched dataset, just load it
             self._log("Loading preexisting patched data from " + patch_dir)
-            image_files = loaders.get_dir_images(im_dir)
-            new_labels, _ = loaders.read_csv_multi_labels_and_ids(point_file, 0)
-            new_labels = [list(map(int, x)) for x in new_labels]
+            #image_files = loaders.get_dir_images(im_dir)
+            new_labels, ids = loaders.read_csv_multi_labels_and_ids(point_file, 0)
+
+            image_files = [os.path.join(patch_dir, id) + '.png' for id in ids]
+
+            new_labels = loaders.csv_points_to_tuples(new_labels)
             return image_files, new_labels
 
         self._log("Patching dataset: Patches will be in " + patch_dir)
+        if os.path.exists(patch_dir):
+            self._log("Overwriting preexisting patched data...")
+            shutil.rmtree(patch_dir)
         os.mkdir(patch_dir)
 
         # We need to construct patches from the previously loaded dataset. We'll take as many of them as we can fit
@@ -304,30 +370,30 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
         n_image = len(self._raw_image_files)
         image_files = []
         new_labels = []
+        out_labels = []
         label_str = []
         for n, im_file, im_labels in zip(trange(n_image), self._raw_image_files, labels):
             im = np.array(Image.open(im_file))
 
-            def place_points_in_patches(tl_coord, br_coord, serial_points):
+            def place_points_in_patches(tl_corner, br_corner, points):
                 # The slow, O(mn) way
-                points = list(zip(serial_points[0::2], serial_points[1::2]))
-                for (py0, px0), (py1, px1) in zip(tl_coord, br_coord):
+                for (py0, px0), (py1, px1) in zip(tl_corner, br_corner):
                     points_in_patch = [(x - px0, y - py0) for (x, y) in points if py0 <= y < py1 and px0 <= x < px1]
-                    points_in_patch = [c for p in points_in_patch for c in p]  # Convert (x,y) tuples to flat x,y list
+                    serial_points = [c for p in points_in_patch for c in p]  # Convert (x,y) tuples to flat x,y list
                     new_labels.append(points_in_patch)
+                    out_labels.append(serial_points)
 
             patch_start, patch_end = self._autopatch_get_patch_coords(im)
             num_patch = len(patch_start)
             place_points_in_patches(patch_start, patch_end, im_labels)
 
-            for i, (y0, x0), (y1, x1), patch_labels in zip(itertools.count(patch_num),
-                                                           patch_start, patch_end, new_labels):
-                im_patch = Image.fromarray(im[y0:y1, x0:x1].astype(np.uint8))
+            for i, tl_coord, br_coord in zip(itertools.count(patch_num), patch_start, patch_end):
+                im_patch = Image.fromarray(self._autopatch_extract_patch(im, tl_coord, br_coord))
                 im_name = os.path.join(im_dir, 'im_{:0>6d}.png'.format(i))
                 im_patch.save(im_name)
                 image_files.append(im_name)
 
-                label_str.append('im_{:0>6d},'.format(i) + ','.join([str(x) for x in patch_labels]))
+                label_str.append('im_{:0>6d},'.format(i) + ','.join([str(x) for x in out_labels[i]]))
 
             patch_num += num_patch
 
@@ -337,15 +403,19 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
 
         return image_files, new_labels
 
+    def _parse_load_heatmap_binary(self, filename):
+        return np.load(filename)
+
     def _parse_apply_preprocessing(self, images, labels):
-        # This is tricky. If we read in the heatmaps as images, then we want to use the version in
-        # SemanticSegmentationModel, which treats the labels like regular images. If we instead generated the heatmaps
-        # from points in a CSV file, then we want to treat the labels like other labels, which the version in DPPModel
-        # does. super() will let us choose which one by making it look through this or Semantic...Model's MRO.
         if not self.__label_from_image_file:
-            # Skip over the version in SemanticSegmentationModel to use the one in DPPModel
-            return super(SemanticSegmentationModel, self)._parse_apply_preprocessing(images, labels)
+            # If we generated the heatmaps from points in a CSV or JSON file, then we want to treat the labels like
+            # other labels, with the wrinkle that loading them requires wrapping a binary loader with tf.py_func
+            images = self._parse_read_images(images, channels=self._image_depth)
+            labels = tf.numpy_function(self._parse_load_heatmap_binary, [labels], tf.float32)
+            return images, labels
         else:
+            # If we instead read in the heatmaps as images, then we want to use the version in
+            # SemanticSegmentationModel, which treats the labels like regular images.
             return super()._parse_apply_preprocessing(images, labels)
 
     def _parse_resize_images(self, images, labels, height, width):
@@ -371,3 +441,28 @@ class HeatmapObjectCountingModel(SemanticSegmentationModel):
             return super(SemanticSegmentationModel, self)._parse_force_set_shape(images, labels, height, width, depth)
         else:
             return super()._parse_force_set_shape(images, labels, height, width, depth)
+
+    def add_output_layer(self, regularization_coefficient=None, output_size=None):
+        if len(self._layers) < 1:
+            raise RuntimeError("An output layer cannot be the first layer added to the model. " +
+                               "Add an input layer with DPPModel.add_input_layer() first.")
+        if regularization_coefficient is not None:
+            warnings.warn("Heatmap counter doesn't use regularization_coefficient in its output layer")
+        if output_size is not None:
+            raise RuntimeError("output_size should be None for heatmap counting")
+
+        self._log('Adding output layer...')
+
+        filter_dimension = [1, 1, copy.deepcopy(self._last_layer().output_size[3]), 1]
+
+        with self._graph.as_default():
+            layer = layers.convLayer('output',
+                                     copy.deepcopy(self._last_layer().output_size),
+                                     filter_dimension,
+                                     1,
+                                     None,
+                                     self._weight_initializer,
+                                     use_bias=False)
+
+        self._log('Inputs: {0} Outputs: {1}'.format(layer.input_size, layer.output_size))
+        self._layers.append(layer)
