@@ -7,6 +7,14 @@ model.use_predefined_model(model_name)
 
 `model_name` defines the name of the predefined network. Currently supported networks include:
 
+### `fcn-18`
+
+An 18-layer fully convolutional network with downsampling and upsampling. Uses residual connections on the encoder half.
+
+### `u-net`
+
+A fully convolutional network which copies activations from the encoder half to the decoder half to preserve spatial information. A good candidate for semantic segmentation as well as heatmap object counting tasks. (Ronneberger, O., Fischer, P., & Brox, T. (2015). *U-net: Convolutional networks for biomedical image segmentation.* In International Conference on Medical image computing and computer-assisted intervention (pp. 234-241).)
+
 ### `alexnet`
 
 A classic image classification network (Krizhevsky, A., Sutskever, I., & Hinton, G. E. (2012). *Imagenet classification with deep convolutional neural networks.* In Advances in neural information processing systems (pp. 1097-1105).)
