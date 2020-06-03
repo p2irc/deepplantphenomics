@@ -322,7 +322,7 @@ class SemanticSegmentationModel(DPPModel):
             return interpreted_outputs
         else:
             # Apply a softmax to the outputs and find the appropriate per-pixel class from the highest probability
-            total_outputs = np.exp(total_outputs) / np.sum(total_outputs, axis=3, keepdims=True)
+            total_outputs = np.exp(total_outputs) / np.sum(np.exp(total_outputs), axis=3, keepdims=True)
             total_outputs = np.argmax(total_outputs, axis=3)
             return total_outputs
 
