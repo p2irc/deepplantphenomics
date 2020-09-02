@@ -14,7 +14,7 @@ output_dir = './segmented-images'
 
 my_files = ['one.png', 'two.png', 'three.png']
 
-y = dpp.tools.segment_vegetation(images)
+y = dpp.tools.segment_vegetation(my_files)
 
 for i, img in enumerate(y):
     # Get original image dimensions
@@ -55,9 +55,9 @@ The canola flower counter provides an estimate of the number of flowers in an im
 ```
 import deepplantphenomics as dpp
 
-image_files = ['one.png', 'two.png', 'three.png']
+my_files = ['one.png', 'two.png', 'three.png']
 
-y = dpp.tools.count_canola_flowers(image_files)
+y = dpp.tools.count_canola_flowers(my_files)
 
 for k, v in zip(image_files, y):
     print('%s: %d' % (k, v))
