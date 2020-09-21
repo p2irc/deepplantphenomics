@@ -55,7 +55,7 @@ The CSV file should contain a mapping of image names to the coordinates of multi
 Alternatively, the point labels can be placed into JSON files (1 per image) in the same directory as the images. These can then be loaded using:
 
 ```python
-model.load_heatmap_with_json_files_from_directory(dirname)
+model.load_heatmap_dataset_with_json_files_from_directory(dirname)
 ```
 
 The JSON label files, however, have a different format to the CSV labels:
