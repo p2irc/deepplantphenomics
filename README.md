@@ -1,3 +1,7 @@
+# DEPRECATED
+
+Deep Plant Phenomics is no longer actively maintained. It is available here for historical purposes - however, it is provided as-is with no updates or bug fixes planned.
+
 # Deep Plant Phenomics
 
 Deep Plant Phenomics (DPP) is a platform for plant phenotyping using deep learning. Think of it as [Keras](https://keras.io/) for plant scientists.
@@ -78,12 +82,3 @@ model.begin_training()
 
 **Note**: The package now requires Python 3.6 or greater. Python 2.7 is no longer supported.
 
-## Contributing
-
-Contributions are always welcome. If you would like to make a contribution, please fork from the develop branch.
-
-## Help
-
-If you are interested in research collaborations or want more information regarding this package, please email `jordan.ubbens@usask.ca`.
-
-If you have a feature request or bug report, please open a new issue.
